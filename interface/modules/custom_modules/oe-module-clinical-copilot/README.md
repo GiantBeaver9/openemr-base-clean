@@ -33,6 +33,17 @@ shared engineering context every build unit read before its own brief —
 useful if you want the condensed, PHP-signature-level version of the specs
 above rather than the full prose.
 
+## LLM credential / config surface
+
+[`docs/configuration.md`](docs/configuration.md) is the complete list of
+environment variables that control which LLM provider (if any) this module
+calls — Vertex AI (production, HIPAA-eligible under a BAA, T18) or a Gemini
+API-key dev/test fast-path (synthetic data only, no BAA, T23) — plus a loud
+warning on the API-key path's synthetic-data-only scope and a
+copy-pasteable example for each. With nothing configured (the default in
+this environment), both factories degrade cleanly to their `Unavailable*`
+implementation.
+
 ## What ships in this directory
 
 ```

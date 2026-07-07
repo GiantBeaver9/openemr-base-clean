@@ -38,6 +38,19 @@ chat agent pinned to a patient. **The LLM narrates and navigates — it never ex
 - **Synthetic patients only this phase** (OPEN-1). Egress redaction: identifiers → per-session pseudonym tokens before any Vertex call, re-hydrated after verification.
 - The module must **degrade cleanly with NO credentials configured** (dev/test default): the LLM client detects missing ADC and reports "unavailable" so synthesis renders facts-only and chat becomes a facts browser. All deterministic logic + tests run with no cloud access.
 
+**T23 (decision of record):** added a **dev/test Gemini API-key fast-path**
+(`GeminiApiLlmClient` / `GeminiApiChatLlmClient`, Google AI Studio, keyed by
+`CLINICAL_COPILOT_GEMINI_API_KEY`) alongside the Vertex production path, so
+the narrated experience can be exercised end to end with synthetic data
+before the full Vertex service-account + BAA is provisioned. Both factories
+(`LlmClientFactory`, `ChatLlmClientFactory`) select Vertex first if
+`CLINICAL_COPILOT_GCP_PROJECT_ID` is set, else the Gemini API-key client if
+`CLINICAL_COPILOT_GEMINI_API_KEY` is set, else Unavailable — Vertex always
+wins when both are configured. This is **synthetic-data-only, not
+HIPAA-eligible, no BAA** (OPEN-1) and does **not** change T18's production
+decision: Vertex remains the only path approved for anything resembling
+real PHI. Full env-var reference: `docs/configuration.md`.
+
 ## Namespace, placement, headers
 
 - Root: `interface/modules/custom_modules/oe-module-clinical-copilot/`
