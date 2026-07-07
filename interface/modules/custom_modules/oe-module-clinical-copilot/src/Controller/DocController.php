@@ -16,12 +16,21 @@ namespace OpenEMR\Modules\ClinicalCopilot\Controller;
 
 use OpenEMR\Common\Logging\EventAuditLogger;
 use OpenEMR\Common\Session\SessionWrapperFactory;
+use OpenEMR\Modules\ClinicalCopilot\Config\LlmRuntimeConfig;
 use OpenEMR\Modules\ClinicalCopilot\Doc\DocRow;
+use OpenEMR\Modules\ClinicalCopilot\Doc\VerifyStatus;
+use OpenEMR\Modules\ClinicalCopilot\DocStore;
+use OpenEMR\Modules\ClinicalCopilot\Chat\TracePoller;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\DocHistoryReader;
+use OpenEMR\Modules\ClinicalCopilot\ReadPath\DocViewModel;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\PatientIdentifierLookup;
+use OpenEMR\Modules\ClinicalCopilot\ReadPath\ScheduledPatientListReader;
+use OpenEMR\Modules\ClinicalCopilot\ReadPath\ScheduledPatientRow;
+use OpenEMR\Modules\ClinicalCopilot\ReadPath\SynthesisDocPayload;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\SynthesisReadPath;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\SynthesisReadResult;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\PatientIdentifiers;
+use Ramsey\Uuid\Uuid;
 
 /**
  * `public/doc.php` is deliberately thin (bootstrap -> CSRF -> ACL -> session
@@ -44,12 +53,35 @@ final class DocController
         private readonly SynthesisReadPath $readPath,
         private readonly PatientIdentifierLookup $identifierLookup,
         private readonly DocHistoryReader $historyReader,
+        private readonly ScheduledPatientListReader $scheduledPatientListReader,
+        private readonly DocStore $docStore,
+        private readonly TracePoller $tracePoller,
     ) {
     }
 
     public static function createDefault(): self
     {
-        return new self(SynthesisReadPath::createDefault(), new PatientIdentifierLookup(), new DocHistoryReader());
+        return new self(
+            SynthesisReadPath::createDefault(),
+            new PatientIdentifierLookup(),
+            new DocHistoryReader(),
+            new ScheduledPatientListReader(),
+            new DocStore(),
+            new TracePoller(),
+        );
+    }
+
+    /**
+     * @return list<ScheduledPatientRow>
+     */
+    public function scheduledPatientsToday(): array
+    {
+        return $this->scheduledPatientListReader->today();
+    }
+
+    public function todayAppointmentForPatient(int $pid): ?ScheduledPatientRow
+    {
+        return $this->scheduledPatientListReader->forPidToday($pid);
     }
 
     /**
@@ -64,23 +96,105 @@ final class DocController
      * T22 manual Regenerate (POST, CSRF-checked by the caller BEFORE this is
      * invoked -- see `public/doc.php`).
      *
+     * @param (\Closure(string): void)|null $onStatus optional staged-status callback for SSE
+     *
      * @return array{found: bool, result: ?SynthesisReadResult, history: list<DocRow>, patient: ?PatientIdentifiers}
      */
-    public function regenerate(int $pid, int $userId): array
+    public function regenerate(int $pid, int $userId, ?\Closure $onStatus = null): array
     {
-        return $this->handle($pid, $userId, regenerate: true);
+        $correlationId = Uuid::uuid7()->toString();
+        if ($onStatus !== null) {
+            $onStatus("correlation_id:{$correlationId}");
+        }
+
+        return $this->handle($pid, $userId, regenerate: true, onStatus: $onStatus, correlationId: $correlationId);
     }
 
     /**
+     * Polling fallback for synthesis regenerate progress (ARCHITECTURE.md §1.3).
+     *
+     * @return array<string, mixed>
+     */
+    public function pollRegenerateStatus(string $correlationId, int $userId, string $webRoot): array
+    {
+        $spans = $this->tracePoller->forCorrelationId($correlationId);
+        $done = false;
+        foreach ($spans as $span) {
+            if ($span['kind'] === 'render') {
+                $done = true;
+                break;
+            }
+        }
+
+        if (!$done) {
+            return ['ok' => true, 'done' => false, 'spans' => $spans, 'result' => null];
+        }
+
+        $docRow = $this->docStore->findByCorrelationId($correlationId);
+        if ($docRow === null) {
+            return ['ok' => true, 'done' => false, 'spans' => $spans, 'result' => null];
+        }
+
+        if (!$this->identifierLookup->exists($docRow->pid)) {
+            return $this->errorResponse(403, 'not authorized for this correlation id');
+        }
+
+        if (!$this->isAuthorizedForCorrelation($correlationId, $userId, $docRow->pid)) {
+            return $this->errorResponse(403, 'not authorized for this correlation id');
+        }
+
+        $result = $this->synthesisResultFromDocRow($correlationId, $docRow);
+
+        return [
+            'ok' => true,
+            'done' => true,
+            'spans' => $spans,
+            'result' => $this->formatRegenerateJson($result, $webRoot),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function formatRegenerateJson(SynthesisReadResult $result, string $webRoot): array
+    {
+        $doc = DocViewModel::summary($result);
+        $viewModel = DocViewModel::build($result, $webRoot);
+        $narrative = is_array($viewModel['narrative'] ?? null) ? $viewModel['narrative'] : [];
+        $verifyStatus = $result->verifyStatus?->value ?? '';
+        $needsGeneration = !$result->capabilityCrash
+            && LlmRuntimeConfig::llmConfigured()
+            && ($verifyStatus === VerifyStatus::Degraded->value || $narrative === []);
+
+        return [
+            'ok' => true,
+            'doc' => $doc,
+            'view_model' => [
+                'narrative' => $narrative,
+            ],
+            'needs_narrative_generation' => $needsGeneration,
+        ];
+    }
+
+    /**
+     * @param (\Closure(string): void)|null $onStatus
+     *
      * @return array{found: bool, result: ?SynthesisReadResult, history: list<DocRow>, patient: ?PatientIdentifiers}
      */
-    private function handle(int $pid, int $userId, bool $regenerate): array
-    {
+    private function handle(
+        int $pid,
+        int $userId,
+        bool $regenerate,
+        ?\Closure $onStatus = null,
+        ?string $correlationId = null,
+    ): array {
         if (!$this->identifierLookup->exists($pid)) {
             return ['found' => false, 'result' => null, 'history' => [], 'patient' => null];
         }
 
-        $result = $regenerate ? $this->readPath->regenerate($pid, $userId) : $this->readPath->read($pid, $userId);
+        $result = $regenerate
+            ? $this->readPath->regenerate($pid, $userId, correlationId: $correlationId, onStatus: $onStatus)
+            : $this->readPath->read($pid, $userId);
 
         $this->auditView($pid, $result->correlationId, $regenerate);
 
@@ -112,5 +226,52 @@ final class DocController
             "Clinical Co-Pilot synthesis {$action}, correlation_id={$correlationId}",
             $pid,
         );
+    }
+
+    private function synthesisResultFromDocRow(string $correlationId, DocRow $docRow): SynthesisReadResult
+    {
+        $payload = SynthesisDocPayload::fromDocArray($docRow->doc);
+
+        return SynthesisReadResult::served(
+            $correlationId,
+            $docRow->pid,
+            $payload->facts,
+            $docRow->factDigest,
+            $docRow->verifyStatus,
+            $docRow->regenReason,
+            $payload->claims,
+            $payload->degradedReason,
+            $payload->degradedMessage,
+            $payload->verdicts,
+            $payload->attempts,
+            false,
+            $docRow->computedAt,
+            $docRow->qaStatus,
+            $docRow->qaScore,
+            $docRow->id,
+        );
+    }
+
+    private function isAuthorizedForCorrelation(string $correlationId, int $userId, int $pid): bool
+    {
+        $row = \OpenEMR\Common\Database\QueryUtils::querySingleRow(
+            'SELECT `user_id` FROM `mod_copilot_trace` WHERE `correlation_id` = ? AND `pid` = ? ORDER BY `id` ASC LIMIT 1',
+            [$correlationId, $pid],
+        );
+        if (!is_array($row)) {
+            return true;
+        }
+
+        $traceUserId = $row['user_id'] ?? null;
+
+        return $traceUserId === null || (int)$traceUserId === $userId;
+    }
+
+    /**
+     * @return array{ok: false, reason: string, http_status: int}
+     */
+    private function errorResponse(int $httpStatus, string $reason): array
+    {
+        return ['ok' => false, 'reason' => $reason, 'http_status' => $httpStatus];
     }
 }

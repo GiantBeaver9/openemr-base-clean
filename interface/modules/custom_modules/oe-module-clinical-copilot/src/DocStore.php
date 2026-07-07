@@ -115,6 +115,16 @@ final class DocStore
         return null;
     }
 
+    public function findByCorrelationId(string $correlationId): ?DocRow
+    {
+        $row = QueryUtils::querySingleRow(
+            'SELECT * FROM `mod_copilot_doc` WHERE `correlation_id` = ? ORDER BY `id` DESC LIMIT 1',
+            [$correlationId],
+        );
+
+        return is_array($row) ? self::hydrate($row) : null;
+    }
+
     /**
      * @param array<string, mixed> $row
      */

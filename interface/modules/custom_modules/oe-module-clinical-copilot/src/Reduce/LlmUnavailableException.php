@@ -73,4 +73,18 @@ final class LlmUnavailableException extends \RuntimeException
     {
         return $this->reason;
     }
+
+    /**
+     * Short, physician-safe copy for chat/synthesis degrade banners.
+     */
+    public function degradedMessage(): string
+    {
+        $detail = strtolower($this->getPrevious()?->getMessage() ?? $this->getMessage());
+        if ($this->reason === self::REASON_PROVIDER_ERROR
+            && (str_contains($detail, '429') || str_contains($detail, 'quota') || str_contains($detail, 'resource_exhausted'))) {
+            return 'Gemini API rate limit reached -- wait about a minute and try again; the chart is still current';
+        }
+
+        return 'narrative unavailable -- the assistant is temporarily unreachable; the chart is still current';
+    }
 }

@@ -89,7 +89,7 @@ final readonly class ChatAnswer
      * @param list<Fact> $accumulatedFacts
      * @param list<ToolCallLogEntry> $toolCallLog
      */
-    public static function degradedLlmUnavailable(array $accumulatedFacts, string $reason, array $toolCallLog = []): self
+    public static function degradedLlmUnavailable(array $accumulatedFacts, string $reason, array $toolCallLog = [], ?string $degradedMessage = null): self
     {
         return new self(
             VerifyStatus::Degraded,
@@ -99,7 +99,7 @@ final readonly class ChatAnswer
             false,
             null,
             'llm_unavailable',
-            'narrative unavailable -- the assistant is temporarily unreachable; the facts below are still current',
+            $degradedMessage ?? 'narrative unavailable -- the assistant is temporarily unreachable; the chart is still current',
             null,
             ReduceUsage::none(),
             $toolCallLog,
@@ -168,7 +168,7 @@ final readonly class ChatAnswer
             false,
             null,
             'circuit_breaker_open',
-            'the assistant is temporarily unavailable (spend limit reached) -- showing retrieved facts only',
+            'the assistant is temporarily unavailable (spend limit reached) -- the chart is still current',
             null,
             ReduceUsage::none(),
             [],

@@ -87,8 +87,8 @@ final class ChatAgent
     ): ChatAnswer {
         try {
             $loopResult = $this->agentLoop->run($sessionFacts, $narrativeClaims, $conversationTranscript, $userQuestion);
-        } catch (LlmUnavailableException) {
-            return ChatAnswer::degradedLlmUnavailable($sessionFacts, LlmUnavailableException::REASON_NO_CREDENTIALS);
+        } catch (LlmUnavailableException $e) {
+            return ChatAnswer::degradedLlmUnavailable($sessionFacts, $e->reason(), [], $e->degradedMessage());
         }
 
         $this->emitStatus('verifying…');
@@ -115,8 +115,8 @@ final class ChatAgent
                 $userQuestion,
                 self::formatFindings($verification->verdicts),
             );
-        } catch (LlmUnavailableException) {
-            return ChatAnswer::degradedLlmUnavailable($loopResult->accumulatedFacts, LlmUnavailableException::REASON_NO_CREDENTIALS, $loopResult->toolCallLog);
+        } catch (LlmUnavailableException $e) {
+            return ChatAnswer::degradedLlmUnavailable($loopResult->accumulatedFacts, $e->reason(), $loopResult->toolCallLog, $e->degradedMessage());
         }
 
         // The retry makes no new tool calls, so carry the first attempt's tool

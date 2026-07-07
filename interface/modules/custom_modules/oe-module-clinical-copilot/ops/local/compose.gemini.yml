@@ -14,15 +14,21 @@
 # Set the key in your host shell first (dev/test, synthetic data only -- see
 # ../../docs/configuration.md for the loud PHI warning):
 #   export CLINICAL_COPILOT_GEMINI_API_KEY=your_ai_studio_key
+# ...or copy ops/local/gemini.local.env.example -> gemini.local.env and edit it.
 # ...or, for the Vertex production path:
 #   export CLINICAL_COPILOT_GCP_PROJECT_ID=your-project
 #   export CLINICAL_COPILOT_GCP_LOCATION=us-central1
 #   # + mount/point GOOGLE_APPLICATION_CREDENTIALS at your service-account json
 services:
   openemr:
+    env_file:
+      - path: gemini.local.env
+        required: false
     environment:
-      # Empty default => the module's factory falls through to the Unavailable
-      # client and renders facts-only / facts-browser (still fully usable).
-      CLINICAL_COPILOT_GEMINI_API_KEY: "${CLINICAL_COPILOT_GEMINI_API_KEY:-}"
+      # Do not set CLINICAL_COPILOT_GEMINI_API_KEY here — an empty host
+      # interpolation overrides env_file above. Use gemini.local.env (Option A)
+      # or export on the host before `compose up` and add the same key to
+      # gemini.local.env for Apache/PHP (Option B + file fallback in LlmEnv).
+      CLINICAL_COPILOT_GEMINI_API_MODEL: "${CLINICAL_COPILOT_GEMINI_API_MODEL:-gemini-2.5-flash}"
       CLINICAL_COPILOT_GCP_PROJECT_ID: "${CLINICAL_COPILOT_GCP_PROJECT_ID:-}"
       CLINICAL_COPILOT_GCP_LOCATION: "${CLINICAL_COPILOT_GCP_LOCATION:-us-central1}"

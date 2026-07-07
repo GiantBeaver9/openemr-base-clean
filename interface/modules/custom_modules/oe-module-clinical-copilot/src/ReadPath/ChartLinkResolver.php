@@ -45,7 +45,29 @@ final class ChartLinkResolver
     {
         $suffix = $citation->field !== null ? ".{$citation->field}" : '';
 
-        return "{$citation->table}#{$citation->pk}{$suffix}";
+        return self::tableLabel($citation->table) . " #{$citation->pk}{$suffix}";
+    }
+
+    public static function visitLabel(?ScheduledPatientRow $visit): ?string
+    {
+        if ($visit === null) {
+            return null;
+        }
+
+        return "{$visit->appointmentTitle} · {$visit->appointmentTime}";
+    }
+
+    private static function tableLabel(string $table): string
+    {
+        return match ($table) {
+            'procedure_result' => 'Lab result',
+            'procedure_order' => 'Lab order',
+            'procedure_report' => 'Lab report',
+            'prescriptions' => 'Prescription',
+            'form_vitals' => 'Vitals',
+            'lists' => 'Problem/med list',
+            default => $table,
+        };
     }
 
     /**

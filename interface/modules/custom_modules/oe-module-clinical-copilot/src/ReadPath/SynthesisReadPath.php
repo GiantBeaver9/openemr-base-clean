@@ -15,6 +15,7 @@ declare(strict_types=1);
 namespace OpenEMR\Modules\ClinicalCopilot\ReadPath;
 
 use OpenEMR\BC\ServiceContainer;
+use OpenEMR\Modules\ClinicalCopilot\Config\LlmRuntimeConfig;
 use OpenEMR\Modules\ClinicalCopilot\Capability\CapabilityInterface;
 use OpenEMR\Modules\ClinicalCopilot\Capability\Config\DbLabTurnaroundConfigProvider;
 use OpenEMR\Modules\ClinicalCopilot\Capability\Config\LabTurnaroundConfigProviderInterface;
@@ -92,7 +93,11 @@ final class SynthesisReadPath
     private const CODE_SET_VERSION = '1';
 
     private const PROMPT_VERSION = 'reduce-v1';
-    private const MODEL = 'gemini-2.5-pro';
+
+    private static function model(): string
+    {
+        return LlmRuntimeConfig::reduceAndChatModel();
+    }
 
     /**
      * @param list<CapabilityInterface> $capabilities all five (ARCHITECTURE_COMPLETE.md "Capabilities"), run fresh on every read (I2)
@@ -182,9 +187,21 @@ final class SynthesisReadPath
      * {@see self::currentDigest()} that the facts have not drifted before
      * calling this with {@see RegenReason::QaLow}.
      */
-    public function regenerate(int $pid, ?int $userId, RegenReason $reason = RegenReason::Manual): SynthesisReadResult
-    {
-        return $this->run($pid, $userId, self::mintCorrelationId(), forceRegenerate: true, regenReason: $reason);
+    public function regenerate(
+        int $pid,
+        ?int $userId,
+        RegenReason $reason = RegenReason::Manual,
+        ?string $correlationId = null,
+        ?\Closure $onStatus = null,
+    ): SynthesisReadResult {
+        return $this->run(
+            $pid,
+            $userId,
+            $correlationId ?? self::mintCorrelationId(),
+            forceRegenerate: true,
+            regenReason: $reason,
+            onStatus: $onStatus,
+        );
     }
 
     /**
@@ -228,8 +245,9 @@ final class SynthesisReadPath
         string $correlationId,
         bool $forceRegenerate,
         RegenReason $regenReason = RegenReason::Manual,
+        ?\Closure $onStatus = null,
     ): SynthesisReadResult {
-        $extraction = $this->extractAll($pid, $correlationId, $userId);
+        $extraction = $this->extractAll($pid, $correlationId, $userId, $onStatus);
 
         if ($extraction->crashed) {
             $this->recordSpan($correlationId, 'render', microtime(true), 'degraded', $pid, $userId);
@@ -238,6 +256,7 @@ final class SynthesisReadPath
         }
 
         $digestT0 = microtime(true);
+        $this->emitStatus($onStatus, 'computing digest…');
         $labConfig = $this->labContractConfigProvider->load();
         $turnaroundConfig = $this->labTurnaroundConfigProvider->load();
         $configVersions = ConfigVersionSnapshot::build($labConfig, $turnaroundConfig);
@@ -264,7 +283,7 @@ final class SynthesisReadPath
             }
         }
 
-        $best = $this->generateAndInsert($pid, $userId, $correlationId, $digest, $extraction, $forceRegenerate, $regenReason);
+        $best = $this->generateAndInsert($pid, $userId, $correlationId, $digest, $extraction, $forceRegenerate, $regenReason, $onStatus);
 
         $this->recordSpan($correlationId, 'render', microtime(true), $best->verifyStatus === VerifyStatus::Passed ? 'ok' : 'degraded', $pid, $userId);
 
@@ -279,6 +298,7 @@ final class SynthesisReadPath
         ExtractionOutcome $extraction,
         bool $forceRegenerate,
         RegenReason $regenReason = RegenReason::Manual,
+        ?\Closure $onStatus = null,
     ): DocRow {
         $identifiers = $this->identifierLookup->forPid($pid) ?? new PatientIdentifiers('', '', '', '');
 
@@ -287,7 +307,7 @@ final class SynthesisReadPath
             $correlationId,
             $extraction->survivingFacts,
             $identifiers,
-            new PromptContext(self::DOC_TYPE, self::digestPromptVersion(), self::MODEL),
+            new PromptContext(self::DOC_TYPE, self::digestPromptVersion(), self::model()),
         );
         $verificationContext = new VerificationContext(
             new SessionFactSet($pid, $extraction->survivingFacts),
@@ -295,6 +315,7 @@ final class SynthesisReadPath
         );
 
         $llmT0 = microtime(true);
+        $this->emitStatus($onStatus, 'generating narrative…');
         $result = $this->verifiedGeneration->generate(new VerifiedGenerationRequest($reduceRequest, $verificationContext));
 
         $this->recordSpan(
@@ -375,8 +396,9 @@ final class SynthesisReadPath
      * caller-supplied subset (the capability-crash rule applies to a run of
      * ALL five, ARCHITECTURE.md §6.1).
      */
-    private function extractAll(int $pid, string $correlationId, ?int $userId): ExtractionOutcome
+    private function extractAll(int $pid, string $correlationId, ?int $userId, ?\Closure $onStatus = null): ExtractionOutcome
     {
+        $this->emitStatus($onStatus, 'extracting chart facts…');
         $allFacts = [];
         $capabilityVersions = [];
         $excludedCounts = [];
@@ -485,6 +507,13 @@ final class SynthesisReadPath
      * drive-by. Left for whichever unit next touches this read path's
      * span-recording call sites.
      */
+    private function emitStatus(?\Closure $onStatus, string $message): void
+    {
+        if ($onStatus !== null) {
+            ($onStatus)($message);
+        }
+    }
+
     private function recordSpan(
         string $correlationId,
         string $kind,
@@ -533,6 +562,6 @@ final class SynthesisReadPath
      */
     private static function digestPromptVersion(): string
     {
-        return self::PROMPT_VERSION . '+' . self::MODEL;
+        return self::PROMPT_VERSION . '+' . self::model();
     }
 }

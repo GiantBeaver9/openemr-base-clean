@@ -17,6 +17,7 @@ namespace OpenEMR\Modules\ClinicalCopilot\Tests\Isolated\ReadPath;
 use OpenEMR\Modules\ClinicalCopilot\Fact\Citation;
 use OpenEMR\Modules\ClinicalCopilot\Fact\Enum\DateSource;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\ChartLinkResolver;
+use OpenEMR\Modules\ClinicalCopilot\ReadPath\ScheduledPatientRow;
 use PHPUnit\Framework\TestCase;
 
 final class ChartLinkResolverTest extends TestCase
@@ -29,7 +30,7 @@ final class ChartLinkResolverTest extends TestCase
             'https://example.test/interface/orders/single_order_results.php?orderid=77',
             ChartLinkResolver::url($citation, 'https://example.test'),
         );
-        self::assertSame('procedure_order#77', ChartLinkResolver::label($citation));
+        self::assertSame('Lab order #77', ChartLinkResolver::label($citation));
     }
 
     public function testUnmappedTableFallsBackToTooltipOnlyNoUrl(): void
@@ -37,13 +38,21 @@ final class ChartLinkResolverTest extends TestCase
         $citation = new Citation('procedure_result', 501, 'result', DateSource::Collected);
 
         self::assertNull(ChartLinkResolver::url($citation, 'https://example.test'));
-        self::assertSame('procedure_result#501.result', ChartLinkResolver::label($citation));
+        self::assertSame('Lab result #501.result', ChartLinkResolver::label($citation));
     }
 
     public function testLabelOmitsTheFieldSuffixWhenFieldIsNull(): void
     {
         $citation = new Citation('form_vitals', 9, null, DateSource::Collected);
 
-        self::assertSame('form_vitals#9', ChartLinkResolver::label($citation));
+        self::assertSame('Vitals #9', ChartLinkResolver::label($citation));
+    }
+
+    public function testVisitLabelFormatsTitleAndTime(): void
+    {
+        $visit = new ScheduledPatientRow(3, 'CCP-003', 'Cara Corrected', '09:30', 'Endo follow-up');
+
+        self::assertSame('Endo follow-up · 09:30', ChartLinkResolver::visitLabel($visit));
+        self::assertNull(ChartLinkResolver::visitLabel(null));
     }
 }

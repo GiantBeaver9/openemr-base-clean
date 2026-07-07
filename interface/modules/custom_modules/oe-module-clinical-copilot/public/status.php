@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Clinical Co-Pilot -- polling fallback for chat turn progress (ARCHITECTURE.md §1.3).
+ * Clinical Co-Pilot -- polling fallback for chat turn and synthesis regenerate progress (ARCHITECTURE.md §1.3).
  *
  * @package   OpenEMR
  * @link      https://www.open-emr.org
@@ -21,7 +21,10 @@ require_once __DIR__ . '/../../../../globals.php';
 
 use OpenEMR\Common\Acl\AclMain;
 use OpenEMR\Common\Session\SessionWrapperFactory;
+use OpenEMR\Core\OEGlobalsBag;
+use OpenEMR\Modules\ClinicalCopilot\Chat\ChatTurnStore;
 use OpenEMR\Modules\ClinicalCopilot\Controller\ChatController;
+use OpenEMR\Modules\ClinicalCopilot\Controller\DocController;
 
 $session = SessionWrapperFactory::getInstance()->getActiveSession();
 
@@ -42,8 +45,15 @@ if ($correlationId === '') {
     exit;
 }
 
-$controller = ChatController::createDefault();
-$result = $controller->pollStatus($correlationId, $authUserId);
+$turnStore = new ChatTurnStore();
+if ($turnStore->findByCorrelationId($correlationId) !== []) {
+    $controller = ChatController::createDefault();
+    $result = $controller->pollStatus($correlationId, $authUserId);
+} else {
+    $webRoot = OEGlobalsBag::getInstance()->getWebRoot();
+    $controller = DocController::createDefault();
+    $result = $controller->pollRegenerateStatus($correlationId, $authUserId, $webRoot);
+}
 
 if (($result['ok'] ?? false) === false && isset($result['http_status'])) {
     http_response_code((int)$result['http_status']);

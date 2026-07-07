@@ -47,12 +47,19 @@ final class ChatSessionSeeder
      * @return ChatSession|null null when the synthesis could not be computed
      *         (capability crash) -- there is nothing safe to seed a session from
      */
-    public function seed(int $pid, int $userId): ?ChatSession
+    public function seed(int $pid, int $userId, bool $forceNew = false): ?ChatSession
     {
         $result = $this->readPath->read($pid, $userId);
 
         if ($result->capabilityCrash || $result->docId === null || $result->factDigest === null) {
             return null;
+        }
+
+        if (!$forceNew) {
+            $existing = $this->sessionStore->findLatestActiveForUserAndPid($userId, $pid);
+            if ($existing !== null && $existing->factDigest === $result->factDigest) {
+                return $existing;
+            }
         }
 
         $sessionId = $this->sessionStore->insert(new NewChatSession($pid, $userId, $result->docId, $result->factDigest));

@@ -14,6 +14,8 @@ declare(strict_types=1);
 
 namespace OpenEMR\Modules\ClinicalCopilot\Chat\Llm;
 
+use OpenEMR\Modules\ClinicalCopilot\Config\LlmEnv;
+
 /**
  * Mirrors {@see \OpenEMR\Modules\ClinicalCopilot\ReadPath\LlmClientFactory}
  * exactly, reusing the SAME environment variables (one GCP project, one
@@ -37,11 +39,6 @@ namespace OpenEMR\Modules\ClinicalCopilot\Chat\Llm;
  */
 final class ChatLlmClientFactory
 {
-    private const ENV_PROJECT_ID = 'CLINICAL_COPILOT_GCP_PROJECT_ID';
-    private const ENV_LOCATION = 'CLINICAL_COPILOT_GCP_LOCATION';
-    private const ENV_GEMINI_API_KEY = 'CLINICAL_COPILOT_GEMINI_API_KEY';
-    private const DEFAULT_LOCATION = 'us-central1';
-
     private function __construct()
     {
         // static-only
@@ -49,17 +46,12 @@ final class ChatLlmClientFactory
 
     public static function create(): ChatLlmClientInterface
     {
-        $projectId = trim((string)getenv(self::ENV_PROJECT_ID));
+        $projectId = LlmEnv::gcpProjectId();
         if ($projectId !== '') {
-            $location = trim((string)getenv(self::ENV_LOCATION));
-            if ($location === '') {
-                $location = self::DEFAULT_LOCATION;
-            }
-
-            return new VertexChatLlmClient($projectId, $location);
+            return new VertexChatLlmClient($projectId, LlmEnv::gcpLocation());
         }
 
-        $apiKey = trim((string)getenv(self::ENV_GEMINI_API_KEY));
+        $apiKey = LlmEnv::geminiApiKey();
         if ($apiKey !== '') {
             return new GeminiApiChatLlmClient($apiKey);
         }

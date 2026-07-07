@@ -50,6 +50,24 @@ final class ChatSessionStore
     }
 
     /**
+     * Latest active session for a user on a patient chart, if any. Used when
+     * reopening the chat panel so a page refresh does not mint a fresh session
+     * row (and trip the per-user active-session cap).
+     */
+    public function findLatestActiveForUserAndPid(int $userId, int $pid): ?ChatSession
+    {
+        $row = QueryUtils::querySingleRow(
+            'SELECT * FROM `mod_copilot_chat_session`
+             WHERE `user_id` = ? AND `pid` = ? AND `status` = ?
+             ORDER BY `id` DESC
+             LIMIT 1',
+            [$userId, $pid, ChatSessionStatus::Active->value],
+        );
+
+        return is_array($row) ? self::hydrate($row) : null;
+    }
+
+    /**
      * ARCHITECTURE.md §2.3: a V3 sev-1 trip freezes the session -- "the
      * response is discarded, the session is frozen, the event is alerted."
      * Idempotent by construction (an UPDATE to an already-`frozen` row is a

@@ -14,6 +14,7 @@ declare(strict_types=1);
 
 namespace OpenEMR\Modules\ClinicalCopilot\ReadPath;
 
+use OpenEMR\Modules\ClinicalCopilot\Config\LlmEnv;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\GeminiApiLlmClient;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\LlmClientInterface;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\VertexLlmClient;
@@ -50,11 +51,6 @@ use OpenEMR\Modules\ClinicalCopilot\Reduce\VertexLlmClient;
  */
 final class LlmClientFactory
 {
-    private const ENV_PROJECT_ID = 'CLINICAL_COPILOT_GCP_PROJECT_ID';
-    private const ENV_LOCATION = 'CLINICAL_COPILOT_GCP_LOCATION';
-    private const ENV_GEMINI_API_KEY = 'CLINICAL_COPILOT_GEMINI_API_KEY';
-    private const DEFAULT_LOCATION = 'us-central1';
-
     private function __construct()
     {
         // static-only
@@ -62,17 +58,12 @@ final class LlmClientFactory
 
     public static function create(): LlmClientInterface
     {
-        $projectId = trim((string)getenv(self::ENV_PROJECT_ID));
+        $projectId = LlmEnv::gcpProjectId();
         if ($projectId !== '') {
-            $location = trim((string)getenv(self::ENV_LOCATION));
-            if ($location === '') {
-                $location = self::DEFAULT_LOCATION;
-            }
-
-            return new VertexLlmClient($projectId, $location);
+            return new VertexLlmClient($projectId, LlmEnv::gcpLocation());
         }
 
-        $apiKey = trim((string)getenv(self::ENV_GEMINI_API_KEY));
+        $apiKey = LlmEnv::geminiApiKey();
         if ($apiKey !== '') {
             return new GeminiApiLlmClient($apiKey);
         }

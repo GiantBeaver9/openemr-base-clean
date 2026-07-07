@@ -44,20 +44,28 @@ anywhere else, and none are ever logged.
 | `CLINICAL_COPILOT_GCP_LOCATION` | Vertex (production, optional) | Vertex AI region. Defaults to `us-central1` if unset. Only consulted when a project id is set. | `CLINICAL_COPILOT_GCP_LOCATION=us-east4` |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Vertex (production) | Standard ADC variable (`google/auth`, not module-specific) — path to a service-account JSON key file. Required by Vertex's ADC resolution; the module never reads this itself. | `GOOGLE_APPLICATION_CREDENTIALS=/etc/openemr/gcp-copilot-sa.json` |
 | `CLINICAL_COPILOT_GEMINI_API_KEY` | Gemini API key (dev/test) | Google AI Studio API key. Setting this (with no Vertex project id set) turns the dev/test fast-path on. **Synthetic-data-only — see warning above.** | `CLINICAL_COPILOT_GEMINI_API_KEY=AIza...` |
+| `CLINICAL_COPILOT_GEMINI_API_MODEL` | Gemini API key (dev/test, optional) | Model id for synthesis + chat when using the API-key path. Defaults to `gemini-2.5-flash` (free-tier friendly). Vertex keeps `gemini-2.5-pro` regardless. Folded into `prompt_version` via {@see \OpenEMR\Modules\ClinicalCopilot\Config\LlmRuntimeConfig}. | `CLINICAL_COPILOT_GEMINI_API_MODEL=gemini-2.5-flash` |
 
 None of these are set in this environment by default — the module ships
 configured to degrade cleanly (see below).
 
-### Optional model-override variables
+### Model selection (API-key path)
 
-Not currently implemented — the model strings (`gemini-2.5-pro` for
-synthesis/chat, `gemini-2.5-flash` for the advisory QA reviewer) are pinned
-as class constants (`VertexLlmClient`'s and `GeminiApiLlmClient`'s callers,
-`FlashReviewer::MODEL`) because they fold into `prompt_version`, a digest
-input (build-notes.md, Fact object section) — an env-var override would let
-a model change silently bypass that digest invalidation. If a future need
-arises for per-deployment model overrides, wire them explicitly through
-`prompt_version` rather than adding a bare `getenv()` read here.
+`LlmRuntimeConfig::reduceAndChatModel()` centralizes the model string synthesis
+and chat pass to the LLM:
+
+- **Vertex** (`CLINICAL_COPILOT_GCP_PROJECT_ID` set) → `gemini-2.5-pro`
+- **API key** → `gemini-2.5-flash` by default, overridable via
+  `CLINICAL_COPILOT_GEMINI_API_MODEL`
+
+The chosen model is folded into `prompt_version` (a digest input), so changing
+`CLINICAL_COPILOT_GEMINI_API_MODEL` invalidates cached docs the same way a
+prompt change would.
+
+The advisory QA reviewer (`Observability\Qa\FlashReviewer`) always requests
+`gemini-2.5-flash` independently — it reuses whichever client
+`LlmClientFactory::create()` returned but passes its own model on each
+`PromptRequest`.
 
 ## Selection precedence
 
@@ -103,6 +111,7 @@ export GOOGLE_APPLICATION_CREDENTIALS="/etc/openemr/gcp-copilot-sa.json"
 
 ```bash
 export CLINICAL_COPILOT_GEMINI_API_KEY="AIza...your-ai-studio-key..."
+export CLINICAL_COPILOT_GEMINI_API_MODEL="gemini-2.5-flash"
 ```
 
 **Default (nothing set — the default in this environment):**

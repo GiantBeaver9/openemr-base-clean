@@ -14,8 +14,10 @@ declare(strict_types=1);
 
 namespace OpenEMR\Modules\ClinicalCopilot;
 
+use OpenEMR\Common\Acl\AclMain;
 use OpenEMR\Common\Logging\SystemLogger;
 use OpenEMR\Menu\MenuEvent;
+use OpenEMR\Menu\PatientMenuEvent;
 use stdClass;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 
@@ -45,11 +47,17 @@ class Bootstrap
     public function subscribeToEvents(): void
     {
         $this->registerMenuItems();
+        $this->registerPatientMenuItems();
     }
 
     public function registerMenuItems(): void
     {
         $this->eventDispatcher->addListener(MenuEvent::MENU_UPDATE, $this->addCustomMenuItem(...));
+    }
+
+    public function registerPatientMenuItems(): void
+    {
+        $this->eventDispatcher->addListener(PatientMenuEvent::MENU_UPDATE, $this->addPatientMenuItem(...));
     }
 
     /**
@@ -92,5 +100,59 @@ class Bootstrap
         }
 
         return $event;
+    }
+
+    /**
+     * Adds an "Appointment Copilot" tab on the patient chart nav bar,
+     * immediately after External Data (standard patient menu order). Skipped
+     * when the caller lacks chart or copilot ACL — same gates as doc.php.
+     */
+    public function addPatientMenuItem(PatientMenuEvent $event): PatientMenuEvent
+    {
+        try {
+            if (
+                !AclMain::aclCheckCore('patients', 'med')
+                || !AclMain::aclCheckCore(self::ACL_SECTION_NAME, 'copilot_access')
+            ) {
+                return $event;
+            }
+
+            $menu = $event->getMenu();
+            $updated = [];
+            $inserted = false;
+
+            foreach ($menu as $menuItem) {
+                $updated[] = $menuItem;
+                if (($menuItem->menu_id ?? '') === 'external_data') {
+                    $updated[] = $this->buildPatientCopilotMenuItem();
+                    $inserted = true;
+                }
+            }
+
+            if (!$inserted) {
+                $updated[] = $this->buildPatientCopilotMenuItem();
+            }
+
+            $event->setMenu($updated);
+        } catch (\Throwable $e) {
+            $this->logger->error('ClinicalCopilot: failed to register patient menu item', ['error' => $e->getMessage()]);
+        }
+
+        return $event;
+    }
+
+    private function buildPatientCopilotMenuItem(): stdClass
+    {
+        $menuItem = new stdClass();
+        $menuItem->requirement = 0;
+        $menuItem->target = 'main';
+        $menuItem->menu_id = 'clinical_copilot';
+        $menuItem->label = xlt('Appointment Copilot');
+        $menuItem->url = self::MODULE_INSTALLATION_PATH . '/public/doc.php?pid=';
+        $menuItem->pid = 'true';
+        $menuItem->on_click = 'top.restoreSession()';
+        $menuItem->children = [];
+
+        return $menuItem;
     }
 }

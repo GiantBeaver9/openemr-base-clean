@@ -17,6 +17,7 @@ namespace OpenEMR\Modules\ClinicalCopilot\Reduce;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
+use GuzzleHttp\Exception\RequestException;
 
 /**
  * T23 (docs/build-notes.md "dev/test Gemini API-key fast-path"): Gemini via
@@ -73,6 +74,9 @@ final class GeminiApiLlmClient implements LlmClientInterface
     {
         $url = $this->endpointUrl($req->model);
         $body = self::buildGenerateContentBody($req);
+        $body['generationConfig']['responseSchema'] = GeminiApiSchemaTranslator::translate(
+            $body['generationConfig']['responseSchema'],
+        );
 
         $startedAt = microtime(true);
 
@@ -85,6 +89,18 @@ final class GeminiApiLlmClient implements LlmClientInterface
                 'timeout' => self::TIMEOUT_SECONDS,
             ]);
         } catch (GuzzleException $e) {
+            if ($e instanceof RequestException && $e->hasResponse()) {
+                $response = $e->getResponse();
+                $statusCode = $response->getStatusCode();
+                $bodySnippet = substr((string)$response->getBody(), 0, 500);
+                throw LlmUnavailableException::providerError(
+                    new \RuntimeException(
+                        'Gemini API HTTP ' . $statusCode . ($bodySnippet !== '' ? ': ' . $bodySnippet : ''),
+                        0,
+                        $e,
+                    ),
+                );
+            }
             throw LlmUnavailableException::unreachable($e);
         }
 

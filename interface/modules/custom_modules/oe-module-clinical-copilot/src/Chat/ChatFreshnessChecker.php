@@ -14,6 +14,7 @@ declare(strict_types=1);
 
 namespace OpenEMR\Modules\ClinicalCopilot\Chat;
 
+use OpenEMR\Modules\ClinicalCopilot\Config\LlmRuntimeConfig;
 use OpenEMR\Modules\ClinicalCopilot\Capability\CapabilityInterface;
 use OpenEMR\Modules\ClinicalCopilot\Fact\Digest;
 use OpenEMR\Modules\ClinicalCopilot\Lab\Config\LabContractConfigProviderInterface;
@@ -54,7 +55,11 @@ final class ChatFreshnessChecker
     private const CODE_SET_VERSION = '1';
     private const DOC_TYPE = 'endo-previsit-v1';
     private const PROMPT_VERSION = 'reduce-v1';
-    private const MODEL = 'gemini-2.5-pro';
+
+    private static function model(): string
+    {
+        return LlmRuntimeConfig::reduceAndChatModel();
+    }
 
     /**
      * @param list<CapabilityInterface> $capabilities all five, same set {@see \OpenEMR\Modules\ClinicalCopilot\ReadPath\SynthesisReadPath} runs
@@ -98,7 +103,7 @@ final class ChatFreshnessChecker
             $configVersions,
             self::CODE_SET_VERSION,
             self::DOC_TYPE,
-            self::PROMPT_VERSION . '+' . self::MODEL,
+            self::PROMPT_VERSION . '+' . self::model(),
         );
 
         return $currentDigest !== $sessionFactDigest;

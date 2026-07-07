@@ -27,6 +27,7 @@ use OpenEMR\Modules\ClinicalCopilot\Capability\VitalsTrend;
 use OpenEMR\Modules\ClinicalCopilot\Chat\AgentLoop;
 use OpenEMR\Modules\ClinicalCopilot\Chat\ChatAgent;
 use OpenEMR\Modules\ClinicalCopilot\Chat\ChatAnswer;
+use OpenEMR\Modules\ClinicalCopilot\Config\LlmRuntimeConfig;
 use OpenEMR\Modules\ClinicalCopilot\Chat\ChatFactSetBuilder;
 use OpenEMR\Modules\ClinicalCopilot\Chat\ChatFreshnessChecker;
 use OpenEMR\Modules\ClinicalCopilot\Chat\ChatPromptAssembler;
@@ -83,7 +84,11 @@ final class ChatController
     private const MAX_TURNS_PER_SESSION = 30;
     private const DOC_TYPE = 'endo-previsit-chat-v1';
     private const PROMPT_VERSION = 'chat-v1';
-    private const MODEL = 'gemini-2.5-pro';
+
+    private static function model(): string
+    {
+        return LlmRuntimeConfig::reduceAndChatModel();
+    }
 
     public function __construct(
         private readonly DocStore $docStore,
@@ -141,20 +146,36 @@ final class ChatController
      * Lazily creates a session for `$pid` (ARCHITECTURE.md §1.1) -- called
      * once when the physician opens the chat panel beside the synthesis doc.
      *
-     * @return array{ok: bool, session_id: int|null, reason: string|null}
+     * @return array{ok: bool, session_id: int|null, reason: string|null, resumed: bool, stale: bool, turns: list<array{role: string, text: ?string, result: ?array<string, mixed>}>}
      */
     public function startSession(int $pid, int $userId): array
     {
         if (!$this->identifierLookup->exists($pid)) {
-            return ['ok' => false, 'session_id' => null, 'reason' => 'patient not found'];
+            return ['ok' => false, 'session_id' => null, 'reason' => 'patient not found', 'resumed' => false, 'stale' => false, 'turns' => []];
+        }
+
+        $existingId = null;
+        $existing = $this->sessionStore->findLatestActiveForUserAndPid($userId, $pid);
+        if ($existing !== null) {
+            $existingId = $existing->id;
         }
 
         $session = $this->seeder->seed($pid, $userId);
         if ($session === null) {
-            return ['ok' => false, 'session_id' => null, 'reason' => 'synthesis unavailable -- open the synthesis doc first'];
+            return ['ok' => false, 'session_id' => null, 'reason' => 'synthesis unavailable -- open the synthesis doc first', 'resumed' => false, 'stale' => false, 'turns' => []];
         }
 
-        return ['ok' => true, 'session_id' => $session->id, 'reason' => null];
+        $resumed = $existingId !== null && $session->id === $existingId;
+        $stale = $resumed && $this->freshnessChecker->hasDrifted($session->pid, $session->factDigest);
+
+        return [
+            'ok' => true,
+            'session_id' => $session->id,
+            'reason' => null,
+            'resumed' => $resumed,
+            'stale' => $stale,
+            'turns' => $this->clientTurnHistory($session->id),
+        ];
     }
 
     /**
@@ -162,11 +183,27 @@ final class ChatController
      * CURRENT doc. The old session is left exactly as it is -- abandoned,
      * never frozen (only a V3 sev-1 trip freezes a session).
      *
-     * @return array{ok: bool, session_id: int|null, reason: string|null}
+     * @return array{ok: bool, session_id: int|null, reason: string|null, resumed: bool, stale: bool, turns: list<array{role: string, text: ?string, result: ?array<string, mixed>}>}
      */
     public function reseed(int $pid, int $userId): array
     {
-        return $this->startSession($pid, $userId);
+        if (!$this->identifierLookup->exists($pid)) {
+            return ['ok' => false, 'session_id' => null, 'reason' => 'patient not found', 'resumed' => false, 'stale' => false, 'turns' => []];
+        }
+
+        $session = $this->seeder->seed($pid, $userId, forceNew: true);
+        if ($session === null) {
+            return ['ok' => false, 'session_id' => null, 'reason' => 'synthesis unavailable -- open the synthesis doc first', 'resumed' => false, 'stale' => false, 'turns' => []];
+        }
+
+        return [
+            'ok' => true,
+            'session_id' => $session->id,
+            'reason' => null,
+            'resumed' => false,
+            'stale' => false,
+            'turns' => [],
+        ];
     }
 
     /**
@@ -392,7 +429,7 @@ final class ChatController
             new Redactor(),
             "chat:{$session->id}",
             $identifiers,
-            new PromptContext(self::DOC_TYPE, self::PROMPT_VERSION, self::MODEL),
+            new PromptContext(self::DOC_TYPE, self::PROMPT_VERSION, self::model()),
             $onStatus,
         );
 
@@ -548,6 +585,50 @@ final class ChatController
             $answer->usage->tokensOut,
             null,
         ));
+    }
+
+    /**
+     * @return list<array{role: string, text: ?string, result: ?array<string, mixed>}>
+     */
+    private function clientTurnHistory(int $sessionId): array
+    {
+        $history = [];
+        foreach ($this->turnStore->forSession($sessionId) as $turn) {
+            if ($turn->role === ChatTurnRole::User) {
+                $text = is_string($turn->content['text'] ?? null) ? $turn->content['text'] : '';
+                $history[] = ['role' => 'physician', 'text' => $text, 'result' => null];
+                continue;
+            }
+
+            if ($turn->role !== ChatTurnRole::Assistant) {
+                continue;
+            }
+
+            $claims = [];
+            $rawClaims = $turn->content['claims'] ?? null;
+            if (is_array($rawClaims)) {
+                foreach ($rawClaims as $claim) {
+                    if (is_array($claim) && is_string($claim['text'] ?? null)) {
+                        $claims[] = ['text' => $claim['text']];
+                    }
+                }
+            }
+
+            $history[] = [
+                'role' => 'assistant',
+                'text' => null,
+                'result' => [
+                    'frozen' => (bool)($turn->content['frozen'] ?? false),
+                    'degraded_message' => is_string($turn->content['degraded_message'] ?? null)
+                        ? $turn->content['degraded_message']
+                        : null,
+                    'claims' => $claims,
+                    'tool_calls' => [],
+                ],
+            ];
+        }
+
+        return $history;
     }
 
     /**

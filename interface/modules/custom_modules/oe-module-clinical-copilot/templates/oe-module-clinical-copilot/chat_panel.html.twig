@@ -18,7 +18,7 @@
 # @copyright Copyright (c) 2026 OpenEMR Foundation
 # @license   https://github.com/openemr/openemr/blob/master/LICENSE GNU General Public License 3
 #}
-<div class="card mb-4" id="ccpChatPanel" data-pid="{{ pid|attr }}">
+<div class="card mb-3" id="ccpChatPanel" data-pid="{{ pid|attr }}">
     <div class="card-header d-flex justify-content-between align-items-center">
         <strong>{{ "Ask a follow-up"|xlt }}</strong>
         <small class="text-muted">{{ "pinned to this patient -- answers cite the same facts as the synthesis above"|xlt }}</small>
@@ -138,27 +138,71 @@
         }
     }
 
-    function startSession() {
+    function replayTurn(turn) {
+        if (turn.role === 'physician' && turn.text) {
+            appendLine('Physician', turn.text);
+            return;
+        }
+        if (turn.role === 'assistant' && turn.result) {
+            renderTurnResult(turn.result);
+        }
+    }
+
+    function reseedFromCurrentSummary(showSystemLine) {
+        var body = new FormData();
+        body.append('action', 'reseed');
+        body.append('pid', pid);
+        body.append('csrf_token_form', csrf);
+
+        return fetch(chatUrl, { method: 'POST', body: body, credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data.ok) {
+                    return data;
+                }
+                sessionId = data.session_id;
+                staleBanner.style.display = 'none';
+                turnsEl.innerHTML = '';
+                if (Array.isArray(data.turns)) {
+                    for (var i = 0; i < data.turns.length; i++) {
+                        replayTurn(data.turns[i]);
+                    }
+                }
+                if (showSystemLine && (data.turns === undefined || data.turns.length === 0)) {
+                    appendLine('System', 'started a fresh conversation from the current summary.');
+                }
+                return data;
+            });
+    }
+
+    async function startSession() {
         var body = new FormData();
         body.append('action', 'start');
         body.append('pid', pid);
         body.append('csrf_token_form', csrf);
 
-        fetch(chatUrl, { method: 'POST', body: body, credentials: 'same-origin' })
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                if (data.ok) {
-                    sessionId = data.session_id;
-                } else {
-                    setStatus(data.reason || 'chat unavailable');
+        try {
+            var response = await fetch(chatUrl, { method: 'POST', body: body, credentials: 'same-origin' });
+            var data = await response.json();
+            if (data.ok) {
+                sessionId = data.session_id;
+                if (data.stale) {
+                    staleBanner.style.display = '';
                 }
-            })
-            .catch(function () {
-                setStatus('chat unavailable');
-            });
+                if (Array.isArray(data.turns)) {
+                    for (var i = 0; i < data.turns.length; i++) {
+                        replayTurn(data.turns[i]);
+                    }
+                }
+            } else {
+                setStatus(data.reason || 'chat unavailable');
+            }
+        } catch (err) {
+            setStatus('chat unavailable');
+        }
     }
 
-    function submitTurn(message) {
+    async function submitTurn(message) {
         if (!sessionId || frozen) {
             return;
         }
@@ -171,22 +215,21 @@
         body.append('message', message);
         body.append('csrf_token_form', csrf);
 
-        fetch(chatUrl, { method: 'POST', body: body, credentials: 'same-origin' })
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                setStatus(null);
-                sendBtn.disabled = false;
-                if (data.ok === false) {
-                    appendLine('System', data.reason || 'the turn could not be completed');
-                    return;
-                }
-                renderTurnResult(data);
-            })
-            .catch(function () {
-                setStatus(null);
-                sendBtn.disabled = false;
-                appendLine('System', 'network error -- the turn may still complete server-side; try again shortly');
-            });
+        try {
+            var response = await fetch(chatUrl, { method: 'POST', body: body, credentials: 'same-origin' });
+            var data = await response.json();
+            setStatus(null);
+            sendBtn.disabled = false;
+            if (data.ok === false) {
+                appendLine('System', data.reason || 'the turn could not be completed');
+                return;
+            }
+            renderTurnResult(data);
+        } catch (err) {
+            setStatus(null);
+            sendBtn.disabled = false;
+            appendLine('System', 'network error -- the turn may still complete server-side; try again shortly');
+        }
     }
 
     form.addEventListener('submit', function (event) {
@@ -202,21 +245,11 @@
 
     reseedLink.addEventListener('click', function (event) {
         event.preventDefault();
-        var body = new FormData();
-        body.append('action', 'reseed');
-        body.append('pid', pid);
-        body.append('csrf_token_form', csrf);
+        reseedFromCurrentSummary(true);
+    });
 
-        fetch(chatUrl, { method: 'POST', body: body, credentials: 'same-origin' })
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                if (data.ok) {
-                    sessionId = data.session_id;
-                    staleBanner.style.display = 'none';
-                    turnsEl.innerHTML = '';
-                    appendLine('System', 'started a fresh conversation from the current summary.');
-                }
-            });
+    document.addEventListener('ccp-summary-regenerated', function () {
+        reseedFromCurrentSummary(false);
     });
 
     startSession();

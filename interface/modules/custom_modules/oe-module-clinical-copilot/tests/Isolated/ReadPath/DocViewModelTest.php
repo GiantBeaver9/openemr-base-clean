@@ -98,7 +98,7 @@ final class DocViewModelTest extends TestCase
 
         self::assertCount(1, $viewModel['narrative']);
         self::assertCount(1, $viewModel['narrative'][0]['citations']);
-        self::assertSame('procedure_result#501.result', $viewModel['narrative'][0]['citations'][0]['label']);
+        self::assertSame('Lab result #501.result', $viewModel['narrative'][0]['citations'][0]['label']);
         // procedure_result has no verified deep-link route (ChartLinkResolver's
         // own documented scope) -- tooltip fallback, url is null.
         self::assertNull($viewModel['narrative'][0]['citations'][0]['url']);

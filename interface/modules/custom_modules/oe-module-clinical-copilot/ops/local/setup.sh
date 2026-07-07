@@ -23,12 +23,44 @@
 
 set -euo pipefail
 
-# --- locate the repo + module (works from any CWD) --------------------------
+log()  { printf '\n\033[1;36m==>\033[0m %s\n' "$*"; }
+die()  { printf '\n\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
+
+# --- locate the repo + module (works from any CWD, incl. Git Bash on Windows) -
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR" && git rev-parse --show-toplevel 2>/dev/null || cd "$SCRIPT_DIR/../../../../../.." && pwd)"
+
+normalize_repo_path() {
+  local p="$1"
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -u "$p"
+  else
+    printf '%s' "$p"
+  fi
+}
+
+resolve_repo_root() {
+  local root candidate
+  root="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
+  root="$(normalize_repo_path "$root")"
+  if [ -n "$root" ] && [ -f "$root/docker/development-easy/docker-compose.yml" ]; then
+    printf '%s' "$root"
+    return 0
+  fi
+  # ops/local -> repo root is six parents up (five was one short of interface/).
+  candidate="$(cd "$SCRIPT_DIR/../../../../../../" && pwd)"
+  candidate="$(normalize_repo_path "$candidate")"
+  if [ -f "$candidate/docker/development-easy/docker-compose.yml" ]; then
+    printf '%s' "$candidate"
+    return 0
+  fi
+  return 1
+}
+
+REPO_ROOT="$(resolve_repo_root)" || die "Could not locate OpenEMR repo root from $SCRIPT_DIR"
 MODULE_REL="interface/modules/custom_modules/oe-module-clinical-copilot"
 COMPOSE_MAIN="$REPO_ROOT/docker/development-easy/docker-compose.yml"
 COMPOSE_OVERLAY="$REPO_ROOT/$MODULE_REL/ops/local/compose.gemini.yml"
+LOCAL_ENV_FILE="$SCRIPT_DIR/gemini.local.env"
 CONTAINER_ROOT="/var/www/localhost/htdocs/openemr"
 HTTPS_URL="https://localhost:${WT_HTTPS_PORT:-9300}"
 
@@ -39,11 +71,16 @@ export HOST_GID="${HOST_GID:-$(id -g)}"
 
 DC=(docker compose -f "$COMPOSE_MAIN" -f "$COMPOSE_OVERLAY")
 
-log()  { printf '\n\033[1;36m==>\033[0m %s\n' "$*"; }
-die()  { printf '\n\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
-
 command -v docker >/dev/null 2>&1 || die "docker not found on PATH."
 [ -f "$COMPOSE_MAIN" ] || die "dev compose not found at $COMPOSE_MAIN"
+
+if [ -f "$LOCAL_ENV_FILE" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$LOCAL_ENV_FILE"
+  set +a
+  log "Loaded LLM settings from gemini.local.env"
+fi
 
 if [ -z "${CLINICAL_COPILOT_GEMINI_API_KEY:-}${CLINICAL_COPILOT_GCP_PROJECT_ID:-}" ]; then
   log "No LLM credentials set -> the module will run in facts-only / facts-browser mode."
@@ -67,7 +104,10 @@ done
 printf '\n'
 log "OpenEMR is up at $HTTPS_URL  (login: admin / pass)"
 
-exec_in() { "${DC[@]}" exec -T openemr "$@"; }
+# OpenEMR CLI scripts refuse UID 0 (RootCliGuard); run as apache inside the container.
+exec_in() {
+  "${DC[@]}" exec -T openemr su -s /bin/sh apache -c "$(printf '%q ' "$@")"
+}
 
 # --- 3. install + enable the module ------------------------------------------
 log "Installing + enabling the Clinical Co-Pilot module..."

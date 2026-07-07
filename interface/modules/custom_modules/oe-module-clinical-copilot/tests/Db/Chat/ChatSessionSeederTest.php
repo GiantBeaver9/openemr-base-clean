@@ -97,6 +97,21 @@ final class ChatSessionSeederTest extends TestCase
         self::assertSame($session->docId, $docRow->id);
     }
 
+    public function testSeedReusesTheLatestActiveSessionWhenDigestIsUnchanged(): void
+    {
+        self::insertA1cResult($this->pid, '7.4', '2025-05-01');
+
+        $readPath = self::buildReadPath($this->docStore);
+        $seeder = new ChatSessionSeeder($readPath, $this->sessionStore);
+
+        $first = $seeder->seed($this->pid, 1);
+        $second = $seeder->seed($this->pid, 1);
+
+        self::assertNotNull($first);
+        self::assertNotNull($second);
+        self::assertSame($first->id, $second->id);
+    }
+
     public function testSeedRefusesWhenACapabilityCrashes(): void
     {
         self::insertA1cResult($this->pid, '7.4', '2025-05-01');

@@ -95,6 +95,7 @@ final class DocViewModel
             'verify_status' => $result->verifyStatus?->value,
             'regen_reason' => $result->regenReason?->value,
             'degraded_message' => $result->degradedMessage,
+            'degraded_reason' => $result->degradedReason,
             'served_from_cache' => $result->servedFromCache,
             'computed_at' => $result->computedAt?->format('Y-m-d H:i'),
             'correlation_id' => $result->correlationId,
@@ -239,6 +240,14 @@ final class DocViewModel
             'clinical_date' => $fact->clinicalDate?->format('Y-m-d'),
             'date_source' => $fact->dateSource->value,
             'flags' => array_map(static fn (Flag $f): string => $f->value, $fact->flags),
+            'flag_labels' => array_map(
+                static fn (Flag $f): string => FactDisplayFormatter::flagLabel($f->value),
+                $fact->flags,
+            ),
+            'kind_label' => FactDisplayFormatter::kindLabel($fact->kind->value),
+            'status_label' => FactDisplayFormatter::statusLabel($fact->status->value),
+            'capability_label' => FactDisplayFormatter::capabilityLabel($fact->capability->value),
+            'is_excluded' => $fact->kind === FactKind::Exclusion,
             'citations' => array_map(static fn (Citation $c): array => self::citationLink($c, $webRoot), $fact->citations),
         ];
     }

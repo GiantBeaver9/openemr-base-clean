@@ -17,7 +17,9 @@ namespace OpenEMR\Modules\ClinicalCopilot\Chat\Llm;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
+use GuzzleHttp\Exception\RequestException;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\LlmUnavailableException;
+use OpenEMR\Modules\ClinicalCopilot\Reduce\GeminiApiSchemaTranslator;
 
 /**
  * T23 (docs/build-notes.md "dev/test Gemini API-key fast-path"): the chat
@@ -70,6 +72,24 @@ final class GeminiApiChatLlmClient implements ChatLlmClientInterface
     {
         $url = $this->endpointUrl($req->prompt->model);
         $body = self::buildChatContentBody($req);
+        if (isset($body['tools'][0]['functionDeclarations']) && is_array($body['tools'][0]['functionDeclarations'])) {
+            /** @var list<array<string, mixed>> $declarations */
+            $declarations = $body['tools'][0]['functionDeclarations'];
+            foreach ($declarations as $index => $declaration) {
+                if (!isset($declaration['parameters']) || !is_array($declaration['parameters'])) {
+                    continue;
+                }
+                /** @var array<string, mixed> $parameters */
+                $parameters = $declaration['parameters'];
+                $declarations[$index]['parameters'] = GeminiApiSchemaTranslator::translate($parameters);
+            }
+            $body['tools'][0]['functionDeclarations'] = $declarations;
+        }
+        if (isset($body['generationConfig']['responseSchema']) && is_array($body['generationConfig']['responseSchema'])) {
+            /** @var array<string, mixed> $schema */
+            $schema = $body['generationConfig']['responseSchema'];
+            $body['generationConfig']['responseSchema'] = GeminiApiSchemaTranslator::translate($schema);
+        }
 
         $startedAt = microtime(true);
 
@@ -82,6 +102,18 @@ final class GeminiApiChatLlmClient implements ChatLlmClientInterface
                 'timeout' => self::TIMEOUT_SECONDS,
             ]);
         } catch (GuzzleException $e) {
+            if ($e instanceof RequestException && $e->hasResponse()) {
+                $response = $e->getResponse();
+                $statusCode = $response->getStatusCode();
+                $bodySnippet = substr((string)$response->getBody(), 0, 500);
+                throw LlmUnavailableException::providerError(
+                    new \RuntimeException(
+                        'Gemini API HTTP ' . $statusCode . ($bodySnippet !== '' ? ': ' . $bodySnippet : ''),
+                        0,
+                        $e,
+                    ),
+                );
+            }
             throw LlmUnavailableException::unreachable($e);
         }
 
