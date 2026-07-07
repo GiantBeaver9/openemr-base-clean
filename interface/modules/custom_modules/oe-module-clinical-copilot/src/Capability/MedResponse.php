@@ -274,9 +274,20 @@ final class MedResponse implements CapabilityInterface
             return '';
         }
 
-        $firstToken = strtok($trimmed, " \t");
+        // Key on the drug NAME (leading words before the first digit), not just
+        // the first whitespace token: "Insulin Glargine 100 UNT/ML" and
+        // "Insulin Aspart 100 UNT/ML" are distinct drugs that must not collapse
+        // to the shared key "INSULIN", while "Metformin 500 MG" and
+        // "Metformin 1000 MG" must still group so a dose change pairs against
+        // the same drug's later labs. Strength/form (from the first digit on) is
+        // the changing attribute, so it's dropped from the key. Name-based
+        // keying can't unify brand vs generic without RxNorm -- an accepted
+        // limitation recorded in docs/known-issues.md.
+        $parts = preg_split('/\s*\d/', $trimmed, 2);
+        $beforeDigit = ($parts !== false && $parts[0] !== '') ? $parts[0] : $trimmed;
+        $name = trim((string) preg_replace('/\s+/', ' ', $beforeDigit));
 
-        return strtoupper($firstToken !== false ? $firstToken : $trimmed);
+        return strtoupper($name !== '' ? $name : $trimmed);
     }
 
     /**
