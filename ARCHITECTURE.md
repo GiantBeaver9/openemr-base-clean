@@ -211,6 +211,12 @@ An in-app module page (Twig + the host's Bootstrap stack, auto-refreshing) compu
 
 Alert evaluation runs on the module's background-service tick; firing writes an `alert_eval` span, surfaces a dashboard banner, and logs at `error` severity (pluggable email/webhook at deploy time). The heartbeat alert is the stated exception — a dead worker can't report itself, so its detection lives on the pull paths (`/ready`, dashboard, external probe).
 
+### 3.6 Baselines and load (R8, R9)
+
+Before the agent ships: capture baseline CPU/memory/latency/throughput of the deployed stack (synthesis read warm/cold, chat turn with 0/1/3 tool calls). Load tests at **10 and 50 concurrent users** against the deployed environment, recording p50/p95/p99 and error rate per level, plus DB connection and PHP-FPM worker saturation. Results are committed with the eval dataset; future changes are measured against them.
+
+**Scaling stance (decided, T20): vertical-first.** The app does not scale horizontally — it scales by resizing the server. OpenEMR is a session-holding monolith and the module is in-process by design (T2); each open chat connection holds a PHP worker for the turn's duration, so concurrency is bought with worker count, which is bought with cores and RAM on a bigger GCE machine type — not with app replicas (which would immediately raise shared-session, worker-singleton, and sticky-connection problems the monolith isn't built for). The load-test saturation numbers tell us the worker/RAM sizing per N users; the honest ceiling is stated rather than hidden: when a deployment outgrows the biggest sensible machine (multi-clinic scale), the next moves are read replicas for fact extraction and pulling the chat loop out of process — a deliberate re-opening of T2, recorded in T20, not an emergency.
+
 ### 3.7 Rate limits and cost circuit breakers
 
 Cost is not only observed (§3.3) — it is **limited**. All limits are initial values in versioned config rows (module-owned; version is a digest-style config input, E5 discipline), tuned from trace data:
@@ -219,12 +225,6 @@ Cost is not only observed (§3.3) — it is **limited**. All limits are initial 
 - **Per user:** max 3 active sessions; max 60 turns/hour.
 - **Per site:** daily LLM spend cap and hourly burn-rate cap; a per-tick LLM budget for the warm worker (a chart-churn storm degrades warm *coverage*, never blows the cap — cold patients fall back to read-time generation, I7).
 - **Trip behavior (automatic):** breaker state lives in the module config table and is checked before every LLM call. Open breaker ⇒ chat degrades to the facts browser with a banner, synthesis serves cache hits and facts-only on miss — the I6/I11 degradation paths, reused, so a tripped breaker is *degraded, never broken*. `/copilot/ready` reports `llm: circuit-open`; the dashboard shows it; reset is automatic at window rollover, manual reset is ACL-gated and audit-logged.
-
-### 3.6 Baselines and load (R8, R9)
-
-Before the agent ships: capture baseline CPU/memory/latency/throughput of the deployed stack (synthesis read warm/cold, chat turn with 0/1/3 tool calls). Load tests at **10 and 50 concurrent users** against the deployed environment, recording p50/p95/p99 and error rate per level, plus DB connection and PHP-FPM worker saturation. Results are committed with the eval dataset; future changes are measured against them.
-
-**Scaling stance (decided, T20): vertical-first.** The app does not scale horizontally — it scales by resizing the server. OpenEMR is a session-holding monolith and the module is in-process by design (T2); each open chat connection holds a PHP worker for the turn's duration, so concurrency is bought with worker count, which is bought with cores and RAM on a bigger GCE machine type — not with app replicas (which would immediately raise shared-session, worker-singleton, and sticky-connection problems the monolith isn't built for). The load-test saturation numbers tell us the worker/RAM sizing per N users; the honest ceiling is stated rather than hidden: when a deployment outgrows the biggest sensible machine (multi-clinic scale), the next moves are read replicas for fact extraction and pulling the chat loop out of process — a deliberate re-opening of T2, recorded in T20, not an emergency.
 
 ---
 
