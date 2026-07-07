@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openemr.org/modules/clinical-copilot/claim.schema.json",
+  "title": "Clinical Co-Pilot Claim",
+  "description": "One unit of model output. The model emits an object with a 'claims' list of these plus optional ordering metadata (ARCHITECTURE.md §2.1). This schema, not the PHP Claim class, is the contract for V1. V2 re-checks that any claim naming an analyte/medication/number/date/patient-attribute cites, regardless of its declared claim_type — the four zero-citation types are a ceiling, not a bypass.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["claims"],
+  "properties": {
+    "claims": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/claim" }
+    },
+    "ordering": {
+      "type": "array",
+      "description": "optional emphasis/ordering metadata (claim identifiers or indices); NOT verified — emphasis/ordering is a stated §2.4 residual",
+      "items": { "type": "string" }
+    }
+  },
+  "$defs": {
+    "claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "claim_type", "citation_ids"],
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the claim prose; V4 extracts every number/date from THIS field (authoritative), not from numeric_values"
+        },
+        "claim_type": {
+          "description": "closed enum. greeting|refusal|retrieval_status|uncertainty_statement may carry zero citations (only when not lexically clinical); every other type MUST cite (V2).",
+          "enum": [
+            "greeting",
+            "refusal",
+            "retrieval_status",
+            "uncertainty_statement",
+            "result",
+            "trend",
+            "med_event",
+            "overdue",
+            "pending",
+            "comparison",
+            "summary",
+            "observation",
+            "conflict",
+            "exclusion_note"
+          ]
+        },
+        "citation_ids": {
+          "type": "array",
+          "description": "fact_id references; each MUST resolve to a fact in the session fact set (V2) and belong to the pinned pid (V3)",
+          "items": { "type": "string" }
+        },
+        "numeric_values": {
+          "type": "array",
+          "description": "numbers the model declares it is asserting; advisory only — V4 grounds against claim text. Numbers or numeric strings are both accepted and coerced.",
+          "items": { "type": ["string", "number"] }
+        },
+        "flags": {
+          "type": "array",
+          "description": "claim-level flags; 'conflict' acknowledgment for any cited conflict-flagged fact lives here (V6)",
+          "items": { "type": "string" }
+        },
+        "order_rank": {
+          "type": ["integer", "null"],
+          "description": "optional per-claim ordering rank; NOT verified (§2.4 residual)"
+        },
+        "emphasis": {
+          "type": ["string", "null"],
+          "description": "optional per-claim emphasis marker; NOT verified (§2.4 residual)"
+        }
+      }
+    }
+  }
+}
