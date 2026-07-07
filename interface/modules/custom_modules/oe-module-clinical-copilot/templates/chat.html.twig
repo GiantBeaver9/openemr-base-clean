@@ -1,0 +1,195 @@
+{#
+ # Clinical Co-Pilot chat surface — the chat panel with the facts panel ALWAYS beside it (§1.3, §6).
+ #
+ # Rendered as an inner fragment by public/chat.php (which supplies the host Header / Bootstrap
+ # shell). Autoescape is OFF globally, so every value is escaped at the sink with |text / |attr /
+ # xlt. No model or user data is ever rendered with |raw. The chat answer is built client-side with
+ # textContent (never innerHTML), so retrieved prose and citations cannot inject markup. The facts
+ # panel is server-rendered and escaped; citations click-through to their fact row by id.
+ #
+ # @package OpenEMR\Modules\ClinicalCopilot
+ # @license https://github.com/openemr/openemr/blob/master/LICENSE GNU General Public License 3
+ #}
+<div class="mod-copilot-chat" data-post-url="{{ post_url|attr }}" data-status-url="{{ status_url|attr }}"
+     data-pid="{{ pid|attr }}" data-session-id="{{ session_id|attr }}" data-csrf="{{ csrf_token|attr }}">
+
+    <h2 class="mb-2">{{ "Clinical Co-Pilot — Chat"|xlt }}</h2>
+
+    {% if seed_banner %}
+        <div class="alert alert-warning" role="alert">{{ seed_banner|text }}</div>
+    {% endif %}
+
+    <div id="cc-stale-banner" class="alert alert-warning d-none" role="alert"></div>
+
+    <div class="row">
+        {# ---- Chat panel ------------------------------------------------------------------ #}
+        <div class="col-md-7 mb-3">
+            <div class="card">
+                <div class="card-header">
+                    <span>{{ "Conversation"|xlt }}</span>
+                    <span class="badge badge-info" title="{{ "V1–V6 verification checks ran on the complete response before display"|xla }}">{{ "citations checked"|xlt }}</span>
+                </div>
+                <div class="card-body">
+                    {% if narrative is not empty %}
+                        <div class="cc-narrative border rounded p-2 mb-2 bg-light">
+                            <div class="small text-muted">{{ "Pre-visit synthesis (context)"|xlt }}</div>
+                            <div>{{ narrative|text|nl2br }}</div>
+                        </div>
+                    {% endif %}
+
+                    <div id="cc-messages" class="cc-messages" aria-live="polite"></div>
+
+                    <div id="cc-status" class="small text-muted my-2" aria-live="polite"></div>
+
+                    <form id="cc-form" class="mt-2" autocomplete="off">
+                        <input type="hidden" name="csrf_token_form" value="{{ csrf_token|attr }}" />
+                        <input type="hidden" name="pid" value="{{ pid|attr }}" />
+                        <input type="hidden" name="session_id" value="{{ session_id|attr }}" />
+                        <div class="form-group mb-2">
+                            <label for="cc-message" class="sr-only">{{ "Your question"|xlt }}</label>
+                            <textarea id="cc-message" name="message" rows="2" class="form-control"
+                                      maxlength="4000" placeholder="{{ "Ask a follow-up about this patient…"|xla }}"></textarea>
+                        </div>
+                        <button type="submit" id="cc-send" class="btn btn-primary btn-sm">{{ "Send"|xlt }}</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        {# ---- Facts panel (always beside the chat — the recovery-asymmetry failsafe, §6) ---- #}
+        <div class="col-md-5 mb-3">
+            <div class="card">
+                <div class="card-header">{{ "Facts"|xlt }} <span class="text-muted">({{ facts|length }})</span></div>
+                <div class="card-body cc-facts" style="max-height: 70vh; overflow-y: auto;">
+                    {% if facts is empty %}
+                        <p class="text-muted">{{ "No facts are available for this patient yet."|xlt }}</p>
+                    {% else %}
+                        {% for fact in facts %}
+                            <div class="cc-fact border-bottom pb-2 mb-2" id="fact-{{ fact.fact_id|attr }}">
+                                <div>
+                                    <span class="badge badge-secondary">{{ fact.capability|text }}</span>
+                                    <span class="badge badge-light">{{ fact.kind|text }}</span>
+                                    {% if fact.clinical_date %}<span class="small text-muted">{{ fact.clinical_date|text }}</span>{% endif %}
+                                </div>
+                                {% if fact.value %}
+                                    <div class="cc-fact-value">
+                                        <strong>{{ fact.value.raw|text }}</strong>
+                                        {% if fact.value.unit_canonical %}<span class="text-muted">{{ fact.value.unit_canonical|text }}</span>{% endif %}
+                                    </div>
+                                {% endif %}
+                                {% for flag in fact.flags %}
+                                    <span class="badge badge-warning">{{ flag|text }}</span>
+                                {% endfor %}
+                                <div class="small text-muted">
+                                    {% for c in fact.citations %}
+                                        <span title="{{ "source record"|xla }}">{{ c.table|text }}#{{ c.pk|text }}{% if c.field %}.{{ c.field|text }}{% endif %}</span>{% if not loop.last %}, {% endif %}
+                                    {% endfor %}
+                                </div>
+                                <div class="small"><code>{{ fact.fact_id|text }}</code></div>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var root = document.querySelector('.mod-copilot-chat');
+    if (!root) { return; }
+    var postUrl = root.getAttribute('data-post-url');
+    var form = document.getElementById('cc-form');
+    var messages = document.getElementById('cc-messages');
+    var statusEl = document.getElementById('cc-status');
+    var staleBanner = document.getElementById('cc-stale-banner');
+    var sendBtn = document.getElementById('cc-send');
+    var input = document.getElementById('cc-message');
+
+    function addMessage(role, text) {
+        var wrap = document.createElement('div');
+        wrap.className = 'cc-msg cc-msg-' + role + ' mb-2';
+        var who = document.createElement('span');
+        who.className = 'font-weight-bold';
+        who.textContent = (role === 'user' ? 'You: ' : 'Co-Pilot: ');
+        var body = document.createElement('span');
+        body.textContent = text; // textContent — never innerHTML; no markup injection possible
+        wrap.appendChild(who);
+        wrap.appendChild(body);
+        messages.appendChild(wrap);
+        return wrap;
+    }
+
+    function addCitations(container, claims) {
+        if (!claims || !claims.length) { return; }
+        claims.forEach(function (claim) {
+            (claim.citation_ids || []).forEach(function (id) {
+                var a = document.createElement('a');
+                a.href = '#fact-' + id;
+                a.className = 'badge badge-light border mr-1';
+                a.textContent = String(id).substring(0, 8);
+                a.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    var target = document.getElementById('fact-' + id);
+                    if (target) {
+                        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        target.classList.add('bg-warning');
+                        setTimeout(function () { target.classList.remove('bg-warning'); }, 1200);
+                    }
+                });
+                container.appendChild(a);
+            });
+        });
+    }
+
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var text = (input.value || '').trim();
+        if (!text) { return; }
+        addMessage('user', text);
+        input.value = '';
+        sendBtn.disabled = true;
+        statusEl.textContent = 'retrieving…';
+
+        var data = new FormData(form);
+        data.set('message', text);
+
+        fetch(postUrl, { method: 'POST', body: data, headers: { 'Accept': 'application/json' } })
+            .then(function (resp) { return resp.json().then(function (j) { return { ok: resp.ok, status: resp.status, body: j }; }); })
+            .then(function (res) {
+                statusEl.textContent = '';
+                sendBtn.disabled = false;
+                var body = res.body || {};
+                if (!res.ok) {
+                    addMessage('assistant', body.error || ('Request failed (' + res.status + ').'));
+                    return;
+                }
+                if (body.staleness_banner) {
+                    staleBanner.textContent = body.staleness_banner;
+                    staleBanner.classList.remove('d-none');
+                }
+                var wrap = addMessage('assistant', body.answer || '');
+                (body.notes || []).forEach(function (n) {
+                    var note = document.createElement('div');
+                    note.className = 'small text-muted';
+                    note.textContent = n;
+                    wrap.appendChild(note);
+                });
+                var cites = document.createElement('div');
+                cites.className = 'mt-1';
+                addCitations(cites, body.claims);
+                wrap.appendChild(cites);
+                if (body.frozen) {
+                    sendBtn.disabled = true;
+                    input.disabled = true;
+                }
+            })
+            .catch(function () {
+                statusEl.textContent = '';
+                sendBtn.disabled = false;
+                addMessage('assistant', 'The chat is temporarily unavailable — the facts panel remains on this page.');
+            });
+    });
+})();
+</script>
