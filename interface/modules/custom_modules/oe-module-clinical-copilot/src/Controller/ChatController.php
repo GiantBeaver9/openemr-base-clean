@@ -39,8 +39,6 @@ use OpenEMR\Modules\ClinicalCopilot\Chat\ChatTurnRole;
 use OpenEMR\Modules\ClinicalCopilot\Chat\ChatTurnStore;
 use OpenEMR\Modules\ClinicalCopilot\Chat\Llm\ChatLlmClientFactory;
 use OpenEMR\Modules\ClinicalCopilot\Chat\NewChatTurn;
-use OpenEMR\Modules\ClinicalCopilot\Chat\RateLimit\AllowAllRateLimiter;
-use OpenEMR\Modules\ClinicalCopilot\Chat\RateLimit\AlwaysClosedCircuitBreaker;
 use OpenEMR\Modules\ClinicalCopilot\Chat\RateLimit\CircuitBreakerInterface;
 use OpenEMR\Modules\ClinicalCopilot\Chat\RateLimit\RateLimiterInterface;
 use OpenEMR\Modules\ClinicalCopilot\Chat\SessionTurnLock;
@@ -50,9 +48,11 @@ use OpenEMR\Modules\ClinicalCopilot\DocStore;
 use OpenEMR\Modules\ClinicalCopilot\Fact\Fact;
 use OpenEMR\Modules\ClinicalCopilot\Lab\Config\DbLabContractConfigProvider;
 use OpenEMR\Modules\ClinicalCopilot\Lab\LabSliceReader;
+use OpenEMR\Modules\ClinicalCopilot\Observability\RateLimit\CadenceCircuitBreaker;
+use OpenEMR\Modules\ClinicalCopilot\Observability\RateLimit\CadenceRateLimiter;
+use OpenEMR\Modules\ClinicalCopilot\Observability\TraceRecorder;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\AlertSinkInterface;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\LoggingAlertSink;
-use OpenEMR\Modules\ClinicalCopilot\ReadPath\NullTraceRecorder;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\PatientIdentifierLookup;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\SynthesisDocPayload;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\SynthesisReadPath;
@@ -128,10 +128,10 @@ final class ChatController
             new PatientIdentifierLookup(),
             new ChatFreshnessChecker($capabilities, $labContractConfigProvider, $turnaroundConfigProvider),
             new SessionTurnLock(),
-            new AllowAllRateLimiter(),
-            new AlwaysClosedCircuitBreaker(),
+            new CadenceRateLimiter(),
+            new CadenceCircuitBreaker(),
             $alertSink,
-            new NullTraceRecorder(),
+            new TraceRecorder(),
             new TracePoller(),
             new SystemLogger(),
         );
@@ -439,6 +439,15 @@ final class ChatController
         }
     }
 
+    /**
+     * TODO(U9 report): same TracePayloadStore adoption gap noted in
+     * {@see \OpenEMR\Modules\ClinicalCopilot\ReadPath\SynthesisReadPath::recordSpan()} --
+     * `chat_turn`/`tool_call`/`verify` spans here do not yet populate
+     * `TraceSpan::$payloadRef` (the prompt bytes, tool args/results, and
+     * verifier findings a span waterfall click-through would show,
+     * ARCHITECTURE.md §3.2/§3.3). Left for whichever unit next touches these
+     * call sites; not taken on as a drive-by change in U9.
+     */
     private function recordSpan(
         string $correlationId,
         string $kind,

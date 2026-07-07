@@ -32,6 +32,7 @@ use OpenEMR\Modules\ClinicalCopilot\Fact\Digest;
 use OpenEMR\Modules\ClinicalCopilot\Lab\Config\DbLabContractConfigProvider;
 use OpenEMR\Modules\ClinicalCopilot\Lab\Config\LabContractConfigProviderInterface;
 use OpenEMR\Modules\ClinicalCopilot\Lab\LabSliceReader;
+use OpenEMR\Modules\ClinicalCopilot\Observability\TraceRecorder;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\Claim;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\PatientIdentifiers;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\PromptAssembler;
@@ -116,7 +117,7 @@ final class SynthesisReadPath
      * this orchestration is needed.
      */
     public static function createDefault(
-        TraceRecorderInterface $tracer = new NullTraceRecorder(),
+        TraceRecorderInterface $tracer = new TraceRecorder(),
         AlertSinkInterface $alertSink = new LoggingAlertSink(),
     ): self {
         $labContractConfigProvider = new DbLabContractConfigProvider();
@@ -159,18 +160,75 @@ final class SynthesisReadPath
 
     /**
      * T22 manual Regenerate: always a fresh reduce+verify attempt over the
-     * CURRENT fresh facts (`regen_reason='manual'`), even when a passed doc
-     * already exists for this exact digest -- append-only (a new row, never
-     * a mutation), best-of-N re-selected via {@see DocStore::findBest()}
+     * CURRENT fresh facts (`regen_reason='manual'` by default), even when a
+     * passed doc already exists for this exact digest -- append-only (a new
+     * row, never a mutation), best-of-N re-selected via {@see DocStore::findBest()}
      * immediately after the insert.
+     *
+     * `$reason` defaults to {@see RegenReason::Manual} (the physician's
+     * Regenerate button, `public/doc.php` -> {@see \OpenEMR\Modules\ClinicalCopilot\Controller\DocController::regenerate()}).
+     * U9's worker passes {@see RegenReason::QaLow} for T22's QA-driven
+     * auto-rerun (docs/build-notes.md "Warm timing + QA-driven rerun") --
+     * same forced-fresh-attempt mechanics, tagged so the count of prior
+     * QA-driven reruns for a `(pid, fact_digest)` can be read back from
+     * `mod_copilot_doc.regen_reason` to enforce T22's "max 2 QA-driven
+     * reruns" bound. This IS a re-extraction (I2 always recomputes facts
+     * fresh), not a replay of a stored fact snapshot -- see U9's own report
+     * for why the more invasive "reduce-only over stored facts" path was not
+     * built: it would require widening {@see DocStore}'s public surface,
+     * which {@see \OpenEMR\Modules\ClinicalCopilot\Tests\Db\DocStore\DocStoreTest::testNoUpdateOrDeleteMethodExistsOnDocStore()}
+     * locks to exactly `insert`/`findBest`. Correctness is unaffected either
+     * way: the caller is expected to have already confirmed via
+     * {@see self::currentDigest()} that the facts have not drifted before
+     * calling this with {@see RegenReason::QaLow}.
      */
-    public function regenerate(int $pid, ?int $userId): SynthesisReadResult
+    public function regenerate(int $pid, ?int $userId, RegenReason $reason = RegenReason::Manual): SynthesisReadResult
     {
-        return $this->run($pid, $userId, self::mintCorrelationId(), forceRegenerate: true);
+        return $this->run($pid, $userId, self::mintCorrelationId(), forceRegenerate: true, regenReason: $reason);
     }
 
-    private function run(int $pid, ?int $userId, string $correlationId, bool $forceRegenerate): SynthesisReadResult
+    /**
+     * T22 freshness guard, exposed for U9's worker: recomputes the CURRENT
+     * digest for `$pid` from a fresh extraction (I2) WITHOUT ever calling the
+     * reducer/LLM -- even on what would otherwise be a cache miss. This is
+     * deliberately NOT the same as calling {@see self::read()} again: a
+     * digest miss there triggers a full reduce+verify attempt as a side
+     * effect, which is exactly the LLM call the T22 freshness check must
+     * avoid ("recompute the current digest -- cheap, LLM-free", docs/build-notes.md).
+     *
+     * Returns null on a capability crash (ARCHITECTURE.md §6.1: no digest is
+     * ever computable over a partial fact set) -- the caller treats that the
+     * same as a drift (skip the QA-driven rerun; a crash already renders its
+     * own banner).
+     */
+    public function currentDigest(int $pid): ?string
     {
+        $extraction = $this->extractAll($pid, self::mintCorrelationId(), null);
+        if ($extraction->crashed) {
+            return null;
+        }
+
+        $labConfig = $this->labContractConfigProvider->load();
+        $turnaroundConfig = $this->labTurnaroundConfigProvider->load();
+        $configVersions = ConfigVersionSnapshot::build($labConfig, $turnaroundConfig);
+
+        return Digest::compute(
+            $extraction->survivingFacts,
+            $extraction->capabilityVersions,
+            $configVersions,
+            self::CODE_SET_VERSION,
+            self::DOC_TYPE,
+            self::digestPromptVersion(),
+        );
+    }
+
+    private function run(
+        int $pid,
+        ?int $userId,
+        string $correlationId,
+        bool $forceRegenerate,
+        RegenReason $regenReason = RegenReason::Manual,
+    ): SynthesisReadResult {
         $extraction = $this->extractAll($pid, $correlationId, $userId);
 
         if ($extraction->crashed) {
@@ -206,7 +264,7 @@ final class SynthesisReadPath
             }
         }
 
-        $best = $this->generateAndInsert($pid, $userId, $correlationId, $digest, $extraction, $forceRegenerate);
+        $best = $this->generateAndInsert($pid, $userId, $correlationId, $digest, $extraction, $forceRegenerate, $regenReason);
 
         $this->recordSpan($correlationId, 'render', microtime(true), $best->verifyStatus === VerifyStatus::Passed ? 'ok' : 'degraded', $pid, $userId);
 
@@ -220,6 +278,7 @@ final class SynthesisReadPath
         string $digest,
         ExtractionOutcome $extraction,
         bool $forceRegenerate,
+        RegenReason $regenReason = RegenReason::Manual,
     ): DocRow {
         $identifiers = $this->identifierLookup->forPid($pid) ?? new PatientIdentifiers('', '', '', '');
 
@@ -288,7 +347,7 @@ final class SynthesisReadPath
             self::digestPromptVersion(),
             $correlationId,
             $result->verifyStatus,
-            $forceRegenerate ? RegenReason::Manual : $result->regenReason,
+            $forceRegenerate ? $regenReason : $result->regenReason,
             $result->usage->latencyMs,
             $result->usage->tokensIn,
             $result->usage->tokensOut,
@@ -413,6 +472,19 @@ final class SynthesisReadPath
         );
     }
 
+    /**
+     * TODO(U9 report): adopt {@see \OpenEMR\Modules\ClinicalCopilot\Observability\TracePayloadStore}
+     * here to populate `TraceSpan::$payloadRef` on the `llm_reduce`/`verify`
+     * spans (the redacted prompt bytes and the raw verifier findings) --
+     * TracePayloadStore's own docblock calls this "a one-line `$ref =
+     * $payloadStore->store(...)` at each call site", but doing it properly
+     * also means threading the actual prompt/verdict bytes down to this
+     * method's call sites (currently only duration/status/tokens are
+     * plumbed through), which is more than a one-line change here and was
+     * judged out of scope for U9 (worker + CI unit) to take on as a
+     * drive-by. Left for whichever unit next touches this read path's
+     * span-recording call sites.
+     */
     private function recordSpan(
         string $correlationId,
         string $kind,
