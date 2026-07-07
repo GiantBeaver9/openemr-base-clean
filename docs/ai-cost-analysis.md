@@ -104,7 +104,7 @@ Per-user-month = per-day × 18 clinic days (W14): **$32 unoptimized, $19 optimiz
 | 3 | 10,000 | Optimized | **≈ $190,000** | Assumes list pricing; at this run-rate (~$2.3M/yr) Google committed-use / provisioned-throughput discounts apply and are *not* modeled — treat as an upper bound |
 | 4 | 100,000 | Optimized, list price | **≈ $1,900,000** | Upper bound before negotiated pricing, a Flash router for navigation-only chat turns (§3), and per-tenant caps trimming the tail |
 
-All figures are Vertex API cost only — infrastructure (DB replicas, queue workers, FPM capacity, §3) is additional and comparatively small at every tier.
+All figures are Vertex API cost only — **hosting/infrastructure (the app runs on Railway, T24) is separate and comparatively small at demo / single-clinic scale** (a Railway service + managed MySQL is single-digit dollars/month for tier 1); DB replicas, queue workers, and FPM capacity (§3) add to it at higher tiers.
 
 Sub-linear effects deliberately *not* credited (each makes real cost lower than the table): W14 assumes every user runs full clinic days; W3's 95% miss rate ignores stable patients whose digests recur; Google committed-use / provisioned-throughput discounts above tier 2.
 
@@ -114,9 +114,11 @@ Sub-linear effects deliberately *not* credited (each makes real cost lower than 
 
 The load-test baselines the module ships with (U13: 10 and 50 concurrent users, p50/p95/p99 + error rate, DB connection and PHP-FPM worker saturation recorded — ARCHITECTURE.md §3.6) are the empirical anchor for tiers 1–2 and the extrapolation base for tier 3.
 
+The app is hosted on **Railway** (T24). Its per-service resource ceiling comfortably covers tiers 1–2; the tier-3/4 changes below assume a **migration to a higher-ceiling host** (cloud VM / k8s) once Railway's caps bind — a cost-triggered move, not a redesign, since the module is platform-agnostic (in-process PHP + MySQL). The Vertex LLM path is unchanged across all tiers and hosts.
+
 ### Tier 1 — 100 users (a handful of clinics): no structural change
 
-- The shipped architecture carries this tier as-is: one MySQL, the host `background_services` worker tick as the warmer, one API key, in-process module.
+- The shipped architecture carries this tier as-is on **Railway** (T24): one Railway service (OpenEMR + module) + a managed MySQL, the host `background_services` worker tick as the warmer, one Vertex service account, in-process module. Hosting is single-digit dollars/month at this scale — the reason for the platform choice.
 - 100 physicians ≈ 2,000 warm generations/day spread over pre-clinic hours — trivially inside one worker tick's capacity and standard API rate limits.
 - The 50-concurrent-user load-test baseline (U13) already covers this tier's peak concurrency outright; no extrapolation needed.
 - Only knob worth turning: enable 5-minute prompt caching on chat (a client flag, not architecture).
