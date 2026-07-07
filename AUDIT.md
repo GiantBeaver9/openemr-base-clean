@@ -117,7 +117,7 @@ The co-pilot's freshness model (T5) recomputes facts on **every** read and cache
 - **`background_services` framework** — DB-scheduled worker with `next_run`/`execute_interval`/lease-lock, reused as the pre-warm worker (T11) — no new daemon (consistent with T2's no-sidecar stance).
 - **`EventAuditLogger`** — inherited PHI audit trail for chart reads (Part 5, and ARCHITECTURE.md §1.3).
 - **Symfony EventDispatcher** — modules extend core by subscribing, never by patching; the basis for optional warm-hints (T5 extension point).
-- **`QueryUtils`, `OEGlobalsBag`, `CsrfUtils`, Twig, `HealthCheckInterface`** — host-provided infrastructure the module composes rather than reinvents.
+- **`QueryUtils`, `OEGlobalsBag`, `CsrfUtils`, Twig** — host-provided infrastructure the module composes rather than reinvents. (The host's `HealthCheckInterface`/`meta/health` prober is *not* extensible without a core diff, so the module's `/copilot/health` and `/copilot/ready` stand alone rather than registering with it — ARCHITECTURE.md §3.4.)
 
 **Architectural risk the audit surfaces.** The monolith's extension points are strong, but its cross-cutting enforcement is decentralized (auth per-page A3, CSRF per-handler X5, escaping per-sink X1, audit per-flow Part 5). A new capability inherits *plumbing* for free but inherits *no enforcement guarantees* — the module must re-assert each control at its own boundaries. This is why the architecture makes verification a deterministic gate (§2) and additivity an enforced invariant (I9/T12) rather than trusting the host's ambient behavior.
 
