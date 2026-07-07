@@ -42,12 +42,25 @@ use GuzzleHttp\Exception\GuzzleException;
  * LlmResponse -- whenever ADC cannot resolve credentials (the default state
  * of this dev/test environment: there is no GCP project configured here) or
  * the endpoint cannot be reached or errors out. This is deliberately the
- * ONLY class in the module that ever imports `Google\Auth` or
- * `GuzzleHttp` transport classes for the reduce path -- every other class
- * depends on {@see LlmClientInterface} instead.
+ * ONLY class in the module that ever imports `Google\Auth` (ADC/service-
+ * account auth is Vertex-only -- {@see GeminiApiLlmClient}'s API key needs
+ * none of it) -- every other class depends on {@see LlmClientInterface}
+ * instead.
+ *
+ * T23 (docs/build-notes.md "dev/test Gemini API-key fast-path"): this
+ * class remains the ONLY production path. {@see GeminiApiLlmClient} is a
+ * sibling implementation of the same interface for a dev/test fast-path
+ * (a Google AI Studio API key, synthetic data only, no BAA) -- the two
+ * share the identical `generateContent` request/response mapping via
+ * {@see GeminiGenerateContentContract} (both use `GuzzleHttp` transport),
+ * differing only in how each authenticates and which host it calls.
+ * {@see \OpenEMR\Modules\ClinicalCopilot\ReadPath\LlmClientFactory}
+ * is the only place that decides which one to construct.
  */
 final class VertexLlmClient implements LlmClientInterface
 {
+    use GeminiGenerateContentContract;
+
     private const API_VERSION = 'v1';
     private const OAUTH_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
     private const TIMEOUT_SECONDS = 20.0;
@@ -79,19 +92,7 @@ final class VertexLlmClient implements LlmClientInterface
     {
         $accessToken = $this->fetchAccessToken();
         $url = $this->endpointUrl($req->model);
-
-        $body = [
-            'systemInstruction' => ['parts' => [['text' => $req->systemInstructions]]],
-            'contents' => [
-                ['role' => 'user', 'parts' => [['text' => $req->userContent]]],
-            ],
-            'generationConfig' => [
-                'temperature' => $req->temperature,
-                'maxOutputTokens' => $req->maxOutputTokens,
-                'responseMimeType' => 'application/json',
-                'responseSchema' => $req->responseSchema,
-            ],
-        ];
+        $body = self::buildGenerateContentBody($req);
 
         $startedAt = microtime(true);
 
@@ -175,40 +176,5 @@ final class VertexLlmClient implements LlmClientInterface
             $this->location,
             $model,
         );
-    }
-
-    /**
-     * @param array<string, mixed> $decoded
-     */
-    private static function extractText(array $decoded): string
-    {
-        $candidates = $decoded['candidates'] ?? null;
-        if (!is_array($candidates) || $candidates === []) {
-            throw LlmUnavailableException::providerError(new \RuntimeException('Vertex response contained no candidates'));
-        }
-
-        $firstCandidate = $candidates[0];
-        $parts = is_array($firstCandidate) ? ($firstCandidate['content']['parts'] ?? null) : null;
-        if (!is_array($parts) || $parts === []) {
-            throw LlmUnavailableException::providerError(new \RuntimeException('Vertex candidate contained no content parts'));
-        }
-
-        $text = $parts[0]['text'] ?? null;
-        if (!is_string($text) || $text === '') {
-            throw LlmUnavailableException::providerError(new \RuntimeException('Vertex candidate part contained no text'));
-        }
-
-        return $text;
-    }
-
-    /**
-     * @param array<string, mixed> $decoded
-     */
-    private static function extractTokenCount(array $decoded, string $field): int
-    {
-        $usage = $decoded['usageMetadata'] ?? null;
-        $count = is_array($usage) ? ($usage[$field] ?? null) : null;
-
-        return is_int($count) ? $count : 0;
     }
 }

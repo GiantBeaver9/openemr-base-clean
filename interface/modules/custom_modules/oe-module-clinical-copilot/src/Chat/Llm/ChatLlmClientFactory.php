@@ -16,16 +16,30 @@ namespace OpenEMR\Modules\ClinicalCopilot\Chat\Llm;
 
 /**
  * Mirrors {@see \OpenEMR\Modules\ClinicalCopilot\ReadPath\LlmClientFactory}
- * exactly, reusing the SAME two environment variables (one GCP project, one
+ * exactly, reusing the SAME environment variables (one GCP project, one
  * chat surface -- there is no reason chat and synthesis would ever target
  * different Vertex deployments) rather than minting a parallel config
  * surface. Empty/unset `CLINICAL_COPILOT_GCP_PROJECT_ID` is the honest
  * dev/test default and MUST degrade through {@see UnavailableChatLlmClient}.
+ *
+ * T23 (build-notes.md "dev/test Gemini API-key fast-path"): same three-way
+ * precedence as the reduce path's factory, production first --
+ *
+ *   1. `CLINICAL_COPILOT_GCP_PROJECT_ID` (+ `..._GCP_LOCATION`) set =>
+ *      {@see VertexChatLlmClient} (production, ADC, HIPAA-eligible).
+ *   2. else `CLINICAL_COPILOT_GEMINI_API_KEY` set =>
+ *      {@see GeminiApiChatLlmClient} (dev/test only, synthetic data, no BAA
+ *      -- see `docs/configuration.md`).
+ *   3. else => {@see UnavailableChatLlmClient} (the default in this
+ *      environment; chat degrades to a facts browser, I6/I11).
+ *
+ * Vertex always wins when both are configured.
  */
 final class ChatLlmClientFactory
 {
     private const ENV_PROJECT_ID = 'CLINICAL_COPILOT_GCP_PROJECT_ID';
     private const ENV_LOCATION = 'CLINICAL_COPILOT_GCP_LOCATION';
+    private const ENV_GEMINI_API_KEY = 'CLINICAL_COPILOT_GEMINI_API_KEY';
     private const DEFAULT_LOCATION = 'us-central1';
 
     private function __construct()
@@ -36,15 +50,20 @@ final class ChatLlmClientFactory
     public static function create(): ChatLlmClientInterface
     {
         $projectId = trim((string)getenv(self::ENV_PROJECT_ID));
-        if ($projectId === '') {
-            return new UnavailableChatLlmClient();
+        if ($projectId !== '') {
+            $location = trim((string)getenv(self::ENV_LOCATION));
+            if ($location === '') {
+                $location = self::DEFAULT_LOCATION;
+            }
+
+            return new VertexChatLlmClient($projectId, $location);
         }
 
-        $location = trim((string)getenv(self::ENV_LOCATION));
-        if ($location === '') {
-            $location = self::DEFAULT_LOCATION;
+        $apiKey = trim((string)getenv(self::ENV_GEMINI_API_KEY));
+        if ($apiKey !== '') {
+            return new GeminiApiChatLlmClient($apiKey);
         }
 
-        return new VertexChatLlmClient($projectId, $location);
+        return new UnavailableChatLlmClient();
     }
 }

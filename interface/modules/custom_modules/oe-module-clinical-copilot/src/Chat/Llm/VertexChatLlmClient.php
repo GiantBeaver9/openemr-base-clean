@@ -20,7 +20,6 @@ use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\LlmUnavailableException;
-use OpenEMR\Modules\ClinicalCopilot\Chat\Tool\ToolCallRequest;
 
 /**
  * T18 (ARCHITECTURE.md "LLM platform"): the SAME Vertex REST contract
@@ -31,17 +30,30 @@ use OpenEMR\Modules\ClinicalCopilot\Chat\Tool\ToolCallRequest;
  * the response for `functionCall` parts (tool-call requests, I13 -- the
  * model requests, this class never executes one) versus a plain `text` part
  * (the final claims JSON, when the model has no more functionCall parts to
- * emit). Deliberately the only other class in the module that imports
- * `Google\Auth`/`GuzzleHttp` transport classes, mirroring `VertexLlmClient`'s
- * own "one file owns the whole REST contract" discipline (T18).
+ * emit). Deliberately the only class in the module (besides
+ * {@see \OpenEMR\Modules\ClinicalCopilot\Reduce\VertexLlmClient} itself)
+ * that imports `Google\Auth` for ADC/service-account auth, mirroring
+ * `VertexLlmClient`'s own "one file owns the whole REST contract"
+ * discipline (T18).
  *
  * Degradation (I6): throws {@see LlmUnavailableException} -- never a
  * partial/empty {@see ChatLlmResponse} -- on missing ADC or an unreachable
  * endpoint, exactly {@see \OpenEMR\Modules\ClinicalCopilot\Reduce\VertexLlmClient}'s
  * contract.
+ *
+ * T23 (docs/build-notes.md "dev/test Gemini API-key fast-path"): this class
+ * remains the ONLY production path. {@see GeminiApiChatLlmClient} is a
+ * sibling implementation of the same interface for a dev/test fast-path (a
+ * Google AI Studio API key, synthetic data only, no BAA) -- the two share
+ * the identical function-calling request/response mapping via
+ * {@see GeminiChatContentContract}, differing only in authentication and
+ * endpoint host. {@see ChatLlmClientFactory} is the only place that decides
+ * which one to construct.
  */
 final class VertexChatLlmClient implements ChatLlmClientInterface
 {
+    use GeminiChatContentContract;
+
     private const API_VERSION = 'v1';
     private const OAUTH_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
     private const TIMEOUT_SECONDS = 20.0;
@@ -68,35 +80,7 @@ final class VertexChatLlmClient implements ChatLlmClientInterface
     {
         $accessToken = $this->fetchAccessToken();
         $url = $this->endpointUrl($req->prompt->model);
-
-        $generationConfig = [
-            'temperature' => $req->prompt->temperature,
-            'maxOutputTokens' => $req->prompt->maxOutputTokens,
-        ];
-
-        $body = [
-            'systemInstruction' => ['parts' => [['text' => $req->prompt->systemInstructions]]],
-            'contents' => [
-                ['role' => 'user', 'parts' => [['text' => $req->prompt->userContent]]],
-            ],
-            'generationConfig' => $generationConfig,
-        ];
-
-        if ($req->tools !== []) {
-            $body['tools'] = [[
-                'functionDeclarations' => array_map(
-                    static fn ($tool): array => $tool->toDeclaration(),
-                    $req->tools,
-                ),
-            ]];
-        } else {
-            // No tools offered this round (the post-retry final-answer
-            // round, ChatLlmRequest's own docblock) -- constrain the reply
-            // to the claim-list schema exactly like the reduce path does.
-            $generationConfig['responseMimeType'] = 'application/json';
-            $generationConfig['responseSchema'] = $req->prompt->responseSchema;
-            $body['generationConfig'] = $generationConfig;
-        }
+        $body = self::buildChatContentBody($req);
 
         $startedAt = microtime(true);
 
@@ -179,76 +163,5 @@ final class VertexChatLlmClient implements ChatLlmClientInterface
             $this->location,
             $model,
         );
-    }
-
-    /**
-     * @param array<string, mixed> $decoded
-     * @return list<array<string, mixed>>
-     */
-    private static function extractParts(array $decoded): array
-    {
-        $candidates = $decoded['candidates'] ?? null;
-        if (!is_array($candidates) || $candidates === []) {
-            throw LlmUnavailableException::providerError(new \RuntimeException('Vertex response contained no candidates'));
-        }
-
-        $firstCandidate = $candidates[0];
-        $parts = is_array($firstCandidate) ? ($firstCandidate['content']['parts'] ?? null) : null;
-        if (!is_array($parts) || $parts === []) {
-            throw LlmUnavailableException::providerError(new \RuntimeException('Vertex candidate contained no content parts'));
-        }
-
-        /** @var list<array<string, mixed>> $parts */
-        return $parts;
-    }
-
-    /**
-     * @param list<array<string, mixed>> $parts
-     * @return list<ToolCallRequest>
-     */
-    private static function extractToolCalls(array $parts): array
-    {
-        $calls = [];
-        foreach ($parts as $part) {
-            $functionCall = $part['functionCall'] ?? null;
-            if (!is_array($functionCall)) {
-                continue;
-            }
-            $name = is_string($functionCall['name'] ?? null) ? $functionCall['name'] : '';
-            $args = is_array($functionCall['args'] ?? null) ? $functionCall['args'] : [];
-            if ($name === '') {
-                continue;
-            }
-            /** @var array<string, mixed> $args */
-            $calls[] = new ToolCallRequest($name, $args);
-        }
-
-        return $calls;
-    }
-
-    /**
-     * @param list<array<string, mixed>> $parts
-     */
-    private static function extractText(array $parts): string
-    {
-        foreach ($parts as $part) {
-            $text = $part['text'] ?? null;
-            if (is_string($text) && $text !== '') {
-                return $text;
-            }
-        }
-
-        throw LlmUnavailableException::providerError(new \RuntimeException('Vertex candidate contained neither a functionCall nor a text part'));
-    }
-
-    /**
-     * @param array<string, mixed> $decoded
-     */
-    private static function extractTokenCount(array $decoded, string $field): int
-    {
-        $usage = $decoded['usageMetadata'] ?? null;
-        $count = is_array($usage) ? ($usage[$field] ?? null) : null;
-
-        return is_int($count) ? $count : 0;
     }
 }

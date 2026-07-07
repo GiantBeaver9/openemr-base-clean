@@ -32,13 +32,21 @@ use OpenEMR\Modules\ClinicalCopilot\Reduce\PromptRequest;
  * same {@see LlmUnavailableException} contract every other implementation
  * uses -- {@see \OpenEMR\Modules\ClinicalCopilot\Reduce\Reducer} cannot tell
  * the difference between "no ADC" and "no Vertex configured at all."
+ *
+ * T23 (build-notes.md "dev/test Gemini API-key fast-path"): this is also
+ * the outcome when the dev/test `CLINICAL_COPILOT_GEMINI_API_KEY` fast-path
+ * is unset too -- see {@see LlmClientFactory}'s three-way precedence. This
+ * class's message is the last thing standing when NOTHING is configured
+ * (the default in this environment).
  */
 final class UnavailableLlmClient implements LlmClientInterface
 {
     public function generateStructured(PromptRequest $req): LlmResponse
     {
         throw LlmUnavailableException::noCredentials(new \RuntimeException(
-            'Clinical Co-Pilot: no Vertex AI project configured in this environment (CLINICAL_COPILOT_GCP_PROJECT_ID unset)'
+            'Clinical Co-Pilot: no LLM provider configured in this environment '
+            . '(neither CLINICAL_COPILOT_GCP_PROJECT_ID for Vertex AI production '
+            . 'nor CLINICAL_COPILOT_GEMINI_API_KEY for the dev/test fast-path is set)'
         ));
     }
 }

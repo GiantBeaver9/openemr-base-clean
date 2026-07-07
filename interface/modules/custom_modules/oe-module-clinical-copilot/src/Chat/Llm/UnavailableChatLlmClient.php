@@ -28,8 +28,13 @@ final class UnavailableChatLlmClient implements ChatLlmClientInterface
 {
     public function converse(ChatLlmRequest $req): ChatLlmResponse
     {
+        // T23: also the outcome when the dev/test
+        // CLINICAL_COPILOT_GEMINI_API_KEY fast-path is unset too -- see
+        // ChatLlmClientFactory's three-way precedence.
         throw LlmUnavailableException::noCredentials(new \RuntimeException(
-            'Clinical Co-Pilot: no Vertex AI project configured in this environment (CLINICAL_COPILOT_GCP_PROJECT_ID unset)'
+            'Clinical Co-Pilot: no LLM provider configured in this environment '
+            . '(neither CLINICAL_COPILOT_GCP_PROJECT_ID for Vertex AI production '
+            . 'nor CLINICAL_COPILOT_GEMINI_API_KEY for the dev/test fast-path is set)'
         ));
     }
 }
