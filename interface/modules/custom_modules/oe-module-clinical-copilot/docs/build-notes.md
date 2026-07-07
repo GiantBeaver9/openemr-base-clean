@@ -112,13 +112,28 @@ telemetry to prove the prompts are working. Build these into U12. **Guardrail: t
 accuracy agent is ADVISORY, never a blocking gate** — the deterministic verifier
 V1–V6 stays the only gate (T15). The agent scores and watches; it never approves.
 
-- **Accuracy agent** = the §2.5 second-pass reviewer: a separate **Gemini Flash**
-  instance that re-reads each rendered answer (synthesis + chat turn) against the
-  session fact set from scratch and returns a structured verdict
-  `{concurs: bool, flags: [{claim_ref, class: emphasis|paraphrase|omission|other, note}]}`.
-  Stored on the doc/turn row and in a `verify`-adjacent trace span; feeds the
-  dashboard and eval suite. When ADC/LLM is unavailable it degrades silently
-  (verdict `unavailable`) — it must never block rendering.
+- **Accuracy agent = post-mortem async QA (user decision of record).** A separate
+  **Gemini Flash** instance runs the §2.5 second-pass review as a **post-mortem QA
+  pass, decoupled from the serving path** — NOT inline, NOT blocking, zero latency
+  on the request. It sweeps recently-served, not-yet-QA'd `mod_copilot_doc` and
+  `mod_copilot_chat_turn` rows **on the worker tick** (rides U9's `background_services`
+  function; no new daemon), re-reads each rendered answer against that row's stored
+  session fact set from scratch, and **logs its verdict to a dedicated append-only
+  table `mod_copilot_qa`** (schema below). Idempotent: the sweep skips any target
+  already present in `mod_copilot_qa` (unique on target_type+target_id). When ADC/LLM
+  is unavailable it writes `status='unavailable'` and moves on — QA lag is acceptable
+  and honest (the badge shows "QA pending" until the sweep lands). The inline
+  "citations checked" badge (V1–V6) is unchanged and still the deterministic gate;
+  the QA verdict is displayed beside it once available, purely advisory.
+- **New module table `mod_copilot_qa`** (append-only; U12/U9 adds it to `table.sql`,
+  install/uninstall, and the ModuleManagerListener drop list):
+  `id (pk) · target_type enum(doc|chat_turn) · target_id · correlation_id (indexed,
+  ties to the original request trace) · pid · user_id · model · concurs tinyint ·
+  salience_ok tinyint · flags JSON [{claim_ref, class: emphasis|paraphrase|omission|salience|other, note}]
+  · density_ratio decimal · fact_utilization_rate decimal · reviewer_note text ·
+  tokens_in · tokens_out · cost_usd · status enum(ok|unavailable|error) · created_at ·
+  UNIQUE(target_type, target_id)`. This is module-owned so it satisfies additivity;
+  it is append-only like the other ledgers (no UPDATE/DELETE in code).
 - **Dashboard metrics to add (all from the trace table + the Flash verdict):**
   `reviewer_concurrence_rate`; `salience_score` (reviewer flags a "Salience Failure"
   when a high-priority out-of-range/critical fact is not near the top);
