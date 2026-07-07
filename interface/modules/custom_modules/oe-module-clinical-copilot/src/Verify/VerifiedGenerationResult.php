@@ -36,6 +36,13 @@ use OpenEMR\Modules\ClinicalCopilot\Reduce\RedactionMap;
  * V3's sev-1 escape hatch (ARCHITECTURE.md §2.3): when true, `sev1Signal` is
  * always set and the caller (U11) MUST NOT continue the chat session --
  * freeze it and route the signal to U12's alerting.
+ *
+ * `usage` ({@see ReduceUsage}) carries the LAST attempt's token/latency/model
+ * metrics -- present whenever a provider call actually happened (every
+ * outcome except {@see VerifiedGenerationResult::degradedLlmUnavailable()},
+ * where the LLM was never reached). U8 persists these onto
+ * `mod_copilot_doc.llm_latency_ms`/`tokens_in`/`tokens_out`; U11 onto the
+ * analogous `mod_copilot_chat_turn` columns.
  */
 final readonly class VerifiedGenerationResult
 {
@@ -57,6 +64,7 @@ final readonly class VerifiedGenerationResult
         public ?string $degradedReason,
         public ?string $degradedMessage,
         public ?RedactionMap $redactionMap,
+        public ReduceUsage $usage,
     ) {
     }
 
@@ -64,7 +72,7 @@ final readonly class VerifiedGenerationResult
      * @param list<Claim> $claims
      * @param list<Verdict> $verdicts
      */
-    public static function passed(array $claims, array $verdicts, int $attempts, RedactionMap $redactionMap): self
+    public static function passed(array $claims, array $verdicts, int $attempts, RedactionMap $redactionMap, ReduceUsage $usage): self
     {
         return new self(
             VerifyStatus::Passed,
@@ -77,6 +85,7 @@ final readonly class VerifiedGenerationResult
             null,
             null,
             $redactionMap,
+            $usage,
         );
     }
 
@@ -93,13 +102,14 @@ final readonly class VerifiedGenerationResult
             self::REASON_LLM_UNAVAILABLE,
             'narrative unavailable',
             null,
+            ReduceUsage::none(),
         );
     }
 
     /**
      * @param list<Verdict> $verdicts
      */
-    public static function degradedVerificationFailed(array $verdicts, int $attempts, string $message): self
+    public static function degradedVerificationFailed(array $verdicts, int $attempts, string $message, ReduceUsage $usage): self
     {
         return new self(
             VerifyStatus::Degraded,
@@ -112,13 +122,14 @@ final readonly class VerifiedGenerationResult
             self::REASON_VERIFICATION_FAILED,
             $message,
             null,
+            $usage,
         );
     }
 
     /**
      * @param list<Verdict> $verdicts
      */
-    public static function frozen(array $verdicts, int $attempts, Sev1Signal $signal): self
+    public static function frozen(array $verdicts, int $attempts, Sev1Signal $signal, ReduceUsage $usage): self
     {
         return new self(
             VerifyStatus::Degraded,
@@ -131,6 +142,7 @@ final readonly class VerifiedGenerationResult
             'patient_identity_sev1',
             "couldn't produce a verifiable answer",
             null,
+            $usage,
         );
     }
 }

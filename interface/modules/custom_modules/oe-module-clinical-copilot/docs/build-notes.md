@@ -70,7 +70,7 @@ chat agent pinned to a patient. **The LLM narrates and navigates — it never ex
 
 **Logging — `OpenEMR\Common\Logging\SystemLogger`** (PSR-3): `new SystemLogger()` then `->error($msg, array $context)`, `->info(...)`, `->debug(...)`. **Never** interpolate variables into the message — use the context array. Always include `correlation_id` in context.
 
-**Audit — `OpenEMR\Common\Logging\EventAuditLogger`**: `EventAuditLogger::instance()->newEvent($event, $user, $groupname, $success, $comments = '', $patient_id = null, $log_from = 'open-emr', $menu_item = 'dashboard')`. For chart-data access use event `patient-record`, action carried in comments with correlation id.
+**Audit — `OpenEMR\Common\Logging\EventAuditLogger`**: `EventAuditLogger::getInstance()->newEvent($event, $user, $groupname, $success, $comments = '', $patient_id = null, $log_from = 'open-emr', $menu_item = 'dashboard')` (the class uses `SingletonTrait`, not its own `instance()` method -- verified against src/Common/Logging/EventAuditLogger.php and src/Core/Traits/SingletonTrait.php). `$user`/`$groupname` are the session's `authUser`/`authProvider` strings (see e.g. `interface/modules/custom_modules/oe-module-dorn/src/ReceiveHl7Results.php`), not `authUserID`. For chart-data access use event `patient-record`, action carried in comments with correlation id.
 
 **ACL — `OpenEMR\Common\Acl\AclMain`**: `AclMain::aclCheckCore(string $section, string $value): bool`. Gate every copilot surface with `AclMain::aclCheckCore('patients','med')`. Also register the module's own ACL section (`clinical_copilot`) so a site can grant/deny independently.
 

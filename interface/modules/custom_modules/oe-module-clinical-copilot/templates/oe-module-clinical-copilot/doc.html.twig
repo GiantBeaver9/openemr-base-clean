@@ -1,0 +1,242 @@
+{#
+# Clinical Co-Pilot -- pre-visit synthesis doc page (U8).
+#
+# Facts-first rendering (ARCHITECTURE.md §2.5): the full fact table is
+# ALWAYS rendered beside the narrative -- prose is never the only view.
+# Autoescape is globally OFF for this project (build-notes.md) -- every
+# piece of dynamic output below is explicitly escaped with |text, |attr,
+# |xlt, or |xla.
+#
+# @package   OpenEMR
+# @link      https://www.open-emr.org
+# @author    Clinical Co-Pilot Team
+# @copyright Copyright (c) 2026 OpenEMR Foundation
+# @license   https://github.com/openemr/openemr/blob/master/LICENSE GNU General Public License 3
+#}
+{% macro citation_refs(citations) %}
+    {% for c in citations %}
+        {% if c.url %}
+            <a href="{{ c.url|attr }}" target="_blank" rel="noopener" class="ccp-citation" title="{{ c.label|attr }}">[{{ c.label|text }}]</a>
+        {% else %}
+            <span class="ccp-citation ccp-citation-tooltip" title="{{ c.label|attr }}">[{{ c.label|text }}]</span>
+        {% endif %}
+    {% endfor %}
+{% endmacro %}
+
+{% macro fact_row(fact) %}
+    <tr class="{{ fact.flags is defined and 'conflict' in fact.flags ? 'table-warning' : '' }}">
+        <td>{{ fact.kind|text }}</td>
+        <td>
+            {%- if fact.parsed is not null -%}
+                {{ fact.comparator != 'none' ? (fact.comparator == 'lt' ? '<' : (fact.comparator == 'lte' ? '<=' : (fact.comparator == 'gt' ? '>' : '>='))) : '' }}{{ fact.parsed }}{{ fact.unit ? ' ' ~ fact.unit : '' }}
+            {%- else -%}
+                {{ fact.raw|default('')|text }}
+            {%- endif -%}
+        </td>
+        <td>{{ fact.status|text }}</td>
+        <td>{{ fact.clinical_date ? fact.clinical_date|text : '—' }}</td>
+        <td>
+            {% for flag in fact.flags %}<span class="badge badge-secondary">{{ flag|text }}</span> {% endfor %}
+        </td>
+        <td>{{ _self.citation_refs(fact.citations) }}</td>
+    </tr>
+{% endmacro %}
+
+<html>
+<head>
+    <title>{{ "Clinical Co-Pilot"|xlt }}</title>
+    {{ setupHeader() }}
+    <style>
+        .ccp-citation { text-decoration: none; font-size: 0.85em; }
+        .ccp-citation-tooltip { color: #6c757d; cursor: help; border-bottom: 1px dotted #6c757d; }
+        .ccp-badge-checked { cursor: help; }
+        .ccp-narrative-claim { margin-bottom: 0.75rem; }
+        .ccp-history-table th, .ccp-history-table td { font-size: 0.85em; }
+    </style>
+</head>
+<body class="body_top">
+<div class="container-fluid mt-3">
+    <div class="row mb-2">
+        <div class="col-12 d-flex justify-content-between align-items-center">
+            <h4>
+                <i class="fa fa-user-md mr-2"></i>{{ "Clinical Co-Pilot -- Pre-Visit Synthesis"|xlt }}
+                {% if patient %}
+                    <small class="text-muted">{{ patient.name|text }} ({{ patient.mrn|text }})</small>
+                {% endif %}
+            </h4>
+        </div>
+    </div>
+
+    {% if not found %}
+        <div class="alert alert-danger">{{ "Patient not found, or you do not have access to this patient's chart."|xlt }}</div>
+    {% else %}
+
+        {% if doc.capability_crash %}
+            <div class="alert alert-danger">
+                <strong>{{ "Synthesis paused"|xlt }}:</strong> {{ doc.crash_banner|text }}.
+                {{ "The facts below are from the capabilities that succeeded; no synthesis was computed over a partial fact set."|xlt }}
+            </div>
+        {% endif %}
+
+        {% if not doc.capability_crash %}
+            <div class="mb-2">
+                <span class="badge badge-info ccp-badge-checked"
+                      title="{{ doc.verdict_hover|attr }}">
+                    {{ "citations checked"|xlt }}
+                </span>
+                {% if doc.verify_status == 'degraded' %}
+                    <span class="badge badge-warning">{{ "narrative unavailable"|xlt }}</span>
+                {% endif %}
+                {% if doc.regen_reason == 'verify_retry' %}
+                    <span class="badge badge-secondary">{{ "retried before serving"|xlt }}</span>
+                {% elseif doc.regen_reason == 'manual' %}
+                    <span class="badge badge-secondary">{{ "manually regenerated"|xlt }}</span>
+                {% elseif doc.regen_reason == 'qa_low' %}
+                    <span class="badge badge-secondary">{{ "auto-regenerated after low QA score"|xlt }}</span>
+                {% endif %}
+                {% if doc.served_from_cache %}
+                    <span class="badge badge-light">{{ "served from cache -- no model call this read"|xlt }}</span>
+                {% endif %}
+                {% if doc.qa_status and doc.qa_status != 'pending' %}
+                    <span class="badge badge-light" title="{{ "advisory second-pass QA review -- never a serving gate"|xla }}">
+                        {{ "QA"|xlt }}: {{ doc.qa_status|text }}{{ doc.qa_score is not null ? ' (' ~ doc.qa_score ~ ')' : '' }}
+                    </span>
+                {% elseif doc.qa_status == 'pending' %}
+                    <span class="badge badge-light">{{ "QA pending"|xlt }}</span>
+                {% endif %}
+                <span class="text-muted small ml-2">
+                    {{ "computed"|xlt }} {{ doc.computed_at ? doc.computed_at|text : '' }}
+                    &middot; {{ "correlation"|xlt }} {{ doc.correlation_id|text }}
+                </span>
+            </div>
+
+            {% if doc.verify_status == 'degraded' and doc.degraded_message %}
+                <div class="alert alert-warning">{{ doc.degraded_message|text }}</div>
+            {% endif %}
+
+            <div class="card mb-3">
+                <div class="card-header"><strong>{{ "Priority Narrative"|xlt }}</strong></div>
+                <div class="card-body">
+                    {% if view_model.narrative is not empty %}
+                        {% for claim in view_model.narrative %}
+                            <div class="ccp-narrative-claim">
+                                {% if 'conflict' in claim.flags %}<span class="badge badge-warning">{{ "conflict"|xlt }}</span>{% endif %}
+                                {{ claim.text|text }}
+                                {{ _self.citation_refs(claim.citations) }}
+                            </div>
+                        {% endfor %}
+                    {% else %}
+                        <p class="text-muted">{{ "No narrative available for this synthesis -- see the facts below."|xlt }}</p>
+                    {% endif %}
+                </div>
+            </div>
+        {% endif %}
+
+        {% if view_model.in_flight is not empty %}
+            <div class="card mb-3">
+                <div class="card-header"><strong>{{ "In Flight"|xlt }}</strong> <small class="text-muted">{{ "pending orders and preliminary results -- never plotted as a trend point"|xlt }}</small></div>
+                <div class="card-body table-responsive">
+                    <table class="table table-sm">
+                        <thead><tr>
+                            <th>{{ "Type"|xlt }}</th><th>{{ "Value"|xlt }}</th><th>{{ "Status"|xlt }}</th>
+                            <th>{{ "Date"|xlt }}</th><th>{{ "Flags"|xlt }}</th><th>{{ "Source"|xlt }}</th>
+                        </tr></thead>
+                        <tbody>
+                        {% for fact in view_model.in_flight %}{{ _self.fact_row(fact) }}{% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        {% endif %}
+
+        <div class="card mb-3">
+            <div class="card-header"><strong>{{ "Facts"|xlt }}</strong> <small class="text-muted">{{ "grouped by capability -- always shown alongside the narrative"|xlt }}</small></div>
+            <div class="card-body">
+                {% for capability, facts in view_model.facts_by_capability %}
+                    <h6>{{ capability|text }}</h6>
+                    <div class="table-responsive mb-3">
+                        <table class="table table-sm">
+                            <thead><tr>
+                                <th>{{ "Type"|xlt }}</th><th>{{ "Value"|xlt }}</th><th>{{ "Status"|xlt }}</th>
+                                <th>{{ "Date"|xlt }}</th><th>{{ "Flags"|xlt }}</th><th>{{ "Source"|xlt }}</th>
+                            </tr></thead>
+                            <tbody>
+                            {% for fact in facts %}{{ _self.fact_row(fact) }}{% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <p class="text-muted">{{ "No facts extracted."|xlt }}</p>
+                {% endfor %}
+            </div>
+        </div>
+
+        {% if view_model.exclusions is not empty %}
+            <div class="card mb-3">
+                <div class="card-header"><strong>{{ "Excluded"|xlt }}</strong> <small class="text-muted">{{ "every filtered row, visibly, with its reason"|xlt }}</small></div>
+                <div class="card-body table-responsive">
+                    <table class="table table-sm">
+                        <thead><tr>
+                            <th>{{ "Capability"|xlt }}</th><th>{{ "Value"|xlt }}</th><th>{{ "Reason (flags)"|xlt }}</th>
+                            <th>{{ "Date"|xlt }}</th><th>{{ "Source"|xlt }}</th>
+                        </tr></thead>
+                        <tbody>
+                        {% for fact in view_model.exclusions %}
+                            <tr>
+                                <td>{{ fact.capability|text }}</td>
+                                <td>{{ fact.raw|default('')|text }}</td>
+                                <td>{% for flag in fact.flags %}<span class="badge badge-secondary">{{ flag|text }}</span> {% endfor %}</td>
+                                <td>{{ fact.clinical_date ? fact.clinical_date|text : '—' }}</td>
+                                <td>{{ _self.citation_refs(fact.citations) }}</td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        {% endif %}
+
+        <form method="post" action="{{ doc_url|attr }}" class="mb-4">
+            {{ csrfToken() }}
+            <input type="hidden" name="action" value="regenerate">
+            <button type="submit" class="btn btn-secondary">
+                <i class="fa fa-refresh mr-1"></i>{{ "Regenerate"|xlt }}
+            </button>
+            <small class="text-muted ml-2">{{ "Forces a fresh attempt over the current facts; always available (free by construction)."|xlt }}</small>
+        </form>
+
+        <div class="card mb-4">
+            <div class="card-header">
+                <a data-toggle="collapse" href="#ccpHistory" role="button" aria-expanded="false">
+                    <strong>{{ "History"|xlt }}</strong> <small class="text-muted">{{ "every attempt ever computed for this patient, most recent first"|xlt }}</small>
+                </a>
+            </div>
+            <div class="collapse" id="ccpHistory">
+                <div class="card-body table-responsive">
+                    <table class="table table-sm ccp-history-table">
+                        <thead><tr>
+                            <th>{{ "Computed"|xlt }}</th><th>{{ "Digest"|xlt }}</th><th>{{ "Verify"|xlt }}</th>
+                            <th>{{ "Regen reason"|xlt }}</th><th>{{ "QA"|xlt }}</th><th>{{ "Correlation"|xlt }}</th>
+                        </tr></thead>
+                        <tbody>
+                        {% for row in history_rows %}
+                            <tr>
+                                <td>{{ row.computed_at|text }}</td>
+                                <td><code>{{ row.fact_digest|text }}&hellip;</code></td>
+                                <td>{{ row.verify_status|text }}</td>
+                                <td>{{ row.regen_reason|text }}</td>
+                                <td>{{ row.qa_status|text }}{{ row.qa_score is not null ? ' (' ~ row.qa_score ~ ')' : '' }}</td>
+                                <td><small>{{ row.correlation_id|text }}</small></td>
+                            </tr>
+                        {% else %}
+                            <tr><td colspan="6" class="text-muted">{{ "No prior attempts."|xlt }}</td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    {% endif %}
+</div>
+</body>
+</html>

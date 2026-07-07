@@ -33,36 +33,37 @@ final readonly class AttemptOutcome
         public ?array $claims,
         public ?Sev1Signal $sev1Signal,
         public ?RedactionMap $redactionMap,
+        public ReduceUsage $usage,
     ) {
     }
 
     public static function llmUnavailable(): self
     {
-        return new self(AttemptOutcomeKind::LlmUnavailable, [], null, null, null);
+        return new self(AttemptOutcomeKind::LlmUnavailable, [], null, null, null, ReduceUsage::none());
     }
 
     /**
      * @param list<Verdict> $verdicts
      */
-    public static function sev1(array $verdicts, Sev1Signal $signal): self
+    public static function sev1(array $verdicts, Sev1Signal $signal, ReduceUsage $usage): self
     {
-        return new self(AttemptOutcomeKind::Sev1, $verdicts, null, $signal, null);
+        return new self(AttemptOutcomeKind::Sev1, $verdicts, null, $signal, null, $usage);
     }
 
     /**
      * @param list<Verdict> $verdicts
      * @param list<Claim> $claims
      */
-    public static function passed(array $verdicts, array $claims, RedactionMap $redactionMap): self
+    public static function passed(array $verdicts, array $claims, RedactionMap $redactionMap, ReduceUsage $usage): self
     {
-        return new self(AttemptOutcomeKind::Passed, $verdicts, $claims, null, $redactionMap);
+        return new self(AttemptOutcomeKind::Passed, $verdicts, $claims, null, $redactionMap, $usage);
     }
 
     /**
      * @param list<Verdict> $verdicts
      */
-    public static function failed(array $verdicts): self
+    public static function failed(array $verdicts, ReduceUsage $usage): self
     {
-        return new self(AttemptOutcomeKind::Failed, $verdicts, null, null, null);
+        return new self(AttemptOutcomeKind::Failed, $verdicts, null, null, null, $usage);
     }
 }

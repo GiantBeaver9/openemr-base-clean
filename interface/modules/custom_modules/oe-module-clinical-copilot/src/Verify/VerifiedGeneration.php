@@ -85,7 +85,7 @@ final class VerifiedGeneration
             ? 'narrative unavailable'
             : "couldn't produce a verifiable answer";
 
-        return VerifiedGenerationResult::degradedVerificationFailed($second->verdicts, 2, $message);
+        return VerifiedGenerationResult::degradedVerificationFailed($second->verdicts, 2, $message, $second->usage);
     }
 
     private function attempt(ReduceRequest $reduceRequest, VerificationContext $context): AttemptOutcome
@@ -95,6 +95,13 @@ final class VerifiedGeneration
         if (!$reduceResult->isAvailable()) {
             return AttemptOutcome::llmUnavailable();
         }
+
+        $usage = new ReduceUsage(
+            $reduceResult->tokensIn,
+            $reduceResult->tokensOut,
+            $reduceResult->latencyMs,
+            $reduceResult->modelVersion,
+        );
 
         $verification = $this->verifier->verify((string)$reduceResult->rawClaimsJson, $context);
 
@@ -106,7 +113,7 @@ final class VerifiedGeneration
                 new \DateTimeImmutable(),
             );
 
-            return AttemptOutcome::sev1($verification->verdicts, $signal);
+            return AttemptOutcome::sev1($verification->verdicts, $signal, $usage);
         }
 
         if ($verification->allPassed()) {
@@ -114,10 +121,11 @@ final class VerifiedGeneration
                 $verification->verdicts,
                 $verification->claims ?? [],
                 $reduceResult->redactionMap ?? throw new \LogicException('an available ReduceResult always carries a RedactionMap'),
+                $usage,
             );
         }
 
-        return AttemptOutcome::failed($verification->verdicts);
+        return AttemptOutcome::failed($verification->verdicts, $usage);
     }
 
     /**
@@ -135,12 +143,14 @@ final class VerifiedGeneration
                 $outcome->verdicts,
                 $attemptNumber,
                 $outcome->sev1Signal ?? throw new \LogicException('a Sev1 AttemptOutcome always carries a Sev1Signal'),
+                $outcome->usage,
             ),
             AttemptOutcomeKind::Passed => VerifiedGenerationResult::passed(
                 $outcome->claims ?? throw new \LogicException('a Passed AttemptOutcome always carries claims'),
                 $outcome->verdicts,
                 $attemptNumber,
                 $outcome->redactionMap ?? throw new \LogicException('a Passed AttemptOutcome always carries a RedactionMap'),
+                $outcome->usage,
             ),
             AttemptOutcomeKind::Failed => null,
         };
