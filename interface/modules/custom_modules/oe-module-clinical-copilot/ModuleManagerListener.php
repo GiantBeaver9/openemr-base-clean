@@ -43,6 +43,9 @@ class ModuleManagerListener extends AbstractModuleActionListener
         'mod_copilot_chat_session',
         'mod_copilot_chat_turn',
         'mod_copilot_trace',
+        'mod_copilot_qa',
+        'mod_copilot_trace_payload',
+        'mod_copilot_ui_event',
     ];
 
     public function __construct()

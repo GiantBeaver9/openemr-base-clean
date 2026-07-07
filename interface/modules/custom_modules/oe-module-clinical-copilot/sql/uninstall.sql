@@ -23,6 +23,9 @@
 
 DELETE FROM `background_services` WHERE `name` = 'clinical_copilot_worker';
 
+DROP TABLE IF EXISTS `mod_copilot_ui_event`;
+DROP TABLE IF EXISTS `mod_copilot_trace_payload`;
+DROP TABLE IF EXISTS `mod_copilot_qa`;
 DROP TABLE IF EXISTS `mod_copilot_trace`;
 DROP TABLE IF EXISTS `mod_copilot_chat_turn`;
 DROP TABLE IF EXISTS `mod_copilot_chat_session`;
