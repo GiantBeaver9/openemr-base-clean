@@ -10,6 +10,8 @@
  * @license   https://github.com/openemr/openemr/blob/master/LICENSE GNU General Public License 3
  */
 
+declare(strict_types=1);
+
 return [
     'name' => 'Clinical Co-Pilot',
     'description' => 'A pre-visit clinical synthesis and multi-turn chat co-pilot for outpatient endocrinology: deterministic, cited facts synthesized into a prioritized document per scheduled patient, with a patient-pinned chat agent for follow-up questions.',

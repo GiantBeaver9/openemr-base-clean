@@ -44,9 +44,13 @@ enum ClaimType: string
      */
     public function isZeroCitationEligible(): bool
     {
+        // Enumerated without a `default` (CLAUDE.md) so a future claim_type
+        // forces an explicit true/false decision here rather than silently
+        // defaulting to "must cite" -- this is V2-critical citation logic.
         return match ($this) {
             self::Greeting, self::Refusal, self::RetrievalStatus, self::UncertaintyStatement => true,
-            default => false,
+            self::LabValue, self::Trend, self::MedEvent, self::Vital,
+            self::Overdue, self::Pending, self::Exclusion, self::Conflict => false,
         };
     }
 }

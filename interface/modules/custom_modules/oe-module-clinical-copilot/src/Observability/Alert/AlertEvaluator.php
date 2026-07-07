@@ -297,7 +297,7 @@ final class AlertEvaluator
 
         try {
             $lastTick = new \DateTimeImmutable($lastTickAt);
-        } catch (\Exception) {
+        } catch (\Throwable) {
             return new AlertFinding(AlertName::WorkerHeartbeatStale, true, 'worker heartbeat timestamp is unparseable', 999999.0, $staleWindowMinutes);
         }
 

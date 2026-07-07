@@ -35,8 +35,11 @@ final class ClaimSchema
     {
         try {
             $decoded = json_decode($rawJson, true, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException $e) {
-            return ClaimParseResult::invalid(['response is not valid JSON: ' . $e->getMessage()]);
+        } catch (\JsonException) {
+            // The raw model output is preserved in the turn/trace payload for
+            // debugging; do not reflect the exception text into the verdict,
+            // which is user-facing (repo error-handling standard).
+            return ClaimParseResult::invalid(['response is not valid JSON']);
         }
 
         if (!is_array($decoded) || !array_is_list($decoded)) {
@@ -54,8 +57,8 @@ final class ClaimSchema
             try {
                 /** @var array<string, mixed> $item */
                 $claims[] = Claim::fromArray($item);
-            } catch (\InvalidArgumentException $e) {
-                $errors[] = "claim[{$index}]: {$e->getMessage()}";
+            } catch (\InvalidArgumentException) {
+                $errors[] = "claim[{$index}] does not conform to the claim schema";
             }
         }
 
