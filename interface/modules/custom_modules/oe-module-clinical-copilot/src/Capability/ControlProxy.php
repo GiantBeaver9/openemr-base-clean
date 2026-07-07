@@ -96,17 +96,53 @@ final class ControlProxy implements CapabilityInterface
 
     public function extract(int $pid): CapabilityResult
     {
+        return $this->extractCodes($pid, AnalyteCodeSets::controlProxyCodes(), null);
+    }
+
+    /**
+     * U11 chat tool `get_control_trend` (ARCHITECTURE.md §1.2): an
+     * analyte-scoped, window-bounded variant of {@see self::extract()} for
+     * follow-up drill-downs beyond the preloaded envelope ("list every A1c
+     * value, not just the trend" -- USERS.md UC6). `$analyte` selects the
+     * SAME LOINC subset {@see self::extract()} already decomposes into
+     * per-code series (`a1c`/`glucose`/`lipids`); `$windowMonths` bounds
+     * `clinical_date` to the trailing window. Derived facts
+     * (delta/span/count) are recomputed over the WINDOWED series, never the
+     * full-history one, so a narrower window never cites a delta computed
+     * from data outside it.
+     *
+     * @throws \DomainException if `$analyte` is not one of the tool's three enum values
+     */
+    public function extractForAnalyte(int $pid, string $analyte, int $windowMonths): CapabilityResult
+    {
+        $codes = match ($analyte) {
+            'a1c' => [AnalyteCodeSets::LOINC_A1C],
+            'glucose' => [AnalyteCodeSets::LOINC_GLUCOSE],
+            'lipids' => AnalyteCodeSets::LIPIDS,
+            default => throw new \DomainException("ControlProxy::extractForAnalyte: unrecognized analyte '{$analyte}'"),
+        };
+
+        return $this->extractCodes($pid, $codes, self::windowCutoff($windowMonths));
+    }
+
+    /**
+     * @param list<string> $codes
+     */
+    private function extractCodes(int $pid, array $codes, ?\DateTimeImmutable $cutoff): CapabilityResult
+    {
         $presented = [];
         $exclusions = [];
         $rawInputCount = 0;
         $accountedCount = 0;
 
-        foreach (AnalyteCodeSets::controlProxyCodes() as $loincCode) {
+        foreach ($codes as $loincCode) {
             $slice = $this->labSliceReader->read($pid, [$loincCode], self::CAPABILITY, self::CAPABILITY_VERSION);
             $exclusions = [...$exclusions, ...$slice->exclusions];
             // I14: aggregated straight from LabSliceResult's own independent
             // per-row tally -- derived_* facts added below are NOT raw rows
-            // and never enter this count.
+            // and never enter this count. A window cutoff narrows what is
+            // PRESENTED, never what is ACCOUNTED (the row was still fully
+            // classified; the caller just asked for a trailing slice of it).
             $rawInputCount += $slice->rawInputCount;
             $accountedCount += $slice->accountedCount;
 
@@ -114,6 +150,10 @@ final class ControlProxy implements CapabilityInterface
             foreach ($slice->presented as $presentedLabFact) {
                 if ($presentedLabFact->inFlight) {
                     // Ceded to PendingResults (C2) -- never duplicated here.
+                    continue;
+                }
+
+                if ($cutoff !== null && $presentedLabFact->fact->clinicalDate !== null && $presentedLabFact->fact->clinicalDate < $cutoff) {
                     continue;
                 }
 
@@ -142,6 +182,11 @@ final class ControlProxy implements CapabilityInterface
         }
 
         return new CapabilityResult($presented, $exclusions, $rawInputCount, $accountedCount);
+    }
+
+    private static function windowCutoff(int $windowMonths): \DateTimeImmutable
+    {
+        return (new \DateTimeImmutable('now'))->sub(new \DateInterval('P' . max(1, $windowMonths) . 'M'));
     }
 
     private static function isTrendEligible(Fact $fact): bool

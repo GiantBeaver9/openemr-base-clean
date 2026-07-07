@@ -110,6 +110,31 @@ final class MedResponse implements CapabilityInterface
 
     public function extract(int $pid): CapabilityResult
     {
+        return $this->extractInternal($pid, null, null);
+    }
+
+    /**
+     * U11 chat tool `get_med_history` (ARCHITECTURE.md §1.2): a drug- and
+     * window-scoped variant of {@see self::extract()} for follow-up
+     * drill-downs beyond the preloaded envelope. `$drugFilter`, when
+     * non-empty, keeps only rows whose raw `drug`/`title` text contains it
+     * (case-insensitive substring -- the same free-text field a physician
+     * would type, e.g. "metformin"); `$windowMonths` bounds `clinical_date`
+     * to the trailing window. Filtering narrows what is PRESENTED only --
+     * `rawInputCount`/`accountedCount` (I14) still reflect every row the host
+     * union returned, since every one of them was still fully classified,
+     * just not requested by this narrower call.
+     */
+    public function extractFiltered(int $pid, ?string $drugFilter, int $windowMonths): CapabilityResult
+    {
+        $trimmedFilter = $drugFilter !== null && trim($drugFilter) !== '' ? trim($drugFilter) : null;
+        $cutoff = (new \DateTimeImmutable('now'))->sub(new \DateInterval('P' . max(1, $windowMonths) . 'M'));
+
+        return $this->extractInternal($pid, $trimmedFilter, $cutoff);
+    }
+
+    private function extractInternal(int $pid, ?string $drugFilter, ?\DateTimeImmutable $cutoff): CapabilityResult
+    {
         $searchResult = $this->prescriptionService->getAll([
             'patient_id' => new StringSearchField('patient_id', (string)$pid, SearchModifier::EXACT),
         ]);
@@ -118,7 +143,7 @@ final class MedResponse implements CapabilityInterface
         $rows = $searchResult->getData();
         $rawInputCount = count($rows);
 
-        /** @var array<string, list<array{citation: Citation, clinicalDate: \DateTimeImmutable, sourceTable: string}>> $byDrugKey */
+        /** @var array<string, list<array{citation: Citation, clinicalDate: \DateTimeImmutable, drugRaw: string, sourceTable: string}>> $byDrugKey */
         $byDrugKey = [];
         $accountedCount = 0;
         foreach ($rows as $row) {
@@ -145,6 +170,13 @@ final class MedResponse implements CapabilityInterface
             usort($group, static fn (array $a, array $b): int => $a['clinicalDate'] <=> $b['clinicalDate']);
 
             foreach ($group as $index => $entry) {
+                if ($drugFilter !== null && stripos($entry['drugRaw'], $drugFilter) === false) {
+                    continue;
+                }
+                if ($cutoff !== null && $entry['clinicalDate'] < $cutoff) {
+                    continue;
+                }
+
                 $isChange = $index > 0;
                 $citations = [$entry['citation']];
 
@@ -182,7 +214,7 @@ final class MedResponse implements CapabilityInterface
 
     /**
      * @param array<string, mixed> $row one row of {@see PrescriptionService::getAll()}'s data
-     * @return array{citation: Citation, clinicalDate: \DateTimeImmutable, drugKey: string, sourceTable: string}|null
+     * @return array{citation: Citation, clinicalDate: \DateTimeImmutable, drugKey: string, drugRaw: string, sourceTable: string}|null
      */
     private static function resolveMedRow(array $row): ?array
     {
@@ -230,6 +262,7 @@ final class MedResponse implements CapabilityInterface
             'citation' => new Citation($sourceTable, $pk, $citationField, DateSource::Collected),
             'clinicalDate' => $clinicalDate,
             'drugKey' => self::drugKey($drug),
+            'drugRaw' => $drug,
             'sourceTable' => $sourceTable,
         ];
     }

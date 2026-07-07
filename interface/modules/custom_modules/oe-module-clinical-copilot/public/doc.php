@@ -66,13 +66,18 @@ if ($pid <= 0) {
 }
 
 $webRoot = OEGlobalsBag::getInstance()->getWebRoot();
-$moduleUrl = $webRoot . '/interface/modules/custom_modules/oe-module-clinical-copilot/public/doc.php';
+$moduleBase = $webRoot . '/interface/modules/custom_modules/oe-module-clinical-copilot/public';
 
 $templateVars = [
     'found' => $viewData['found'],
     'patient' => $viewData['patient'],
     'pid' => $pid,
-    'doc_url' => $moduleUrl . '?pid=' . $pid,
+    'doc_url' => $moduleBase . '/doc.php?pid=' . $pid,
+    // U11: the chat panel (included below when a doc was found) posts to
+    // these -- passed through rather than hardcoded in the template so the
+    // module's base path stays a single source of truth.
+    'chat_url' => $moduleBase . '/chat.php',
+    'status_url' => $moduleBase . '/status.php',
     'history_rows' => $viewData['found'] ? DocViewModel::historyRows($viewData['history']) : [],
 ];
 

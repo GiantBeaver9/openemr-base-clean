@@ -82,6 +82,34 @@ final class VitalsTrend implements CapabilityInterface
 
     public function extract(int $pid): CapabilityResult
     {
+        return $this->extractInternal($pid, null, null);
+    }
+
+    /**
+     * U11 chat tool `get_vitals_trend` (ARCHITECTURE.md §1.2): a
+     * metric-scoped, window-bounded variant of {@see self::extract()} for
+     * follow-up drill-downs beyond the preloaded envelope. `$metric` is one
+     * of the tool's enum values (`weight`/`bp`/`bmi`); `$windowMonths` bounds
+     * `date` to the trailing window. A row outside the window is still
+     * accounted (I14) -- it was fully classified, just not requested by this
+     * narrower call -- and derived facts (delta/span/count) are recomputed
+     * over the windowed series only.
+     *
+     * @throws \DomainException if `$metric` is not one of the tool's three enum values
+     */
+    public function extractForMetric(int $pid, string $metric, int $windowMonths): CapabilityResult
+    {
+        if (!in_array($metric, ['weight', 'bp', 'bmi'], true)) {
+            throw new \DomainException("VitalsTrend::extractForMetric: unrecognized metric '{$metric}'");
+        }
+
+        $cutoff = (new \DateTimeImmutable('now'))->sub(new \DateInterval('P' . max(1, $windowMonths) . 'M'));
+
+        return $this->extractInternal($pid, $metric, $cutoff);
+    }
+
+    private function extractInternal(int $pid, ?string $metric, ?\DateTimeImmutable $cutoff): CapabilityResult
+    {
         $rows = QueryUtils::fetchRecords(
             'SELECT `id`, `date`, `weight`, `bps`, `bpd`, `BMI` FROM `form_vitals` WHERE `pid` = ? AND `activity` = 1 ORDER BY `date` ASC',
             [$pid],
@@ -108,17 +136,21 @@ final class VitalsTrend implements CapabilityInterface
             }
             $accountedCount++;
 
-            if (self::isSetNumeric($row['weight'] ?? null)) {
+            if ($cutoff !== null && $date < $cutoff) {
+                continue;
+            }
+
+            if (($metric === null || $metric === 'weight') && self::isSetNumeric($row['weight'] ?? null)) {
                 $fact = self::buildNumericVital($pid, $id, $date, 'weight', (float)$row['weight'], self::WEIGHT_UNIT);
                 $presented[] = $fact;
                 $weightSeries[] = $fact;
             }
 
-            if (self::isSetNumeric($row['bps'] ?? null) && self::isSetNumeric($row['bpd'] ?? null)) {
+            if (($metric === null || $metric === 'bp') && self::isSetNumeric($row['bps'] ?? null) && self::isSetNumeric($row['bpd'] ?? null)) {
                 $presented[] = self::buildBloodPressureVital($pid, $id, $date, (string)$row['bps'], (string)$row['bpd']);
             }
 
-            if (self::isSetNumeric($row['BMI'] ?? null)) {
+            if (($metric === null || $metric === 'bmi') && self::isSetNumeric($row['BMI'] ?? null)) {
                 $fact = self::buildNumericVital($pid, $id, $date, 'BMI', (float)$row['BMI'], '');
                 $presented[] = $fact;
                 $bmiSeries[] = $fact;

@@ -236,6 +236,20 @@
                 </div>
             </div>
         </div>
+
+        {#
+        # U11: the chat panel is the second surface ARCHITECTURE.md §1 calls
+        # for -- "a chat panel rendered beside each patient's pre-visit
+        # synthesis." Never shown over a capability-crash (no safe fact set
+        # to seed a session from) or when the doc itself was never found.
+        #}
+        {% if not doc.capability_crash %}
+            {% include 'oe-module-clinical-copilot/chat_panel.html.twig' with {
+                'pid': pid,
+                'chat_url': chat_url,
+                'status_url': status_url,
+            } %}
+        {% endif %}
     {% endif %}
 </div>
 </body>
