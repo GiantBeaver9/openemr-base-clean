@@ -312,6 +312,14 @@ final class Worker
     {
         $budget = $this->cadenceConfig->limits()['per_tick_worker_llm_budget_usd'];
 
+        // An explicit zero (or negative) per-tick budget means "suspend
+        // worker-driven generation" -- honour it. max(1, ...) would otherwise
+        // still run one real generation every tick (~288 LLM calls/day)
+        // against a budget the operator deliberately set to 0.
+        if ($budget <= 0.0) {
+            return 0;
+        }
+
         return max(1, (int)floor($budget / self::ASSUMED_COST_PER_GENERATION_USD));
     }
 

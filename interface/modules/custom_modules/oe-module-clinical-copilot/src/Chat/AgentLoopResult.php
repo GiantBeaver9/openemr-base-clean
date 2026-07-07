@@ -47,4 +47,29 @@ final readonly class AgentLoopResult
         public bool $budgetExhausted,
     ) {
     }
+
+    /**
+     * The verify-then-retry pass (AgentLoop::answerWithFindings) makes no new
+     * tool calls, so its own toolCallLog is empty; the turn's real tool calls
+     * happened on the first attempt. This wither lets ChatAgent carry the
+     * first attempt's log onto the retry result so a retried turn still
+     * persists its Tool rows / trace spans and the fetched facts survive into
+     * the next turn's rebuilt fact set.
+     *
+     * @param list<ToolCallLogEntry> $toolCallLog
+     */
+    public function withToolCallLog(array $toolCallLog): self
+    {
+        return new self(
+            $this->finalClaimsJson,
+            $this->redactionMap,
+            $this->accumulatedFacts,
+            $toolCallLog,
+            $this->tokensIn,
+            $this->tokensOut,
+            $this->latencyMs,
+            $this->modelVersion,
+            $this->budgetExhausted,
+        );
+    }
 }

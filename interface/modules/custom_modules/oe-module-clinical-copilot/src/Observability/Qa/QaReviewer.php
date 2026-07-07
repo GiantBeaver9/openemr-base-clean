@@ -92,7 +92,17 @@ final class QaReviewer
         $errors = 0;
 
         foreach ($this->pendingDocTargets($limit) as $row) {
-            $outcome = $this->reviewDoc($row, $threshold);
+            try {
+                $outcome = $this->reviewDoc($row, $threshold);
+            } catch (\Throwable $e) {
+                // One target failing -- e.g. a UNIQUE(target_type,target_id)
+                // race when two ticks overlap on the same still-pending row --
+                // must not abort the whole batch and silently no-op the T22
+                // rerun stage for this tick. Skip it, count it, keep going.
+                $this->logger->error('ClinicalCopilot: QA review of a doc target failed', ['exception' => $e]);
+                $errors++;
+                continue;
+            }
             if ($outcome === null) {
                 continue;
             }
@@ -103,7 +113,13 @@ final class QaReviewer
         $remaining = $limit - count($outcomes);
         if ($remaining > 0) {
             foreach ($this->pendingChatTurnTargets($remaining) as $row) {
-                $outcome = $this->reviewChatTurn($row, $threshold);
+                try {
+                    $outcome = $this->reviewChatTurn($row, $threshold);
+                } catch (\Throwable $e) {
+                    $this->logger->error('ClinicalCopilot: QA review of a chat-turn target failed', ['exception' => $e]);
+                    $errors++;
+                    continue;
+                }
                 if ($outcome === null) {
                     continue;
                 }

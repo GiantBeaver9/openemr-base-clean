@@ -119,6 +119,14 @@ final class ChatAgent
             return ChatAnswer::degradedLlmUnavailable($loopResult->accumulatedFacts, LlmUnavailableException::REASON_NO_CREDENTIALS, $loopResult->toolCallLog);
         }
 
+        // The retry makes no new tool calls, so carry the first attempt's tool
+        // log onto the retry result -- otherwise a retried turn persists zero
+        // Tool rows/trace spans and the facts it fetched vanish from the next
+        // turn's rebuilt fact set (ChatFactSetBuilder reads only Tool turns).
+        $retryResult = $retryResult->withToolCallLog(
+            array_merge($loopResult->toolCallLog, $retryResult->toolCallLog),
+        );
+
         $this->emitStatus('verifying…');
         $retryVerification = $this->verifier->verify(
             $retryResult->finalClaimsJson,
