@@ -37,7 +37,9 @@ use OpenEMR\Modules\ClinicalCopilot\Doc\QaStatus;
  * {@see \OpenEMR\Modules\ClinicalCopilot\Chat\ChatSessionStore::freeze()}'s
  * "the one legal mutation" precedent for `mod_copilot_chat_session.status`).
  * `DocStore::findBest()` already documents reading `qa_score` for best-of-N
- * ordering -- this is the only code path that ever sets it.
+ * ordering -- this is the only code path that ever sets it. This narrow
+ * exception to the append-only invariant is recorded in the spec at
+ * docs/build-notes.md (I3 "Documented carve-out (T22)").
  */
 final class DocQaAnnotator
 {

@@ -20,7 +20,7 @@ chat agent pinned to a patient. **The LLM narrates and navigates — it never ex
 
 ## Non-negotiable invariants (from ARCHITECTURE_COMPLETE.md — do not violate)
 
-- **I2** facts never cached; only narratives cached. **I3/E7** doc & trace stores append-only (no UPDATE/DELETE in code).
+- **I2** facts never cached; only narratives cached. **I3/E7** doc & trace stores append-only (no UPDATE/DELETE in code). **Documented carve-out (T22):** `mod_copilot_doc`'s advisory QA-annotation columns (`qa_status`, `qa_score`) are the one exception — `DocQaAnnotator` performs a single, monotonic `pending → scored` UPDATE of *those columns only*, never touching the served content (`doc` facts+narrative, `verify_status`, citations). "What the physician was shown" stays immutable; only the post-hoc advisory QA verdict is stamped on. This is a deliberate, narrow exception recorded here so the append-only invariant's intent (an untamperable provenance ledger of shown content) still holds. Alternative considered: store QA verdicts only in `mod_copilot_qa` and LEFT JOIN in `findBest` — cleaner against a strict reading of I3, deferred as it complicates the hot read path; revisit if the ledger's immutability is ever audited literally.
 - **I5** no silent exclusion — every filtered row becomes a visible `exclusion` fact with citations + reason.
 - **I6/I11** degradation absolute — LLM unavailable ⇒ facts + "narrative unavailable"; no unverified prose ever rendered.
 - **I9 additivity** — ZERO diff outside `oe-module-clinical-copilot/` (spec docs are the only exception). No writes to any core OpenEMR table, ever. Module-owned `mod_copilot_*` tables only.
