@@ -1,0 +1,45 @@
+{#
+ # Clinical Co-Pilot dashboard — request list for a tile (§3.3 click-through step 2).
+ #
+ # One row per correlation id in the window; click through to the span waterfall.
+ # Autoescape OFF — escape every sink with |text / |attr / xlt.
+ #
+ # @package OpenEMR\Modules\ClinicalCopilot
+ # @license https://github.com/openemr/openemr/blob/master/LICENSE GNU General Public License 3
+ #}
+<div class="mod-copilot-dashboard">
+    <p><a href="dashboard.php">&larr; {{ "Back to overview"|xlt }}</a></p>
+    <h4>
+        {{ "Requests"|xlt }}
+        {% if kind %}<small class="text-muted">({{ kind|text }})</small>{% endif %}
+    </h4>
+    <p class="text-muted">{{ "Since"|xlt }}: {{ since|text }}</p>
+    <table class="table table-sm table-hover">
+        <thead><tr>
+            <th>{{ "Correlation ID"|xlt }}</th>
+            <th>{{ "Started"|xlt }}</th>
+            <th>{{ "Spans"|xlt }}</th>
+            <th>{{ "Errors"|xlt }}</th>
+            <th>{{ "Total ms"|xlt }}</th>
+            <th>{{ "Cost (USD)"|xlt }}</th>
+        </tr></thead>
+        <tbody>
+        {% for req in requests %}
+            <tr class="{{ req.errors > 0 ? 'table-danger' : '' }}">
+                <td>
+                    <a href="dashboard.php?view=waterfall&amp;correlation_id={{ req.correlation_id|attr_url }}">
+                        {{ req.correlation_id|text }}
+                    </a>
+                </td>
+                <td>{{ req.started_at|text }}</td>
+                <td>{{ req.span_count|text }}</td>
+                <td>{{ req.errors|text }}</td>
+                <td>{{ req.total_ms|text }}</td>
+                <td>${{ req.cost_usd|round(4)|text }}</td>
+            </tr>
+        {% else %}
+            <tr><td colspan="6" class="text-muted">{{ "No requests in window"|xlt }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>

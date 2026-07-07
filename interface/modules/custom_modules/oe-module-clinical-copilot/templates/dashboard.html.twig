@@ -1,0 +1,138 @@
+{#
+ # Clinical Co-Pilot observability dashboard — overview tiles (§3.3, R4).
+ #
+ # Rendered as an inner fragment by public/dashboard.php (which supplies the host Header /
+ # Bootstrap shell). Autoescape is OFF globally, so every value is escaped at the sink with
+ # |text / |attr / xlt. No model data is ever rendered raw.
+ #
+ # @package OpenEMR\Modules\ClinicalCopilot
+ # @license https://github.com/openemr/openemr/blob/master/LICENSE GNU General Public License 3
+ #}
+<div class="mod-copilot-dashboard">
+    <h2 class="mb-3">{{ "Clinical Co-Pilot — Observability"|xlt }}</h2>
+    <p class="text-muted">{{ "Metrics since"|xlt }}: <span>{{ since|text }}</span></p>
+
+    {% for alert in alerts %}
+        <div class="alert {{ alert.severity == 'sev1' ? 'alert-danger' : 'alert-warning' }}" role="alert">
+            <strong>{{ alert.label|text }}</strong>
+            <span>({{ alert.severity|text }})</span> —
+            <span>{{ alert.message|text }}</span>
+            <span class="small">
+                [{{ "observed"|xlt }}: {{ alert.observed|text }}, {{ "threshold"|xlt }}: {{ alert.threshold|text }}]
+            </span>
+        </div>
+    {% endfor %}
+
+    <div class="row">
+        <div class="col-md-3 mb-3">
+            <div class="card"><div class="card-body">
+                <h6 class="card-title text-muted">{{ "Total spans"|xlt }}</h6>
+                <p class="h3">{{ metrics.total|text }}</p>
+            </div></div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card"><div class="card-body">
+                <h6 class="card-title text-muted">{{ "Error rate"|xlt }}</h6>
+                <p class="h3">{{ (metrics.error_rate * 100)|round(2)|text }}%</p>
+            </div></div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card"><div class="card-body">
+                <h6 class="card-title text-muted">{{ "Degraded"|xlt }}</h6>
+                <p class="h3">{{ metrics.degraded_count|text }}</p>
+            </div></div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card"><div class="card-body">
+                <h6 class="card-title text-muted">{{ "LLM retries"|xlt }}</h6>
+                <p class="h3">{{ metrics.llm_retry_count|text }}</p>
+            </div></div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-4 mb-3">
+            <div class="card"><div class="card-body">
+                <h6 class="card-title text-muted">{{ "Verification pass rate"|xlt }}</h6>
+                <p class="h4">{{ (metrics.verification.pass_rate * 100)|round(1)|text }}%</p>
+                <p class="small text-muted">
+                    {{ metrics.verification.pass|text }} {{ "pass"|xlt }} /
+                    {{ metrics.verification.fail|text }} {{ "fail"|xlt }}
+                </p>
+            </div></div>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card"><div class="card-body">
+                <h6 class="card-title text-muted">{{ "Cache (digest) hit rate"|xlt }}</h6>
+                <p class="h4">{{ (metrics.cache.hit_rate * 100)|round(1)|text }}%</p>
+                <p class="small text-muted">
+                    {{ metrics.cache.hits|text }} {{ "hits"|xlt }} /
+                    {{ metrics.cache.misses|text }} {{ "misses"|xlt }}
+                </p>
+            </div></div>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card"><div class="card-body">
+                <h6 class="card-title text-muted">{{ "Cumulative cost (USD)"|xlt }}</h6>
+                <p class="h4">${{ metrics.cumulative_cost|round(4)|text }}</p>
+                <p class="small text-muted">{{ "warmed"|xlt }}: {{ metrics.warmed_count|text }}</p>
+            </div></div>
+        </div>
+    </div>
+
+    <h5 class="mt-3">{{ "Requests by kind (click through to spans)"|xlt }}</h5>
+    <table class="table table-sm table-striped">
+        <thead><tr>
+            <th>{{ "Kind"|xlt }}</th>
+            <th>{{ "Count"|xlt }}</th>
+            <th>{{ "p50 ms"|xlt }}</th>
+            <th>{{ "p95 ms"|xlt }}</th>
+        </tr></thead>
+        <tbody>
+        {% for kind, count in metrics.count_by_kind %}
+            <tr>
+                <td>
+                    <a href="dashboard.php?view=requests&amp;kind={{ kind|attr_url }}">{{ kind|text }}</a>
+                </td>
+                <td>{{ count|text }}</td>
+                <td>{{ (metrics.p50_by_kind[kind] is not null) ? metrics.p50_by_kind[kind]|text : "—" }}</td>
+                <td>{{ (metrics.p95_by_kind[kind] is not null) ? metrics.p95_by_kind[kind]|text : "—" }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <h5 class="mt-3">{{ "Tool failure rate per tool"|xlt }}</h5>
+    <table class="table table-sm">
+        <thead><tr>
+            <th>{{ "Tool"|xlt }}</th>
+            <th>{{ "Calls"|xlt }}</th>
+            <th>{{ "Failures"|xlt }}</th>
+            <th>{{ "Failure rate"|xlt }}</th>
+        </tr></thead>
+        <tbody>
+        {% for tool, stats in metrics.tool_failure_by_tool %}
+            <tr>
+                <td>{{ tool|text }}</td>
+                <td>{{ stats.calls|text }}</td>
+                <td>{{ stats.failures|text }}</td>
+                <td>{{ (stats.failure_rate * 100)|round(2)|text }}%</td>
+            </tr>
+        {% else %}
+            <tr><td colspan="4" class="text-muted">{{ "No tool calls in window"|xlt }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <h5 class="mt-3">{{ "Cost per day"|xlt }}</h5>
+    <table class="table table-sm">
+        <thead><tr><th>{{ "Day"|xlt }}</th><th>{{ "Cost (USD)"|xlt }}</th></tr></thead>
+        <tbody>
+        {% for day, cost in metrics.cost_per_day %}
+            <tr><td>{{ day|text }}</td><td>${{ cost|round(4)|text }}</td></tr>
+        {% else %}
+            <tr><td colspan="2" class="text-muted">{{ "No cost recorded in window"|xlt }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>

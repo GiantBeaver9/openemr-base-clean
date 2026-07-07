@@ -1,0 +1,41 @@
+{#
+ # Clinical Co-Pilot dashboard — single span detail (§3.3 click-through step 4).
+ #
+ # The deepest drill-down: one span's stored fields, including its payload_ref pointer.
+ # The PHI-bearing payload itself lives behind payload_ref in this same MySQL (T16); this
+ # view shows the pointer + metadata, never inlines PHI. Autoescape OFF — escape every sink.
+ #
+ # @package OpenEMR\Modules\ClinicalCopilot
+ # @license https://github.com/openemr/openemr/blob/master/LICENSE GNU General Public License 3
+ #}
+<div class="mod-copilot-dashboard">
+    <p><a href="dashboard.php">&larr; {{ "Back to overview"|xlt }}</a></p>
+    <h4>{{ "Span detail"|xlt }}</h4>
+    {% if span %}
+        <p>
+            <a href="dashboard.php?view=waterfall&amp;correlation_id={{ span.correlation_id|attr_url }}">
+                &larr; {{ "Back to waterfall"|xlt }}
+            </a>
+        </p>
+        <table class="table table-sm">
+            <tbody>
+                <tr><th>{{ "Correlation ID"|xlt }}</th><td>{{ span.correlation_id|text }}</td></tr>
+                <tr><th>{{ "Span ID"|xlt }}</th><td>{{ span.span_id|text }}</td></tr>
+                <tr><th>{{ "Parent span ID"|xlt }}</th><td>{{ span.parent_span_id|text }}</td></tr>
+                <tr><th>{{ "Kind"|xlt }}</th><td>{{ span.kind|text }}</td></tr>
+                <tr><th>{{ "Status"|xlt }}</th><td>{{ span.status|text }}</td></tr>
+                <tr><th>{{ "Started"|xlt }}</th><td>{{ span.started_at|text }}</td></tr>
+                <tr><th>{{ "Duration ms"|xlt }}</th><td>{{ span.duration_ms|text }}</td></tr>
+                <tr><th>{{ "Model"|xlt }}</th><td>{{ span.model|text }}</td></tr>
+                <tr><th>{{ "Tokens in"|xlt }}</th><td>{{ span.tokens_in|text }}</td></tr>
+                <tr><th>{{ "Tokens out"|xlt }}</th><td>{{ span.tokens_out|text }}</td></tr>
+                <tr><th>{{ "Cost (USD)"|xlt }}</th><td>{{ span.cost_usd|text }}</td></tr>
+                <tr><th>{{ "Error class"|xlt }}</th><td>{{ span.error_class|text }}</td></tr>
+                <tr><th>{{ "Error detail"|xlt }}</th><td>{{ span.error_detail|text }}</td></tr>
+                <tr><th>{{ "Payload ref"|xlt }}</th><td>{{ span.payload_ref|text }}</td></tr>
+            </tbody>
+        </table>
+    {% else %}
+        <p class="text-muted">{{ "Span not found"|xlt }}</p>
+    {% endif %}
+</div>

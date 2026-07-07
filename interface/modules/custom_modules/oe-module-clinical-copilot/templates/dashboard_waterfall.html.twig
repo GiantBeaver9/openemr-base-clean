@@ -1,0 +1,46 @@
+{#
+ # Clinical Co-Pilot dashboard — span waterfall for one request (§3.3 click-through step 3).
+ #
+ # Spans ordered by start, indented by nesting depth; click a span for its full payload.
+ # Autoescape OFF — escape every sink with |text / |attr / xlt.
+ #
+ # @package OpenEMR\Modules\ClinicalCopilot
+ # @license https://github.com/openemr/openemr/blob/master/LICENSE GNU General Public License 3
+ #}
+<div class="mod-copilot-dashboard">
+    <p><a href="dashboard.php">&larr; {{ "Back to overview"|xlt }}</a></p>
+    <h4>{{ "Span waterfall"|xlt }}</h4>
+    <p class="text-muted">{{ "Correlation ID"|xlt }}: {{ correlation_id|text }}</p>
+    <table class="table table-sm">
+        <thead><tr>
+            <th>{{ "Kind"|xlt }}</th>
+            <th>{{ "Status"|xlt }}</th>
+            <th>{{ "Started"|xlt }}</th>
+            <th>{{ "Duration ms"|xlt }}</th>
+            <th>{{ "Model"|xlt }}</th>
+            <th>{{ "Tokens in/out"|xlt }}</th>
+            <th>{{ "Cost"|xlt }}</th>
+            <th>{{ "Error class"|xlt }}</th>
+            <th></th>
+        </tr></thead>
+        <tbody>
+        {% for span in spans %}
+            <tr class="{{ span.status == 'error' ? 'table-danger' : (span.status == 'degraded' ? 'table-warning' : '') }}">
+                <td style="padding-left: {{ (span.depth * 20)|attr }}px;">{{ span.kind|text }}</td>
+                <td>{{ span.status|text }}</td>
+                <td>{{ span.started_at|text }}</td>
+                <td>{{ span.duration_ms|text }}</td>
+                <td>{{ span.model|text }}</td>
+                <td>{{ span.tokens_in|text }} / {{ span.tokens_out|text }}</td>
+                <td>${{ (span.cost_usd is not null) ? span.cost_usd|round(4)|text : "0" }}</td>
+                <td>{{ span.error_class|text }}</td>
+                <td>
+                    <a href="dashboard.php?view=payload&amp;span_id={{ span.span_id|attr_url }}">{{ "payload"|xlt }}</a>
+                </td>
+            </tr>
+        {% else %}
+            <tr><td colspan="9" class="text-muted">{{ "No spans for this correlation id"|xlt }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
