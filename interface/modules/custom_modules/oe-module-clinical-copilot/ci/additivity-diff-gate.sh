@@ -21,12 +21,16 @@
 
 set -euo pipefail
 
-BASE_REF="${1:-origin/master}"
+BASE_REF="${1:-origin/main}"
 
-# Paths that may change outside the module directory: the spec documents the module co-owns.
+# Paths that may change outside the module directory: the co-pilot design corpus the
+# module co-owns (the case-study deliverables). AUDIT.md is the pre-build audit and a
+# named companion to ARCHITECTURE.md; it belongs to the same family as the spec docs.
+# No host/core source is ever in this list — that is what the gate exists to protect.
 ALLOWED_OUTSIDE=(
   "ARCHITECTURE.md"
   "ARCHITECTURE_COMPLETE.md"
+  "AUDIT.md"
   "USERS.md"
   "docs/clinical-copilot-tradeoffs.md"
 )
@@ -78,7 +82,7 @@ if [ "${#OFFENDERS[@]}" -gt 0 ]; then
     echo "  - ${path}" >&2
   done
   echo "" >&2
-  echo "Only files under ${MODULE_DIR}/ (plus the four spec docs) may change in this module's PRs." >&2
+  echo "Only files under ${MODULE_DIR}/ (plus the co-pilot design docs) may change in this module's PRs." >&2
   exit 1
 fi
 
