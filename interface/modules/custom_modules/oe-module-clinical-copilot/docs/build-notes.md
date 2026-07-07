@@ -147,6 +147,48 @@ V1–V6 stays the only gate (T15). The agent scores and watches; it never approv
 - Deterministic wherever possible: density/utilization/drilldown are pure trace math
   (no LLM). Only concurrence/salience use the Flash verdict, and both are advisory.
 
+## Warm timing + QA-driven rerun (T22 — user decision of record)
+
+**Warm earlier, leave a QA buffer.** Each appointment's synthesis must be generated
+and ready by **T‑30min** (keep the T‑12h and T‑1h full-window passes; the 5‑min tick
+must ensure every appointment is warmed AND QA-swept by ~T‑30min). The 30-minute
+buffer exists so the post-mortem QA sweep can score the doc and, if it scores low,
+trigger a bounded automatic regeneration BEFORE the physician opens the chart.
+
+**QA-driven auto-rerun — synthesis path only (safe because the synthesis is
+disposable/idempotent, T21).** On the worker tick, after QA writes a verdict to
+`mod_copilot_qa`: if `concurs=false` OR `salience_ok=false` (below a versioned
+threshold in `mod_copilot_cadence` config) AND now is before ~T‑5min AND the per-tick
+LLM budget + circuit breaker allow (§3.7), enqueue ONE regeneration of that
+`(pid, digest)`: re-run the reduce over the SAME fresh facts (same digest — re-rolling
+the narrative, NOT re-pulling data), verify V1–V6, append the new attempt. **Bounded:
+max 2 QA-driven reruns per (pid, digest)**; after that stop and let the QA /
+verification-failure alert (§3.5) surface it as a prompt/model regression — never an
+unbounded loop. Reruns respect the breaker: a QA-fail storm degrades warm coverage,
+never blows the cap (I7).
+
+**Physician manual Regenerate (already §6.1 — keep and surface it).** The doc page
+always shows a **Regenerate** button; the physician can force a fresh attempt anytime,
+independent of the QA loop. Free by construction (append-only, idempotent).
+
+**Schema change — `mod_copilot_doc` (U6 DocStore owns the `table.sql`/install edit +
+selection logic; U9 owns the warm-by-T‑30min + rerun loop; U12 owns the QA threshold
++ enqueue):** relax so a fact set carries multiple candidate narratives (best-of-N):
+- DROP `UNIQUE(pid, fact_digest)`; add non-unique index `(pid, fact_digest, id)`.
+- Add columns: `qa_status enum(pending|ok|low|unavailable) default 'pending'`,
+  `qa_score decimal(4,3) null`, `regen_reason enum(none|qa_low|manual|verify_retry)
+  default 'none'`, `verify_status enum(passed|degraded) not null default 'passed'`.
+- **Serve-selection rule (still NO LLM on read — lookup cost unchanged):** for
+  `(pid, digest)` serve the current best = most recent row with
+  `verify_status='passed'`, preferring higher `qa_score`; if none passed, serve the
+  latest `degraded` (facts-only, I6). Append-only preserved (new attempts are new
+  rows; nothing mutated — E7 still holds). Content-addressing preserved: I1 still holds
+  (served narrative corresponds to the current facts' digest; we pick best-of-candidates
+  for that digest). E1–E6 unchanged (digest computed identically).
+
+Recorded as **T22**, extending T7 (append-only) and T21 (recovery asymmetry): the
+synthesis being disposable is exactly what makes quality-driven auto-rerun safe.
+
 ## Commits
 
 Conventional Commits, scope `copilot`. One commit per build unit (or per U-pair), e.g.
