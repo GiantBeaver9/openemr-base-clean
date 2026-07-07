@@ -58,7 +58,21 @@ final readonly class LabContractConfig
 
     public function conversionRuleFor(string $analyte, string $unitOriginal): ?ConversionRule
     {
-        return $this->conversionRulesByAnalyte[$analyte][$unitOriginal] ?? null;
+        $rules = $this->conversionRulesByAnalyte[$analyte] ?? [];
+        if (isset($rules[$unitOriginal])) {
+            return $rules[$unitOriginal];
+        }
+
+        // Lab feeds/devices report units in inconsistent case (e.g. "MMOL/L"
+        // vs the whitelist's "mmol/L"); fall back to a case-insensitive match
+        // so a convertible value isn't wrongly excluded as unitless.
+        foreach ($rules as $unit => $rule) {
+            if (strcasecmp($unit, $unitOriginal) === 0) {
+                return $rule;
+            }
+        }
+
+        return null;
     }
 
     public function thresholdFor(string $analyte): ?Threshold

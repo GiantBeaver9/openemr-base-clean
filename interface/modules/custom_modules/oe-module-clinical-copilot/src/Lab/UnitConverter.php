@@ -41,7 +41,12 @@ final class UnitConverter
             return new UnitConversionResult($unitOriginal, null, null, null, true);
         }
 
-        if ($unitOriginal === $canonical) {
+        // Lab feeds/devices report units in inconsistent case ("MG/DL" vs the
+        // seeded canonical "mg/dL"); a value already in canonical units modulo
+        // case needs no conversion and must not be excluded as "unitless".
+        // (OutOfRangeEvaluator already lower-cases the abnormal flag for the
+        // same reason; units were the one lab-supplied string left unnormalised.)
+        if (strcasecmp($unitOriginal, $canonical) === 0) {
             return new UnitConversionResult($unitOriginal, $canonical, $rawValue, null, false);
         }
 

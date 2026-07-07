@@ -32,7 +32,7 @@ use OpenEMR\Modules\ClinicalCopilot\Fact\Enum\FactStatus;
  */
 final class ResultStatusClassifier
 {
-    private const UNRESULTED_STATUSES = ['cannot be done', 'incomplete', 'error', 'pending', 'canceled'];
+    private const UNRESULTED_STATUSES = ['cannot be done', 'incomplete', 'error', 'pending', 'canceled', 'cancelled'];
 
     private function __construct()
     {
@@ -41,12 +41,23 @@ final class ResultStatusClassifier
 
     public static function classify(string $resultStatus): StatusClassification
     {
+        // result_status is a free-text varchar. Normalise case/whitespace and
+        // accept the aliases OpenEMR's own HL7 result receivers actually write
+        // (rhl7ReportStatus() in interface/orders/receive_hl7_results.inc.php
+        // and the DORN receiver map C->'correct', P->'prelim') alongside the
+        // contract's canonical spellings. Without this, a real HL7-imported
+        // corrected result ('correct') falls to UnrecognizedStatus and is
+        // dropped from its supersession group, leaving the stale prior value
+        // presented as current -- the exact silent-replacement failure C2 /
+        // USERS.md §1 exist to prevent.
+        $status = strtolower(trim($resultStatus));
+
         return match (true) {
-            $resultStatus === 'final' => StatusClassification::presented(FactStatus::Final, true, false, 2),
-            $resultStatus === 'corrected' => StatusClassification::presented(FactStatus::Corrected, true, false, 3),
-            $resultStatus === '' => StatusClassification::presented(FactStatus::Unstated, true, false, 1),
-            $resultStatus === 'preliminary' => StatusClassification::presented(FactStatus::Preliminary, false, true, 0),
-            in_array($resultStatus, self::UNRESULTED_STATUSES, true) => StatusClassification::excluded(ExclusionReason::UnresultedStatus),
+            $status === '' => StatusClassification::presented(FactStatus::Unstated, true, false, 1),
+            $status === 'final' => StatusClassification::presented(FactStatus::Final, true, false, 2),
+            in_array($status, ['corrected', 'correct'], true) => StatusClassification::presented(FactStatus::Corrected, true, false, 3),
+            in_array($status, ['preliminary', 'prelim'], true) => StatusClassification::presented(FactStatus::Preliminary, false, true, 0),
+            in_array($status, self::UNRESULTED_STATUSES, true) => StatusClassification::excluded(ExclusionReason::UnresultedStatus),
             default => StatusClassification::excluded(ExclusionReason::UnrecognizedStatus),
         };
     }

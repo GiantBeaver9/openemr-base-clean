@@ -191,7 +191,12 @@ final class ControlProxy implements CapabilityInterface
 
     private static function isTrendEligible(Fact $fact): bool
     {
-        return $fact->status !== FactStatus::Corrected
+        // A fact with no clinical date can't be placed on the timeline: it
+        // would bypass the window cutoff (which only excludes dated facts) and
+        // sort to epoch 0 (dateKey ?? 0), landing first in the series and
+        // corrupting the derived deltas/span with data outside the window.
+        return $fact->clinicalDate !== null
+            && $fact->status !== FactStatus::Corrected
             && $fact->value?->comparator === Comparator::None
             && $fact->value?->parsed !== null;
     }
