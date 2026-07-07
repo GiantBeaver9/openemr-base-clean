@@ -160,8 +160,18 @@ disposable/idempotent, T21).** On the worker tick, after QA writes a verdict to
 `mod_copilot_qa`: if `concurs=false` OR `salience_ok=false` (below a versioned
 threshold in `mod_copilot_cadence` config) AND now is before ~T‑5min AND the per-tick
 LLM budget + circuit breaker allow (§3.7), enqueue ONE regeneration of that
-`(pid, digest)`: re-run the reduce over the SAME fresh facts (same digest — re-rolling
-the narrative, NOT re-pulling data), verify V1–V6, append the new attempt. **Bounded:
+`(pid, digest)`. **The rerun REUSES the already-pulled fact set — it re-extracts
+nothing.** The canonical facts are persisted in the low-scored attempt's
+`mod_copilot_doc.doc` JSON (`facts + citations`), so the rerun reads that snapshot and
+re-runs ONLY reduce+verify (redaction → LLM → V1–V6), appending the new attempt for the
+same digest. This does not violate I2 (facts-never-cached governs the SERVE/read path,
+which still recomputes fresh; replaying a stored, already-addressed snapshot to re-roll
+its narrative is provenance replay, not serving stale facts).
+**Freshness guard (keeps I1 honest):** before re-narrating, recompute the current
+digest (the tick does this anyway — cheap, LLM-free). If it still equals the low-scored
+doc's digest → reuse the stored facts as above. If it has drifted → skip the QA rerun
+and do a normal fresh warm for the new digest instead (re-rolling a stale snapshot would
+yield a doc wrong on arrival; content-addressing retires the old one). **Bounded:
 max 2 QA-driven reruns per (pid, digest)**; after that stop and let the QA /
 verification-failure alert (§3.5) surface it as a prompt/model regression — never an
 unbounded loop. Reruns respect the breaker: a QA-fail storm degrades warm coverage,
