@@ -84,9 +84,16 @@ final class ToolExecutor implements ToolExecutorInterface
         } catch (\Throwable $e) {
             // A capability throwing mid-turn is a tool failure, not a fatal
             // request error (ARCHITECTURE.md §1.3's "vitals lookup failed --
-            // answering from labs and meds only") -- the agent loop and the
-            // user both see this exact reason, never a stack trace.
-            return ToolCallOutcome::failed($request->name, "capability threw during extraction: {$e->getMessage()}");
+            // answering from labs and meds only"). The real exception is
+            // logged (it can carry SQL/internal detail); the agent loop and
+            // the user get only a generic reason -- never $e->getMessage(),
+            // which chat.php reflects verbatim into the JSON response (repo
+            // error-handling standard: no exception text in user-facing output).
+            (new \OpenEMR\Common\Logging\SystemLogger())->error(
+                'Clinical Co-Pilot: chat tool capability threw during extraction',
+                ['tool' => $request->name, 'correlation_id' => $this->correlationId, 'exception' => $e],
+            );
+            return ToolCallOutcome::failed($request->name, "the '{$request->name}' lookup failed");
         }
 
         $assertedFacts = [];
