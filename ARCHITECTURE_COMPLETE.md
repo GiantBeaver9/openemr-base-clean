@@ -6,7 +6,7 @@
 **Job:** Pre-visit synthesis — is control on target, are meds working, what's overdue, what's in flight.
 **Platform:** This OpenEMR fork. Additive only.
 
-Rationale and rejected alternatives live in [docs/clinical-copilot-tradeoffs.md](docs/clinical-copilot-tradeoffs.md) (T1–T20, referenced below). This doc is the buildable **what**. Repo conventions, canonical commands, and blast-radius live in the root `INDEX.md` / `repomap.json`; implementers follow house conventions from there (strict_types, PSR-4, QueryUtils, Twig escaping filters, CSRF on POSTs, file-header docblocks).
+Rationale and rejected alternatives live in [docs/clinical-copilot-tradeoffs.md](docs/clinical-copilot-tradeoffs.md) (T1–T21, referenced below). This doc is the buildable **what**. Repo conventions, canonical commands, and blast-radius live in the root `INDEX.md` / `repomap.json`; implementers follow house conventions from there (strict_types, PSR-4, QueryUtils, Twig escaping filters, CSRF on POSTs, file-header docblocks).
 
 ---
 
@@ -160,10 +160,16 @@ READ PATH (every read):
   extract facts fresh (deterministic, per-patient indexed queries)
   canonicalize → digest = hash(facts ‖ capability versions ‖ config/cadence version ‖ code-set version
                                ‖ doc_type ‖ reduce prompt+schema version)
+  CAPABILITY-CRASH RULE (ARCHITECTURE.md §6.1): if any capability throws during
+    extraction → NO digest, NO ledger write — a synthesis is never computed over a
+    partial fact set. Surviving capabilities' facts render under a named banner
+    ("VitalsTrend unavailable — synthesis paused"); error span carries correlation_id.
   lookup (pid, digest):
     hit  → serve stored doc
-    miss → LLM reduce → VERIFY V1–V6 (fail ⇒ one retry ⇒ facts-only, I11) → INSERT row → serve
-    miss + LLM unavailable → facts + "narrative unavailable" (I6)
+    miss → LLM reduce (transient LLM errors auto-retried up to 3, versioned config,
+           breaker-aware — rerun is free: no side effects, append-only ledger)
+           → VERIFY V1–V6 (fail ⇒ one retry ⇒ facts-only, I11) → INSERT row → serve
+    miss + LLM unavailable after retries → facts + "narrative unavailable" (I6)
 
 CHAT PATH (per turn — full spec ARCHITECTURE.md §1–§2):
   mint correlation_id; load session (pid-pinned, I10) seeded with doc fact set + narrative
@@ -207,7 +213,8 @@ mod_copilot_doc:
 mod_copilot_cadence:
   code_set · interval · version · updated_at (nullable; module-owned so allowed)
   (also carries canonical-unit/conversion config, lab-turnaround config for
-   expected_result_date facts, and §3.7 rate-limit/breaker values — all versioned)
+   expected_result_date facts, §3.7 rate-limit/breaker values, and the synthesis
+   auto-retry count (default 3, ARCHITECTURE.md §6.1) — all versioned)
 
 mod_copilot_chat_session:
   id (pk) · pid · user_id · doc_id (fk mod_copilot_doc) · fact_digest

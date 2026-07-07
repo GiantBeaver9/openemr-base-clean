@@ -1,6 +1,6 @@
 # Clinical Co-Pilot — Architecture
 
-**Companion documents:** [USERS.md](USERS.md) (target user + use cases UC1–UC6 — the source of truth every capability traces to) · [ARCHITECTURE_COMPLETE.md](ARCHITECTURE_COMPLETE.md) (the complete build spec: fact layer, lab contracts, digest model, build units) · [docs/clinical-copilot-tradeoffs.md](docs/clinical-copilot-tradeoffs.md) (decision record T1–T20, rejected alternatives).
+**Companion documents:** [USERS.md](USERS.md) (target user + use cases UC1–UC6 — the source of truth every capability traces to) · [ARCHITECTURE_COMPLETE.md](ARCHITECTURE_COMPLETE.md) (the complete build spec: fact layer, lab contracts, digest model, build units) · [docs/clinical-copilot-tradeoffs.md](docs/clinical-copilot-tradeoffs.md) (decision record T1–T21, rejected alternatives).
 
 ---
 
@@ -239,7 +239,7 @@ Before the agent ships: capture baseline CPU/memory/latency/throughput of the de
 
 ## §5 Evaluation (summary — full suite in ARCHITECTURE_COMPLETE.md)
 
-The deterministic evals E1–E7 (digest/freshness/append-only) and per-capability known-answer fixtures carry over unchanged. The agent layer adds: **verification evals** (seeded wrong-number, wrong-patient, uncited, causation-phrased outputs must be blocked — fixtures drive a stub LLM so the gate is tested without a live model); **chat evals** (multi-turn anaphora fixtures, tool-chaining known answers, chaining-budget exhaustion); **adversarial evals** (cross-patient requests via forged tool args and via prompt content, ACL-denied users, prompt-injection strings embedded in seeded lab free-text — all must refuse and log); **boundary evals** (empty patient record, all-tools-failing, LLM-down degradation, malformed chat input — empty, oversized, and garbage messages must get a clean refusal, not a stack trace); and **regression evals** as a named category — every defect found in evals or production gets a replayable fixture before its fix, and committed baselines (verification pass rate, per-check failure mix, latency) are diffed run-over-run so drift is a test failure, not a surprise. Every eval documents the failure mode it guards (same naming discipline as digest evals E1–E7). Pass/fail is deterministic wherever possible; LLM-judge scores are tracked for narrative quality but never gate CI alone.
+The deterministic evals E1–E7 (digest/freshness/append-only) and per-capability known-answer fixtures carry over unchanged. The agent layer adds: **verification evals** (seeded wrong-number, wrong-patient, uncited, causation-phrased outputs must be blocked — fixtures drive a stub LLM so the gate is tested without a live model); **chat evals** (multi-turn anaphora fixtures, tool-chaining known answers, chaining-budget exhaustion); **adversarial evals** (cross-patient requests via forged tool args and via prompt content, ACL-denied users, prompt-injection strings embedded in seeded lab free-text — all must refuse and log); **boundary evals** (empty patient record, all-tools-failing, LLM-down degradation, **capability-crash ⇒ no digest, no ledger write, banner renders** — §6.1's rule proven, not assumed; malformed chat input — empty, oversized, and garbage messages must get a clean refusal, not a stack trace); and **regression evals** as a named category — every defect found in evals or production gets a replayable fixture before its fix, and committed baselines (verification pass rate, per-check failure mix, latency) are diffed run-over-run so drift is a test failure, not a surprise. Every eval documents the failure mode it guards (same naming discipline as digest evals E1–E7). Pass/fail is deterministic wherever possible; LLM-judge scores are tracked for narrative quality but never gate CI alone.
 
 ---
 
@@ -299,7 +299,7 @@ Every failure in the tables above traces to one of five classes, each with its o
 | Authorization / who-is-asking | §4 |
 | Speed vs completeness | Summary decision 4; T5/T11/T17 |
 | HIPAA / BAA / PHI | §4; T16; OPEN-1 |
-| Failure modes / degradation | §1.3, §2.3, §3.4–3.5; I6/I7 |
+| Failure modes / degradation (why + the way around) | **§6** (recovery asymmetry, failure tables, root-cause triage); §1.3, §2.3, §3.4–3.5; I6/I7 |
 | Correlation IDs (R2) | §3.1 |
 | Schema contracts (R3) | §1.2, §2.1; fact-object schema in ARCHITECTURE_COMPLETE.md |
 | Dashboard (R4) · health/ready (R6) · alerts (R7) · baselines/load (R8–R9) | §3.3 · §3.4 · §3.5 · §3.6 |
