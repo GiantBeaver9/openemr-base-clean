@@ -1,0 +1,30 @@
+meta {
+  name: Ready
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{module_base}}/ready.php
+  auth: none
+}
+
+assert {
+  res.status: isDefined
+  res.body.status: isDefined
+  res.body.db: isDefined
+}
+
+docs {
+  Unauthenticated, redacted readiness (ARCHITECTURE.md §3.4/§3.7, R6). Runs
+  genuine dependency probes and returns status enums only — no latencies, no
+  config, no PHI. Shape:
+
+    { "status": "ready|not-ready", "db": "ok|unreachable",
+      "trace_store": "ok|unwritable", "llm": "ok|unreachable|circuit-open|unknown",
+      "worker": "ok|stale|unknown", "breaker": "open|closed|unknown" }
+
+  HTTP 200 when ready, 503 when not-ready (a DB/trace-store failure). LLM-down
+  or breaker-open is degraded-but-serving — still 200 "ready", honestly
+  reported (I6). Per-IP rate-limited: a burst may return 429 "rate-limited".
+}

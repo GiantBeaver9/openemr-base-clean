@@ -1,0 +1,19 @@
+meta {
+  name: Auth Bootstrap
+  seq: 1
+}
+
+docs {
+  # Login + CSRF bootstrap (ARCHITECTURE.md §1.3, R5)
+
+  Every Co-Pilot surface is session-authenticated and CSRF-protected. Run
+  these two requests first, in order:
+
+  1. **Login** — POSTs credentials to the host login handler. On success the
+     server sets a fresh session cookie; Bruno's cookie jar carries it on
+     every subsequent request in this run automatically.
+  2. **Fetch CSRF Token** — GETs the chat page and scrapes the
+     `csrf_token_form` hidden field into the `csrf_token` env var, which the
+     `Chat turn` request then submits. The CSRF token is minted per-session
+     server-side (CsrfUtils), so it MUST be fetched after login.
+}

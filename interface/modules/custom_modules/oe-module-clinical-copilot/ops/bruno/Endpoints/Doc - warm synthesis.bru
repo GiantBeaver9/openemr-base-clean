@@ -1,0 +1,22 @@
+meta {
+  name: Doc - warm synthesis
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{module_base}}/doc.php?pid={{synthetic_pid}}
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+}
+
+docs {
+  The pre-visit synthesis page (ARCHITECTURE.md §1.3, U8/R5). Session-
+  authenticated — run the Auth Bootstrap folder first so the session cookie
+  is present. Access requires the `patients`/`med` ACL; a caller without it
+  gets HTTP 403. `pid` MUST be a synthetic patient (OPEN-1). Renders HTML (the
+  DocController output), not JSON.
+}

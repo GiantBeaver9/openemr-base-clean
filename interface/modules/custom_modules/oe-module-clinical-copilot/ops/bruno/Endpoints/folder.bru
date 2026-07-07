@@ -1,0 +1,18 @@
+meta {
+  name: Endpoints
+  seq: 2
+}
+
+docs {
+  # The four Co-Pilot endpoints
+
+  - **Health** (GET health.php) — unauthenticated liveness; checks nothing
+    but the enabled flag + version, so it stays green during a DB/LLM outage.
+  - **Ready** (GET ready.php) — unauthenticated but redacted readiness;
+    genuine dependency probes (DB, trace store, LLM, worker, breaker). Status
+    enums only — no latencies, no PHI. Returns 200 ready / 503 not-ready.
+  - **Doc — warm synthesis** (GET doc.php?pid=) — the pre-visit summary page.
+    Session-authenticated; run the Auth Bootstrap folder first.
+  - **Chat turn** (POST chat.php) — one synchronous agent turn. Requires the
+    session cookie AND the CSRF token captured by the bootstrap.
+}

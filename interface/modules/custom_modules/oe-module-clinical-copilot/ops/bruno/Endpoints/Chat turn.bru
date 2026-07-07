@@ -1,0 +1,66 @@
+meta {
+  name: Chat turn
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{module_base}}/chat.php
+  body: formUrlEncoded
+  auth: none
+}
+
+headers {
+  Content-Type: application/x-www-form-urlencoded
+  Accept: application/json
+}
+
+body:form-urlencoded {
+  message: What were the most recent lab results on file for this patient?
+  pid: {{synthetic_pid}}
+  session_id: 0
+  csrf_token_form: {{csrf_token}}
+  transport: json
+}
+
+assert {
+  res.status: lt 500
+}
+
+script:post-response {
+  // The controller returns JSON (transport=json). A valid turn carries an
+  // `answer` + `correlation_id`; a clean refusal / guard hit returns
+  // `{ error, correlation_id }` with a 4xx status. Either is a healthy,
+  // non-crashing response. A 5xx or a stack trace is a failure.
+  const status = res.getStatus();
+  const body = res.getBody();
+  bru.setVar("chat_http_status", status);
+  if (body && body.correlation_id) {
+    console.log("Chat turn correlation_id: " + body.correlation_id);
+  }
+  if (status >= 500) {
+    console.log("ERROR: chat endpoint returned a server error (" + status + ").");
+  }
+}
+
+docs {
+  One synchronous agent turn (POST chat.php, ARCHITECTURE.md §1.3). Requires
+  BOTH the session cookie (from Login) and the CSRF token (from Fetch CSRF
+  Token) — a missing/invalid token yields HTTP 400 "Invalid or missing
+  request token".
+
+  Request fields:
+  - message  — the physician's question (max 4000 chars).
+  - pid      — SYNTHETIC patient id (OPEN-1). Used only to lazily open a
+               pinned session when `session_id` is 0; the patient is pinned
+               server-side thereafter, never trusted from the request.
+  - session_id — 0 to open/lazily-create a session; a real id to continue one.
+  - transport — `json` for a single JSON body (default). Set to `sse` (and/or
+               send `Accept: text/event-stream`) to stream staged status
+               frames. Bruno's CLI is easier to assert on with JSON.
+
+  A successful turn returns `{ correlation_id, session_id, outcome, answer,
+  claims[], verdict, facts[], tokens_in, tokens_out, ... }`. Guard hits
+  (empty message, 409 one-active-turn, 403 identity) return
+  `{ error, correlation_id }` — a clean refusal, never a stack trace.
+}

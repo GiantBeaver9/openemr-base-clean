@@ -1,0 +1,38 @@
+meta {
+  name: Fetch CSRF Token
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{module_base}}/chat.php?pid={{synthetic_pid}}
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+}
+
+script:post-response {
+  // The chat page renders the per-session CSRF token in two spots (see
+  // templates/chat.html.twig): a hidden input `csrf_token_form` and a
+  // `data-csrf` attribute. Scrape either into the env var the chat POST uses.
+  const body = String(res.getBody() || "");
+  let m = body.match(/name="csrf_token_form"\s+value="([^"]+)"/);
+  if (!m) {
+    m = body.match(/data-csrf="([^"]+)"/);
+  }
+  if (m && m[1]) {
+    bru.setEnvVar("csrf_token", m[1]);
+    console.log("Captured CSRF token (" + m[1].length + " chars).");
+  } else {
+    console.log("ERROR: could not extract a CSRF token — is the login step logged in?");
+  }
+}
+
+docs {
+  Fetches the chat page for the synthetic patient and extracts the
+  `csrf_token_form` value into the `csrf_token` environment variable. The
+  `Chat turn` request submits this token; OpenEMR's CsrfUtils rejects a POST
+  without it (HTTP 400 "Invalid or missing request token").
+}

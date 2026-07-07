@@ -1,0 +1,50 @@
+meta {
+  name: Login
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{login_url}}?auth=login&site={{site}}
+  body: formUrlEncoded
+  auth: none
+}
+
+headers {
+  Content-Type: application/x-www-form-urlencoded
+}
+
+body:form-urlencoded {
+  new_login_session_management: 1
+  authUser: {{username}}
+  clearPass: {{password}}
+  languageChoice: 1
+  site: {{site}}
+}
+
+assert {
+  res.status: lt 400
+}
+
+script:post-response {
+  // OpenEMR's new-login path does not require a CSRF token (auth.inc.php);
+  // it validates credentials and migrates to a fresh session id. The
+  // Set-Cookie from this response is stored in Bruno's cookie jar and
+  // carried by every later request automatically.
+  //
+  // A failed login re-renders the login screen (HTTP 200) with a
+  // "login failure" message rather than an error status, so assert on the
+  // body as a sanity signal that we are NOT sitting on the login form.
+  const body = String(res.getBody() || "");
+  const onLoginScreen = /name="clearPass"/.test(body) || /loginfailure/i.test(body);
+  bru.setVar("login_on_login_screen", onLoginScreen);
+  if (onLoginScreen) {
+    console.log("WARNING: still on the login screen — check username/password/site env vars.");
+  }
+}
+
+docs {
+  Logs in to OpenEMR. Default dev credentials are admin / pass (see
+  ARCHITECTURE.md / CLAUDE.md). No CSRF token is needed for the login POST
+  itself — the new-login path skips the CSRF check and issues a new session.
+}

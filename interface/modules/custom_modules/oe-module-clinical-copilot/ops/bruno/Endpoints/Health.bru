@@ -1,0 +1,23 @@
+meta {
+  name: Health
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{module_base}}/health.php
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.enabled: isDefined
+  res.body.version: isDefined
+}
+
+docs {
+  Unauthenticated liveness (ARCHITECTURE.md §3.4, R6). Returns
+  `{ "enabled": <bool>, "version": "<string>" }`. Deliberately checks NO
+  dependencies, so a DB or LLM outage must not fail liveness. This request
+  needs no login and no CSRF token.
+}

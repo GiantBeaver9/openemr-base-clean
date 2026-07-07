@@ -1,0 +1,35 @@
+docs {
+  # Clinical Co-Pilot — Bruno API Collection
+
+  A runnable, source-free walkthrough of the Clinical Co-Pilot module's four
+  HTTP surfaces. A grader can run this end-to-end WITHOUT reading module code.
+
+  ## SYNTHETIC PATIENTS ONLY (OPEN-1)
+
+  This collection is for the synthetic-data phase of the project. Point
+  `synthetic_pid` at a SYNTHETIC patient only. Never run this against a
+  database containing real Protected Health Information (PHI). PHI is only
+  ever sent in POST bodies (never URLs), and a named redaction/BAA review is
+  a hard gate before any real-PHI deployment (ARCHITECTURE.md §4, OPEN-1).
+
+  ## Real endpoints (module pages)
+
+  The doc's `/copilot/*` names are shorthand for these real module pages:
+
+  - doc.php?pid=   → GET  the warm pre-visit synthesis page (session-auth)
+  - chat.php       → POST one agent turn (session-auth + CSRF)
+  - health.php     → GET  unauthenticated liveness (enabled + version)
+  - ready.php      → GET  unauthenticated, redacted readiness (dep checks)
+
+  ## Run order
+
+  1. `Auth Bootstrap / Login` — logs in, captures the session cookie in the
+     Bruno cookie jar (carried automatically by every later request).
+  2. `Auth Bootstrap / Fetch CSRF Token` — GETs chat.php and extracts the
+     `csrf_token_form` value into the `csrf_token` env var.
+  3. `Endpoints / *` — health, ready, doc, and a chat turn.
+
+  Select the `Local` environment first. Edit `base_url` and `synthetic_pid`
+  to match your stack. The OpenEMR dev stack serves a self-signed TLS cert,
+  so the CLI needs `--insecure` (see ops/README.md).
+}
