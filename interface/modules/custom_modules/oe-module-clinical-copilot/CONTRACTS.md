@@ -39,6 +39,15 @@ signatures, and conventions so independently-built units stay coherent. Specs:
 - `VersionBundle(array $capabilityVersions, string $cadenceVersion, string $codeSetVersion, string $docType, string $promptVersion)` → `->toCanonical()`
 - `Digest(?CanonicalSerializer)` → `->compute(list<Fact>, VersionBundle): string`, `->computeForSet(FactSet, VersionBundle): string` (sha3-256, no timestamps).
 
+### Observability spine (`src/Observability/`) — partial, built
+- `CorrelationId::mint(?int $unixMillis=null): string` (UUIDv7), `::spanId()`, `::isValid()`
+- `TraceKind` (enum: extract, digest, cache_lookup, llm_reduce, chat_turn, tool_call, verify, render, warm, alert_eval)
+- `SpanStatus` (enum: ok, error, retried, degraded)
+- `Span(correlationId, spanId, ?parentSpanId, TraceKind, startedAt, ?pid, ?userId)` — mutable fields (status/duration/tokens/cost/model/errorClass/errorDetail/payloadRef); `->close()`, `->failWith(\Throwable)`, `->toRow()`. errorDetail never carries PHI.
+- `TraceRecorder` interface (`start(...)`, `record(Span)` — append-only, no update/delete)
+- `InMemoryTraceRecorder` (tests) and `DbTraceWriter` (QueryUtils INSERT into mod_copilot_trace)
+- U12 still owns: Dashboard (metrics from trace table + span-waterfall click-through), AlertEvaluator (7 alerts §3.5), RateLimiter + CircuitBreaker (§3.7, config from cadence table), `health.php`/`ready.php` pages. Build these ON TOP of the spine above; do not redefine CorrelationId/Span/TraceRecorder.
+
 ### Module skeleton — U1, complete
 - `composer.json`, `info.txt`, `version.php`, `openemr.bootstrap.php`, `moduleConfig.php` (TODO if referenced), `ModuleManagerListener.php`, `table.sql`, `cleanup.sql`, `src/Bootstrap.php`, `src/GlobalConfig.php`, `schema/fact.schema.json`.
 

@@ -82,10 +82,14 @@ final class Assert
     }
 }
 
+$filter = $argv[1] ?? '';
 $suiteDir = __DIR__ . '/Unit';
 $suites = is_dir($suiteDir) ? glob($suiteDir . '/*.php') : [];
 sort($suites);
 foreach ($suites as $suite) {
+    if ($filter !== '' && !str_contains(basename($suite), $filter)) {
+        continue;
+    }
     require $suite;
     $fn = 'clinical_copilot_test_' . basename($suite, '.php');
     if (function_exists($fn)) {
