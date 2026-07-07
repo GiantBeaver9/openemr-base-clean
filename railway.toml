@@ -3,4 +3,4 @@
 
 [build]
 builder = "DOCKERFILE"
-dockerfilePath = "docker/release/Dockerfile"
+dockerfilePath = "docker/railway/Dockerfile"

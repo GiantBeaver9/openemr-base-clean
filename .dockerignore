@@ -1,0 +1,13 @@
+.git
+.github
+.gitlab
+.cursor
+docker/development-easy
+docker/development-easy-light
+docker/development-easy-redis
+node_modules
+vendor
+**/node_modules
+**/vendor
+*.md
+!docker/release/README.md
