@@ -1,0 +1,71 @@
+{#
+ # Clinical Co-Pilot — fact table partial (U8).
+ #
+ # Renders a list of fact rows (the main fact table AND the in-flight section share this shape).
+ # Autoescape is OFF globally, so EVERY value is escaped at the sink with |text / |attr; a fact's
+ # value, flags, and citation targets are chart-derived and are never emitted raw.
+ #
+ # Parameters:
+ #   rows            list of fact-row arrays (SynthesisResult::factRow shape)
+ #   show_citations  bool — render the citation click-through column
+ #   empty_message   string — shown when rows is empty
+ #
+ # @package OpenEMR\Modules\ClinicalCopilot
+ # @license https://github.com/openemr/openemr/blob/master/LICENSE GNU General Public License 3
+ #}
+<div class="table-responsive">
+    <table class="table table-sm table-striped mod-copilot-facts">
+        <thead>
+            <tr>
+                <th>{{ "Fact"|xlt }}</th>
+                <th>{{ "Domain"|xlt }}</th>
+                <th>{{ "Kind"|xlt }}</th>
+                <th>{{ "Date"|xlt }}</th>
+                <th>{{ "Value"|xlt }}</th>
+                <th>{{ "Status"|xlt }}</th>
+                <th>{{ "Flags"|xlt }}</th>
+                {% if show_citations %}<th>{{ "Citations"|xlt }}</th>{% endif %}
+            </tr>
+        </thead>
+        <tbody>
+        {% for row in rows %}
+            <tr class="{{ row.is_conflict ? 'table-warning' : '' }}">
+                <td><code title="{{ row.fact_id|attr }}">{{ row.fact_id_short|text }}</code></td>
+                <td>{{ row.capability|text }}</td>
+                <td>{{ row.kind|text }}</td>
+                <td>{{ (row.clinical_date is not null) ? row.clinical_date|text : "—" }}
+                    {% if row.date_source == 'fallback' %}<span class="badge badge-secondary">{{ "est."|xlt }}</span>{% endif %}
+                </td>
+                <td>
+                    {% if row.value_raw is not null %}
+                        {% if row.comparator is not null and row.comparator != 'none' %}<span>{{ row.comparator|text }}</span>{% endif %}
+                        <span>{{ row.value_raw|text }}</span>
+                        {% if row.unit is not null %}<span class="text-muted">{{ row.unit|text }}</span>{% endif %}
+                    {% else %}
+                        <span class="text-muted">—</span>
+                    {% endif %}
+                </td>
+                <td>{{ row.status|text }}</td>
+                <td>
+                    {% for flag in row.flags %}
+                        <span class="badge badge-light border">{{ flag|text }}</span>
+                    {% else %}
+                        <span class="text-muted">—</span>
+                    {% endfor %}
+                </td>
+                {% if show_citations %}
+                    <td class="small">
+                        {% for cite in row.citations %}
+                            <span class="mod-copilot-citation"
+                                  data-table="{{ cite.table|attr }}"
+                                  data-pk="{{ cite.pk|attr }}">{{ cite.table|text }}#{{ cite.pk|text }}{% if cite.field is not null %}.{{ cite.field|text }}{% endif %}</span>{% if not loop.last %}, {% endif %}
+                        {% endfor %}
+                    </td>
+                {% endif %}
+            </tr>
+        {% else %}
+            <tr><td colspan="{{ show_citations ? 8 : 7 }}" class="text-muted">{{ empty_message|default("No facts"|xlt)|text }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>

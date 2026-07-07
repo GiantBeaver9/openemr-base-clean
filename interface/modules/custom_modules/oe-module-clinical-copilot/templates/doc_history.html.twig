@@ -1,0 +1,51 @@
+{#
+ # Clinical Co-Pilot — synthesis doc history view (U8).
+ #
+ # Every doc ever served for the patient, oldest first (the store returns ORDER BY computed_at).
+ # Each entry shows its narrative, its verification badge, and its facts' citations as
+ # click-through references to the underlying chart rows. Autoescape is OFF; every sink is escaped
+ # with |text / |attr / xlt and the stored narrative is split on blank lines, never rendered raw.
+ #
+ # @package OpenEMR\Modules\ClinicalCopilot
+ # @license https://github.com/openemr/openemr/blob/master/LICENSE GNU General Public License 3
+ #}
+<div class="mod-copilot-doc-history">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 class="mb-0">{{ "Clinical Co-Pilot — Summary History"|xlt }}</h2>
+        <a class="btn btn-sm btn-outline-secondary"
+           href="doc.php?pid={{ pid|attr_url }}">{{ "Back to current"|xlt }}</a>
+    </div>
+
+    {% for doc in docs %}
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>{{ "Generated"|xlt }}: {{ doc.computed_at|text }}</span>
+                {% include 'doc_badge.html.twig' with {checks_run: doc.checks_run, retried: false} only %}
+            </div>
+            <div class="card-body">
+                {% for paragraph in doc.narrative|split("\n\n") %}
+                    {% if paragraph|trim != '' %}<p>{{ paragraph|text }}</p>{% endif %}
+                {% endfor %}
+
+                <h6 class="text-muted mt-2">{{ "Citations"|xlt }}</h6>
+                <ul class="small">
+                    {% for fact in doc.facts %}
+                        {% for cite in fact.citations %}
+                            <li class="mod-copilot-citation"
+                                data-table="{{ cite.table|attr }}"
+                                data-pk="{{ cite.pk|attr }}">{{ cite.table|text }}#{{ cite.pk|text }}{% if cite.field is not null %}.{{ cite.field|text }}{% endif %}</li>
+                        {% endfor %}
+                    {% else %}
+                        <li class="text-muted">{{ "No facts recorded"|xlt }}</li>
+                    {% endfor %}
+                </ul>
+                <p class="small text-muted mb-0">
+                    {{ "prompt"|xlt }}: {{ doc.prompt_version|text }}
+                    <span class="ml-2">{{ "correlation"|xlt }}: <code>{{ doc.correlation_id|text }}</code></span>
+                </p>
+            </div>
+        </div>
+    {% else %}
+        <p class="text-muted">{{ "No summaries have been generated for this patient yet."|xlt }}</p>
+    {% endfor %}
+</div>

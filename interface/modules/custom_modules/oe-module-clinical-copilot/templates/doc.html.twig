@@ -1,0 +1,77 @@
+{#
+ # Clinical Co-Pilot — synthesis doc page (U8).
+ #
+ # Facts-first by construction (I6): the fact table is ALWAYS rendered; the narrative is an
+ # optional block above it, present only when a verified summary was served. Autoescape is OFF
+ # globally, so every sink is escaped with |text / |attr / xlt and the model narrative is NEVER
+ # emitted with |raw — it is split on blank lines and each paragraph is |text-escaped.
+ #
+ # @package OpenEMR\Modules\ClinicalCopilot
+ # @license https://github.com/openemr/openemr/blob/master/LICENSE GNU General Public License 3
+ #}
+<div class="mod-copilot-doc" data-correlation-id="{{ correlation_id|attr }}">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h2 class="mb-0">{{ "Clinical Co-Pilot — Pre-visit Summary"|xlt }}</h2>
+        <a class="btn btn-sm btn-outline-secondary"
+           href="doc.php?view=history&amp;pid={{ pid|attr_url }}">{{ "History"|xlt }}</a>
+    </div>
+
+    {# Named banner: capability crash (§6.1), freeze (SEV-1), degradation, or a retried notice. #}
+    {% if banner is not null %}
+        <div class="alert {{ (is_paused or is_frozen) ? 'alert-danger' : (degraded ? 'alert-warning' : 'alert-info') }}" role="alert">
+            {% if sev1 %}<strong>{{ "SEV-1"|xlt }}:</strong> {% endif %}
+            <span>{{ banner|text }}</span>
+        </div>
+    {% endif %}
+
+    {# Narrative block — only when a verified summary was served; otherwise a facts-only note. #}
+    {% if has_narrative %}
+        <div class="card mb-3">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start">
+                    <h5 class="card-title">{{ "Summary"|xlt }}</h5>
+                    {% include 'doc_badge.html.twig' with {checks_run: checks_run, retried: retried} only %}
+                </div>
+                {% for paragraph in narrative|split("\n\n") %}
+                    {% if paragraph|trim != '' %}<p>{{ paragraph|text }}</p>{% endif %}
+                {% endfor %}
+                {% if computed_at is not null %}
+                    <p class="small text-muted mb-0">{{ "Generated"|xlt }}: {{ computed_at|text }}
+                        <span class="ml-2">{{ "correlation"|xlt }}: <code>{{ correlation_id|text }}</code></span>
+                    </p>
+                {% endif %}
+            </div>
+        </div>
+    {% else %}
+        <div class="card mb-3 border-warning">
+            <div class="card-body">
+                <h5 class="card-title">{{ "Summary"|xlt }}</h5>
+                <p class="mb-1"><em>{{ (narrative_unavailable_reason|default("narrative unavailable"))|text }}</em></p>
+                <p class="small text-muted mb-0">
+                    {{ "The facts below are current and were extracted fresh for this view."|xlt }}
+                    <span class="ml-2">{{ "correlation"|xlt }}: <code>{{ correlation_id|text }}</code></span>
+                </p>
+            </div>
+        </div>
+    {% endif %}
+
+    {# In-flight section: pending orders + preliminary results. #}
+    {% if in_flight is not empty %}
+        <h5 class="mt-3">{{ "In flight (pending / preliminary)"|xlt }}</h5>
+        {% include 'doc_facts.html.twig' with {rows: in_flight, show_citations: true, empty_message: "Nothing in flight"|xlt} only %}
+    {% endif %}
+
+    {# The always-present fact table. #}
+    <h5 class="mt-3">{{ "Facts"|xlt }}</h5>
+    {% include 'doc_facts.html.twig' with {rows: facts, show_citations: true, empty_message: "No facts for this patient"|xlt} only %}
+
+    {# Exclusion notes: "N excluded (reason)" — silence is never left to read as normal (I5). #}
+    {% if exclusions is not empty %}
+        <h6 class="mt-3 text-muted">{{ "Excluded from synthesis"|xlt }}</h6>
+        <ul class="small text-muted">
+            {% for note in exclusions %}
+                <li>{{ note.count|text }} {{ "excluded"|xlt }} ({{ note.reason|text }})</li>
+            {% endfor %}
+        </ul>
+    {% endif %}
+</div>

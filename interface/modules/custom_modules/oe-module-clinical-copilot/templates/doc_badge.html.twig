@@ -1,0 +1,29 @@
+{#
+ # Clinical Co-Pilot — "citations checked" verification badge (U8).
+ #
+ # Hovering the badge lists which of V1–V6 ran and whether each passed (built into the title
+ # attribute, |attr-escaped). A doc that was regenerated before it passed says so with a second
+ # pill. Autoescape is OFF; every sink is escaped.
+ #
+ # Parameters:
+ #   checks_run  list of CheckSummary {id, label, passed}
+ #   retried     bool — the summary was regenerated once before passing
+ #
+ # @package OpenEMR\Modules\ClinicalCopilot
+ # @license https://github.com/openemr/openemr/blob/master/LICENSE GNU General Public License 3
+ #}
+{% set tip = [] %}
+{% set all_passed = true %}
+{% for c in checks_run %}
+    {% set tip = tip|merge([c.id ~ ' ' ~ c.label ~ ': ' ~ (c.passed ? 'pass' : 'fail')]) %}
+    {% set all_passed = all_passed and c.passed %}
+{% endfor %}
+<span class="mod-copilot-badges">
+    <span class="badge {{ all_passed ? 'badge-success' : 'badge-danger' }}"
+          title="{{ tip|join('; ')|attr }}">
+        {{ "citations checked"|xlt }} ({{ checks_run|length|text }}/6)
+    </span>
+    {% if retried %}
+        <span class="badge badge-info">{{ "regenerated"|xlt }}</span>
+    {% endif %}
+</span>
