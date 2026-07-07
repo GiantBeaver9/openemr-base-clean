@@ -1,0 +1,6 @@
+# Railway build config for nashemrendo → OpenEMR production image.
+# https://docs.railway.com/reference/config-as-code
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "docker/release/Dockerfile"
