@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openemr.org/modules/clinical-copilot/fact.schema.json",
+  "title": "Clinical Co-Pilot Fact",
+  "description": "The one canonical shape every capability output, tool result, digest input, LLM prompt fact, and verifier check operates on. The schema, not the PHP implementation, is the contract (ARCHITECTURE.md R3).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["fact_id", "capability", "capability_version", "kind", "pid", "clinical_date", "date_source", "value", "status", "flags", "citations"],
+  "properties": {
+    "fact_id": {
+      "type": "string",
+      "description": "hash(capability, kind, citations, canonical value) — value included so a corrected re-fetch never collides with a preloaded fact (T19)."
+    },
+    "capability": {
+      "enum": ["control_proxy", "med_response", "vitals_trend", "overdue_tests", "pending_results"]
+    },
+    "capability_version": { "type": "string", "description": "digest input" },
+    "kind": {
+      "enum": ["result", "trend_point", "med_event", "vital", "overdue_item", "pending_order", "preliminary_result", "exclusion", "conflict", "derived_delta", "derived_count", "derived_span", "expected_result_date"]
+    },
+    "pid": { "type": "integer", "description": "asserted on tool return (I10) and re-verified per citation (V3)" },
+    "clinical_date": {
+      "type": ["string", "null"],
+      "description": "ISO-8601 per C1 precedence; null only for kinds without a timeline"
+    },
+    "date_source": { "enum": ["collected", "fallback"] },
+    "value": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["raw", "parsed", "comparator", "unit_original", "unit_canonical", "conversion_version"],
+          "properties": {
+            "raw": { "type": "string", "description": "verbatim chart text, length-bounded" },
+            "parsed": { "type": ["number", "null"], "description": "null ⇒ no numeric claim permitted (C3)" },
+            "comparator": { "enum": ["none", "lt", "lte", "gt", "gte"], "description": "censored values (C3)" },
+            "unit_original": { "type": "string" },
+            "unit_canonical": { "type": ["string", "null"] },
+            "conversion_version": { "type": ["string", "null"], "description": "C4 whitelist version, digest input" }
+          }
+        }
+      ]
+    },
+    "status": { "enum": ["final", "corrected", "unstated", "preliminary", "excluded"] },
+    "flags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "description": "conflict | censored | superseded_N | out_of_range_by_value | out_of_range_by_lab_flag | excluded_reason:<enum>"
+      }
+    },
+    "citations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["table", "pk", "field", "date_source"],
+        "properties": {
+          "table": { "type": "string" },
+          "pk": { "type": "integer" },
+          "field": { "type": ["string", "null"] },
+          "date_source": { "enum": ["collected", "fallback"] }
+        }
+      }
+    }
+  }
+}
