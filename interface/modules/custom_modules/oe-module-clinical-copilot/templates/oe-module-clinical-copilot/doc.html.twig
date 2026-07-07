@@ -28,7 +28,7 @@
         <td>{{ fact.kind|text }}</td>
         <td>
             {%- if fact.parsed is not null -%}
-                {{ fact.comparator != 'none' ? (fact.comparator == 'lt' ? '<' : (fact.comparator == 'lte' ? '<=' : (fact.comparator == 'gt' ? '>' : '>='))) : '' }}{{ fact.parsed }}{{ fact.unit ? ' ' ~ fact.unit : '' }}
+                {{ fact.comparator != 'none' ? (fact.comparator == 'lt' ? '<' : (fact.comparator == 'lte' ? '<=' : (fact.comparator == 'gt' ? '>' : '>='))) : '' }}{{ fact.parsed }}{{ fact.unit ? ' ' ~ fact.unit|text : '' }}
             {%- else -%}
                 {{ fact.raw|default('')|text }}
             {%- endif -%}
