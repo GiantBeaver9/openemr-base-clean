@@ -69,6 +69,13 @@ final class LabRowProcessor
         /** @var array<string, list<array{row: RawLabRow, clinicalDate: ClinicalDate, statusClassification: StatusClassification, parsedValue: ParsedValue, unitConversion: UnitConversionResult}>> $groups */
         $groups = [];
 
+        // I14 (extraction conservation): tallied independently per row, NOT
+        // derived from count($rows) -- a future branch that neither excludes
+        // nor groups a row would leave $accountedRows short, which is
+        // exactly the "silently dropped before classification" regression
+        // this counter exists to catch (see LabSliceResult's docblock).
+        $accountedRows = 0;
+
         foreach ($rows as $row) {
             $clinicalDate = ClinicalDateResolver::resolve($row);
             $statusClassification = ResultStatusClassifier::classify($row->resultStatus);
@@ -86,6 +93,7 @@ final class LabRowProcessor
                     $statusClassification->exclusionReason ?? throw new \LogicException('Excluded StatusClassification must carry a reason'),
                     'result_status',
                 );
+                $accountedRows++;
                 continue;
             }
 
@@ -100,6 +108,7 @@ final class LabRowProcessor
                     ExclusionReason::Unitless,
                     'units',
                 );
+                $accountedRows++;
                 continue;
             }
 
@@ -111,6 +120,7 @@ final class LabRowProcessor
                 'parsedValue' => $parsedValue,
                 'unitConversion' => $unitConversion,
             ];
+            $accountedRows++;
         }
 
         $presented = [];
@@ -118,7 +128,7 @@ final class LabRowProcessor
             $presented[] = self::resolveGroup($group, $config, $capability, $capabilityVersion);
         }
 
-        return new LabSliceResult($presented, $exclusions);
+        return new LabSliceResult($presented, $exclusions, count($rows), $accountedRows);
     }
 
     private static function resolveUnitConversion(RawLabRow $row, ParsedValue $parsedValue, LabContractConfig $config): UnitConversionResult

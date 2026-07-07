@@ -18,6 +18,15 @@
 -- mod_copilot_doc — narratives are content-addressed by (pid, fact_digest).
 -- Facts are never cached (I2); this table caches narratives only. Append-only
 -- in code (no UPDATE/DELETE path is ever implemented against it — I3/E7).
+--
+-- T22 (Warm timing + QA-driven rerun, docs/build-notes.md): relaxed to carry
+-- best-of-N candidate narratives per (pid, fact_digest) instead of exactly
+-- one. DROPPED the UNIQUE(pid, fact_digest) key in favor of a non-unique
+-- (pid, fact_digest, id) index; added qa_status/qa_score/regen_reason/
+-- verify_status so DocStore::findBest() (U6) can serve the current best =
+-- most recent row with verify_status='passed', preferring higher qa_score,
+-- falling back to the latest 'degraded' row when none passed (I6). Still
+-- append-only (E7): new attempts are new rows, nothing here is ever mutated.
 -- ============================================================================
 #IfNotTable mod_copilot_doc
 CREATE TABLE IF NOT EXISTS `mod_copilot_doc` (
@@ -36,10 +45,14 @@ CREATE TABLE IF NOT EXISTS `mod_copilot_doc` (
     `tokens_out` INT(11) DEFAULT NULL,
     `cost_usd` DECIMAL(10,6) DEFAULT NULL,
     `excluded_counts` LONGTEXT DEFAULT NULL COMMENT 'JSON, per-analyte exclusion counts incl. unitless-exclusion rate (I5)',
+    `qa_status` ENUM('pending','ok','low','unavailable') NOT NULL DEFAULT 'pending' COMMENT 'T22/U12: post-mortem async QA verdict for this attempt; advisory only, never a serving gate',
+    `qa_score` DECIMAL(4,3) DEFAULT NULL COMMENT 'T22/U12: advisory QA score in [0,1]; drives best-of-N preference in DocStore::findBest(), never a gate by itself',
+    `regen_reason` ENUM('none','qa_low','manual','verify_retry') NOT NULL DEFAULT 'none' COMMENT 'T22: why this attempt exists; none for the first attempt at a given digest',
+    `verify_status` ENUM('passed','degraded') NOT NULL DEFAULT 'passed' COMMENT 'T22/I11: this attempt''s deterministic V1-V6 verdict; degraded = facts-only, no narrative content may be trusted/served as prose',
     PRIMARY KEY (`id`),
-    UNIQUE KEY `idx_pid_fact_digest` (`pid`, `fact_digest`),
+    KEY `idx_pid_fact_digest_id` (`pid`, `fact_digest`, `id`) COMMENT 'T22: relaxed from UNIQUE(pid, fact_digest) so best-of-N candidate narratives can coexist per digest',
     KEY `idx_pid_computed_at` (`pid`, `computed_at`)
-) ENGINE=InnoDB COMMENT='Clinical Co-Pilot: content-addressed pre-visit synthesis documents (append-only)';
+) ENGINE=InnoDB COMMENT='Clinical Co-Pilot: content-addressed pre-visit synthesis documents (append-only, best-of-N per digest, T22)';
 #EndIf
 
 -- ============================================================================
@@ -181,4 +194,52 @@ INSERT INTO `mod_copilot_cadence` (`code_set`, `interval`, `config_json`, `versi
 #IfNotRow mod_copilot_cadence code_set synthesis_retry
 INSERT INTO `mod_copilot_cadence` (`code_set`, `interval`, `config_json`, `version`, `updated_at`) VALUES
     ('synthesis_retry', NULL, '{"auto_retry_count":3}', 'v1', CURRENT_TIMESTAMP());
+#EndIf
+
+-- ============================================================================
+-- U5 ControlProxy out-of-range thresholds (lab contract C3 proof (a): parsed
+-- numeric vs. a versioned threshold). Read by DbLabContractConfigProvider
+-- (U4) into LabContractConfig::thresholdByAnalyte, keyed by the SAME
+-- unit-conversion analyte buckets as the `unit_conversion` row above (a1c,
+-- glucose, cholesterol, triglycerides) — NOT the coarser `cadence:lipids`
+-- monitoring bucket, for the identical reason DbLabContractConfigProvider's
+-- own docblock already documents for unit conversion: `cadence:lipids`
+-- bundles four LOINC codes (total cholesterol, LDL, HDL, triglycerides)
+-- under one monitoring interval, but total cholesterol/LDL/HDL share one
+-- conversion-and-threshold bucket ("cholesterol") while triglycerides use a
+-- separate one. A "lipids" threshold row would never be looked up by
+-- LabRowProcessor (it resolves the analyte via analyteForLoinc(), which only
+-- ever yields "cholesterol"/"triglycerides"/"a1c"/"glucose") — so "lipids" is
+-- split into its two real analyte buckets here, matching config, not renamed.
+--
+-- Known accepted limitation (see the U5 report): the "cholesterol" bucket
+-- covers three distinct LOINC codes (total cholesterol, LDL, HDL) under one
+-- threshold+direction, so a single "high" threshold is a simplification for
+-- LDL/total cholesterol risk targets and is directionally WRONG for HDL
+-- (where low, not high, is the abnormal direction). Splitting this further
+-- needs per-LOINC (not per-analyte-bucket) threshold config — a versioned
+-- config/schema extension per the T13 extension model, out of scope here.
+--
+-- Endocrinology targets used (ADA general targets for non-pregnant adults
+-- with type 2 diabetes); each is its own versioned row so a target change
+-- ships as a version bump (E5), never an in-place semantic change.
+-- ============================================================================
+#IfNotRow mod_copilot_cadence code_set threshold:a1c
+INSERT INTO `mod_copilot_cadence` (`code_set`, `interval`, `config_json`, `version`, `updated_at`) VALUES
+    ('threshold:a1c', NULL, '{"value":7.0,"direction":"high","description":"ADA general A1c target for most non-pregnant adults with type 2 diabetes: <7.0%"}', 'v1', CURRENT_TIMESTAMP());
+#EndIf
+
+#IfNotRow mod_copilot_cadence code_set threshold:glucose
+INSERT INTO `mod_copilot_cadence` (`code_set`, `interval`, `config_json`, `version`, `updated_at`) VALUES
+    ('threshold:glucose', NULL, '{"value":130,"direction":"high","description":"ADA preprandial/fasting plasma glucose target upper bound: 130 mg/dL"}', 'v1', CURRENT_TIMESTAMP());
+#EndIf
+
+#IfNotRow mod_copilot_cadence code_set threshold:cholesterol
+INSERT INTO `mod_copilot_cadence` (`code_set`, `interval`, `config_json`, `version`, `updated_at`) VALUES
+    ('threshold:cholesterol', NULL, '{"value":100,"direction":"high","description":"LDL-C ASCVD-risk target for diabetic patients: <100 mg/dL. Bucket also covers total cholesterol and HDL codes (see table.sql comment above) — accepted simplification, not directionally correct for HDL."}', 'v1', CURRENT_TIMESTAMP());
+#EndIf
+
+#IfNotRow mod_copilot_cadence code_set threshold:triglycerides
+INSERT INTO `mod_copilot_cadence` (`code_set`, `interval`, `config_json`, `version`, `updated_at`) VALUES
+    ('threshold:triglycerides', NULL, '{"value":150,"direction":"high","description":"Normal fasting triglycerides upper bound: 150 mg/dL"}', 'v1', CURRENT_TIMESTAMP());
 #EndIf
