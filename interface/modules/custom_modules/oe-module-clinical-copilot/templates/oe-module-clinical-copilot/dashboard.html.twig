@@ -66,7 +66,12 @@
                 {{ "hourly burn cap"|xlt }}=${{ limits.hourly_llm_burn_cap_usd }}
             </p>
             <form method="post" action="{{ dashboard_url|attr }}" class="form-inline">
-                {{ csrfToken() }}
+                {# See doc.html.twig's Regenerate form for why the field name is
+                   pinned explicitly: csrfToken()'s own default ("_token") does not
+                   match dashboard.php's CsrfUtils::checkCsrfInput() default key
+                   ("csrf_token_form"); left as the default it silently 403s the
+                   breaker force-open/reset actions. #}
+                {{ csrfToken('default', 'csrf_token_form') }}
                 {% if breaker.open %}
                     <input type="hidden" name="action" value="breaker_reset">
                     <button type="submit" class="btn btn-sm btn-outline-secondary">{{ "Manual reset (ACL-gated, audit-logged)"|xlt }}</button>

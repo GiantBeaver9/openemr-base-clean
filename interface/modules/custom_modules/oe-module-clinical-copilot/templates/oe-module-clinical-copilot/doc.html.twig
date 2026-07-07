@@ -197,7 +197,13 @@
         {% endif %}
 
         <form method="post" action="{{ doc_url|attr }}" class="mb-4">
-            {{ csrfToken() }}
+            {# csrfToken()'s own default field name is "_token" (Symfony-style);
+               this module's public/*.php pages check CsrfUtils::checkCsrfInput()
+               with ITS default key, "csrf_token_form" (the convention every other
+               legacy form in this codebase uses) -- pass it explicitly so the
+               posted field name matches what doc.php actually reads, or the
+               Regenerate button 403s on every click. #}
+            {{ csrfToken('default', 'csrf_token_form') }}
             <input type="hidden" name="action" value="regenerate">
             <button type="submit" class="btn btn-secondary">
                 <i class="fa fa-refresh mr-1"></i>{{ "Regenerate"|xlt }}

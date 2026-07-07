@@ -24,7 +24,13 @@
         <small class="text-muted">{{ "pinned to this patient -- answers cite the same facts as the synthesis above"|xlt }}</small>
     </div>
     <div class="card-body">
-        <input type="hidden" id="ccpChatCsrf" value="{{ csrfToken()|attr }}">
+        {# csrfToken() (no args) renders a whole <input type="hidden" ...> tag,
+           not a bare value -- using it here would embed that entire markup
+           string as this input's `value` attribute instead of the token
+           itself, so the JS below would POST the literal HTML back to
+           chat.php and fail CSRF on every request. csrfTokenRaw() returns just
+           the token string, which is what a JS-read hidden value needs. #}
+        <input type="hidden" id="ccpChatCsrf" value="{{ csrfTokenRaw()|attr }}">
         <input type="hidden" id="ccpChatUrl" value="{{ chat_url|attr }}">
         <input type="hidden" id="ccpStatusUrl" value="{{ status_url|attr }}">
 
