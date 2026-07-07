@@ -105,6 +105,33 @@ Every capability output, tool result, digest input, prompt fact, verifier check 
 - Every eval documents the failure mode it guards (naming discipline like E1–E7).
 - `php -l` must pass on every file. Follow PHPStan level-10 expectations (native types everywhere, no `mixed` unless narrowed, no new baseline entries).
 
+## U12 additions — accuracy agent + telemetry (user decision of record)
+
+The user explicitly wants (a) the advisory accuracy-gauging agent and (b) richer
+telemetry to prove the prompts are working. Build these into U12. **Guardrail: the
+accuracy agent is ADVISORY, never a blocking gate** — the deterministic verifier
+V1–V6 stays the only gate (T15). The agent scores and watches; it never approves.
+
+- **Accuracy agent** = the §2.5 second-pass reviewer: a separate **Gemini Flash**
+  instance that re-reads each rendered answer (synthesis + chat turn) against the
+  session fact set from scratch and returns a structured verdict
+  `{concurs: bool, flags: [{claim_ref, class: emphasis|paraphrase|omission|other, note}]}`.
+  Stored on the doc/turn row and in a `verify`-adjacent trace span; feeds the
+  dashboard and eval suite. When ADC/LLM is unavailable it degrades silently
+  (verdict `unavailable`) — it must never block rendering.
+- **Dashboard metrics to add (all from the trace table + the Flash verdict):**
+  `reviewer_concurrence_rate`; `salience_score` (reviewer flags a "Salience Failure"
+  when a high-priority out-of-range/critical fact is not near the top);
+  `narrative_density_ratio` (unique cited clinical entities ÷ narrative length);
+  `fact_utilization_rate` / null-data density (% of extracted facts left uncited —
+  fluff + capability-tuning signal); `chat_drilldown_rate` (turns needing a tool
+  call beyond the preloaded envelope — what the pre-pull couldn't answer). These sit
+  beside the already-specced per-check `verification_pass_rate` (V1–V6), cache hit
+  rate, p50/p95, cost, and the over-reliance indicators (citation click-through,
+  facts-panel opens).
+- Deterministic wherever possible: density/utilization/drilldown are pure trace math
+  (no LLM). Only concurrence/salience use the Flash verdict, and both are advisory.
+
 ## Commits
 
 Conventional Commits, scope `copilot`. One commit per build unit (or per U-pair), e.g.
