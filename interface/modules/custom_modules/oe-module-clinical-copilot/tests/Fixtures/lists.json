@@ -1,0 +1,35 @@
+[
+  {
+    "id": 8101,
+    "pid": 9001,
+    "type": "medication",
+    "title": "Metformin 500mg",
+    "begdate": "2024-06-01",
+    "enddate": null,
+    "activity": 1,
+    "diagnosis": "ICD10:E11.9",
+    "comments": "Same drug as prescriptions.7101 -> MedResponse union must dedup, not double-count"
+  },
+  {
+    "id": 8201,
+    "pid": 9002,
+    "type": "medication",
+    "title": "Glipizide 5mg",
+    "begdate": "2025-02-01",
+    "enddate": null,
+    "activity": 1,
+    "diagnosis": "ICD10:E11.9",
+    "comments": ""
+  },
+  {
+    "id": 8401,
+    "pid": 9004,
+    "type": "medication",
+    "title": "Insulin glargine",
+    "begdate": "2025-01-10",
+    "enddate": null,
+    "activity": 1,
+    "diagnosis": "ICD10:E11.9",
+    "comments": "Union counterpart to prescriptions.7401 (dedup target)"
+  }
+]

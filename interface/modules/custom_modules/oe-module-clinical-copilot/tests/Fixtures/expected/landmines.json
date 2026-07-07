@@ -1,0 +1,176 @@
+{
+  "_about": "Known-answer expectations for every U2 landmine. Vocabulary matches src/Fact enums (Capability, FactKind, FactStatus, Comparator, ExclusionReason, Flag, DateSource). Each contract test (U4 LabSlice, U5 Capabilities) asserts against the row here for its landmine. clinical_date values follow the C1 precedence: procedure_report.date_collected -> procedure_order.date_collected -> procedure_result.date -> procedure_report.date_report.",
+  "landmines": {
+    "L1_rising_a1c_trend": {
+      "pid": 9001,
+      "capability": "control_proxy",
+      "source_rows": { "procedure_result": [6101, 6102, 6103] },
+      "expected": {
+        "trend_points": [
+          { "clinical_date": "2025-09-10", "parsed": 7.1, "unit_canonical": "%", "date_source": "collected" },
+          { "clinical_date": "2026-01-12", "parsed": 7.8, "unit_canonical": "%", "date_source": "collected" },
+          { "clinical_date": "2026-06-20", "parsed": 8.46, "unit_canonical": "%", "date_source": "collected", "note": "converted from 69 mmol/mol" }
+        ],
+        "derived_delta": { "kind": "derived_delta", "from": 7.1, "to": 8.46, "delta": 1.36, "direction": "rising", "cites": [6101, 6103] },
+        "all_out_of_range_by_lab_flag": true
+      }
+    },
+    "L2_med_dose_a1c_mismatch": {
+      "pid": 9001,
+      "capability": "med_response",
+      "source_rows": { "prescriptions": [7101], "lists": [8101], "procedure_result": [6101, 6102, 6103] },
+      "expected": {
+        "paired": true,
+        "med": { "drug": "Metformin", "dosage": "500", "stable_since": "2024-06-01", "dose_changed": false },
+        "lab_trend_direction": "rising",
+        "union_dedup": "prescriptions.7101 and lists.8101 are the same drug -> counted once",
+        "asserts_causation": false,
+        "note": "MedResponse presents the paired stable-dose / rising-A1c facts and cites both; it never claims the dose caused (or failed to cause) the rise."
+      }
+    },
+    "L3_overdue_urine_acr": {
+      "pid": 9002,
+      "capability": "overdue_tests",
+      "source_rows": { "procedure_result": [6201], "mod_copilot_cadence": ["code_set:acr"] },
+      "expected": {
+        "code_set": "acr",
+        "loinc": "9318-7",
+        "last_collected": "2024-11-15",
+        "interval_days": 365,
+        "as_of": "2026-07-07",
+        "overdue": true,
+        "kind": "overdue_item",
+        "reorder_note_suppressed": false,
+        "note": "No active pending ACR order exists, so PendingResults does NOT suppress the reorder note."
+      }
+    },
+    "L4_late_arriving_lab": {
+      "pid": 9004,
+      "capability": "control_proxy",
+      "source_rows": { "procedure_result": [6402], "procedure_report": [5402], "procedure_order": [4402] },
+      "expected": {
+        "clinical_date": "2026-03-05",
+        "date_source": "fallback",
+        "parsed": 7.9,
+        "note": "report.date_collected and order.date_collected are NULL, so C1 falls through to procedure_result.date (2026-03-05); the fact carries date_source=fallback. Because the draw date (2026-03-05) precedes the 2026-05-20 corrected draw, it sorts EARLIER in the trend even though its row was entered later (E1 late-arrival: a re-extract that adds this row changes the digest).",
+        "digest_effect": "adding/altering this row changes the fact digest (E1)"
+      }
+    },
+    "L5_corrected_lab_in_place": {
+      "pid": 9004,
+      "capability": "control_proxy",
+      "source_rows": { "procedure_result": [6401] },
+      "expected": {
+        "variant": "in_place_update",
+        "winner_result_id": 6401,
+        "status": "corrected",
+        "parsed": 7.4,
+        "superseded_siblings": [],
+        "supersedes_count": 0,
+        "note": "In-place UPDATE leaves ONE row whose result_status flipped final->corrected and whose value changed 8.9->7.4. There is no prior sibling row to flag superseded; the fact is presented as status=corrected. (E2: the in-place value change alters the digest.)"
+      }
+    },
+    "L6_corrected_lab_new_row": {
+      "pid": 9002,
+      "capability": "control_proxy",
+      "source_rows": { "procedure_result": [6202, 6203] },
+      "expected": {
+        "variant": "new_row_correction",
+        "group_key": { "pid": 9002, "result_code": "4548-4", "clinical_date": "2026-05-02" },
+        "winner_result_id": 6203,
+        "winner_status": "corrected",
+        "winner_parsed": 7.6,
+        "superseded_result_id": 6202,
+        "superseded_flag": "superseded_1",
+        "supersedes_count": 1,
+        "note": "Two rows share (pid, result_code, clinical_date). Supersession rank corrected>final; corrected row 6203 wins and its citation notes 'supersedes 1 prior result'; row 6202 carries the superseded_n flag and status=excluded (reason superseded)."
+      }
+    },
+    "L7_drawn_but_unresulted": {
+      "pid": 9002,
+      "capability": "pending_results",
+      "source_rows": { "procedure_order": [4203], "procedure_report": [5203], "procedure_result": [] },
+      "expected": {
+        "kind": "pending_order",
+        "order_id": 4203,
+        "order_status": "routed",
+        "has_final_or_corrected_result": false,
+        "resets_overdue_clock": false,
+        "counts_as_result": false,
+        "expected_result_date": { "derived_from": "turnaround:a1c", "collection": "2026-07-02", "days": 2, "value": "2026-07-04" },
+        "note": "Order collected (report received) but ZERO result rows -> shown as an in-flight pending order. It never counts as a result and never resets the overdue clock (T10). expected_result_date is a derived, cited fact from turnaround config."
+      }
+    },
+    "L8_censored_value_lt7": {
+      "pid": 9003,
+      "capability": "control_proxy",
+      "source_rows": { "procedure_result": [6301] },
+      "expected": {
+        "raw": "<7.0",
+        "comparator": "lt",
+        "parsed": 7.0,
+        "flags": ["censored"],
+        "presented": true,
+        "exact_numeric_claim_allowed": false,
+        "note": "Comparator-censored: the fact carries comparator=lt and a censored flag. Support only claims the direction (< 7.0) proves; plotted with a marker, never as an exact point."
+      }
+    },
+    "L9_unitless_value": {
+      "pid": 9003,
+      "capability": "control_proxy",
+      "source_rows": { "procedure_result": [6302] },
+      "expected": {
+        "raw": "142",
+        "unit_original": "",
+        "status": "excluded",
+        "exclusion_reason": "no_unit",
+        "flags": ["excluded_reason:no_unit"],
+        "visible": true,
+        "excluded_from_thresholds_and_trends": true,
+        "counts_toward_unitless_exclusion_rate": true,
+        "note": "No unit, no math. Value shown verbatim but excluded from thresholds/trends and counted in the per-analyte unitless-exclusion rate (I5: excluded-but-visible)."
+      }
+    },
+    "L10_mmol_mol_a1c": {
+      "pid": 9001,
+      "capability": "control_proxy",
+      "source_rows": { "procedure_result": [6103], "mod_copilot_cadence": ["unit:a1c"] },
+      "expected": {
+        "unit_original": "mmol/mol",
+        "raw": "69",
+        "unit_canonical": "%",
+        "parsed_canonical": 8.46,
+        "conversion_version": "conv:a1c@1",
+        "note": "IFCC mmol/mol converted to NGSP % via the whitelist (0.09148*69 + 2.152 = 8.464). Fact carries original unit, canonical unit, and conversion_version (a digest input)."
+      }
+    },
+    "L11_unrecognized_status": {
+      "pid": 9003,
+      "capability": "control_proxy",
+      "source_rows": { "procedure_result": [6304] },
+      "expected": {
+        "result_status_raw": "transcribed",
+        "status": "excluded",
+        "exclusion_reason": "unrecognized_status",
+        "flags": ["excluded_reason:unrecognized_status"],
+        "visible": true,
+        "resets_overdue_clock": false,
+        "note": "Status not in the known vocabulary -> exclude-and-flag, never guess. Visible exclusion (I5); does not reset the overdue clock."
+      }
+    },
+    "L12_preliminary_result": {
+      "pid": 9003,
+      "capability": "control_proxy_and_pending_results",
+      "source_rows": { "procedure_result": [6303] },
+      "expected": {
+        "status": "preliminary",
+        "kind": "preliminary_result",
+        "parsed": 8.1,
+        "in_flight_section": true,
+        "is_trend_point": false,
+        "resets_overdue_clock": false,
+        "note": "Preliminary A1c renders in the in-flight section beside PendingResults ('preliminary A1c 8.1 - final pending'), is never a trend point, and does NOT reset the overdue clock (C2)."
+      }
+    }
+  }
+}

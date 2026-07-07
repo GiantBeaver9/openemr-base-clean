@@ -1,0 +1,113 @@
+[
+  {
+    "procedure_report_id": 5101,
+    "procedure_order_id": 4101,
+    "procedure_order_seq": 1,
+    "date_collected": "2025-09-10 08:20:00",
+    "date_report": "2025-09-11 14:00:00",
+    "report_status": "final",
+    "review_status": "reviewed"
+  },
+  {
+    "procedure_report_id": 5102,
+    "procedure_order_id": 4102,
+    "procedure_order_seq": 1,
+    "date_collected": "2026-01-12 08:15:00",
+    "date_report": "2026-01-13 14:00:00",
+    "report_status": "final",
+    "review_status": "reviewed"
+  },
+  {
+    "procedure_report_id": 5103,
+    "procedure_order_id": 4103,
+    "procedure_order_seq": 1,
+    "date_collected": "2026-06-20 08:05:00",
+    "date_report": "2026-06-21 14:00:00",
+    "report_status": "final",
+    "review_status": "reviewed"
+  },
+  {
+    "procedure_report_id": 5201,
+    "procedure_order_id": 4201,
+    "procedure_order_seq": 1,
+    "date_collected": "2024-11-15 09:10:00",
+    "date_report": "2024-11-16 12:00:00",
+    "report_status": "final",
+    "review_status": "reviewed"
+  },
+  {
+    "procedure_report_id": 5202,
+    "procedure_order_id": 4202,
+    "procedure_order_seq": 1,
+    "date_collected": "2026-05-02 09:05:00",
+    "date_report": "2026-05-03 12:00:00",
+    "report_status": "final",
+    "review_status": "reviewed"
+  },
+  {
+    "procedure_report_id": 5203,
+    "procedure_order_id": 4203,
+    "procedure_order_seq": 1,
+    "date_collected": "2026-07-02 09:15:00",
+    "date_report": null,
+    "report_status": "received",
+    "review_status": "received",
+    "_note": "9002 drawn-but-unresulted: report exists, no procedure_result rows reference this report"
+  },
+  {
+    "procedure_report_id": 5301,
+    "procedure_order_id": 4301,
+    "procedure_order_seq": 1,
+    "date_collected": "2026-04-10 10:10:00",
+    "date_report": "2026-04-11 13:00:00",
+    "report_status": "final",
+    "review_status": "reviewed"
+  },
+  {
+    "procedure_report_id": 5302,
+    "procedure_order_id": 4302,
+    "procedure_order_seq": 1,
+    "date_collected": "2026-04-10 10:10:00",
+    "date_report": "2026-04-11 13:00:00",
+    "report_status": "final",
+    "review_status": "reviewed"
+  },
+  {
+    "procedure_report_id": 5303,
+    "procedure_order_id": 4303,
+    "procedure_order_seq": 1,
+    "date_collected": "2026-07-01 08:40:00",
+    "date_report": null,
+    "report_status": "received",
+    "review_status": "received",
+    "_note": "9003 preliminary A1c report — result_status preliminary on its result row"
+  },
+  {
+    "procedure_report_id": 5304,
+    "procedure_order_id": 4304,
+    "procedure_order_seq": 1,
+    "date_collected": "2026-02-15 10:05:00",
+    "date_report": "2026-02-16 13:00:00",
+    "report_status": "final",
+    "review_status": "reviewed"
+  },
+  {
+    "procedure_report_id": 5401,
+    "procedure_order_id": 4401,
+    "procedure_order_seq": 1,
+    "date_collected": "2026-05-20 07:55:00",
+    "date_report": "2026-05-21 13:00:00",
+    "report_status": "final",
+    "review_status": "reviewed"
+  },
+  {
+    "procedure_report_id": 5402,
+    "procedure_order_id": 4402,
+    "procedure_order_seq": 1,
+    "date_collected": null,
+    "date_report": "2026-06-25 11:30:00",
+    "report_status": "final",
+    "review_status": "reviewed",
+    "_note": "9004 backdated lab: report+order date_collected NULL -> C1 falls through to result.date, date_source=fallback"
+  }
+]

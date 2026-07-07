@@ -1,0 +1,58 @@
+[
+  {
+    "pid": 9001,
+    "pubpid": "CCPILOT-9001",
+    "title": "Mr.",
+    "fname": "Diego",
+    "lname": "Rivera",
+    "DOB": "1968-03-14",
+    "sex": "Male",
+    "status": "married",
+    "street": "114 Rio Grande Ave",
+    "city": "Santa Fe",
+    "state": "NM",
+    "postal_code": "87501"
+  },
+  {
+    "pid": 9002,
+    "pubpid": "CCPILOT-9002",
+    "title": "Ms.",
+    "fname": "Mei",
+    "lname": "Chen",
+    "DOB": "1975-08-02",
+    "sex": "Female",
+    "status": "single",
+    "street": "88 Lantern Way",
+    "city": "Sacramento",
+    "state": "CA",
+    "postal_code": "95814"
+  },
+  {
+    "pid": 9003,
+    "pubpid": "CCPILOT-9003",
+    "title": "Ms.",
+    "fname": "Amara",
+    "lname": "Okafor",
+    "DOB": "1981-11-27",
+    "sex": "Female",
+    "status": "married",
+    "street": "5 Baobab Court",
+    "city": "Houston",
+    "state": "TX",
+    "postal_code": "77002"
+  },
+  {
+    "pid": 9004,
+    "pubpid": "CCPILOT-9004",
+    "title": "Mr.",
+    "fname": "Rafael",
+    "lname": "Santos",
+    "DOB": "1959-06-09",
+    "sex": "Male",
+    "status": "widowed",
+    "street": "220 Harborview Rd",
+    "city": "Miami",
+    "state": "FL",
+    "postal_code": "33101"
+  }
+]

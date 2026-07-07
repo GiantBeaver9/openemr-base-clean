@@ -1,0 +1,61 @@
+[
+  {
+    "config_key": "code_set:a1c",
+    "config_value": "{\"loinc\":[\"4548-4\"],\"interval_days\":180}",
+    "version": "cadence@1",
+    "updated_at": "2026-01-01 00:00:00",
+    "_note": "A1c recommended every 180 days"
+  },
+  {
+    "config_key": "code_set:acr",
+    "config_value": "{\"loinc\":[\"9318-7\"],\"interval_days\":365}",
+    "version": "cadence@1",
+    "updated_at": "2026-01-01 00:00:00",
+    "_note": "Urine ACR annual; 9002 last draw 2024-11-15 is overdue as of 2026-07-07"
+  },
+  {
+    "config_key": "code_set:glucose",
+    "config_value": "{\"loinc\":[\"2345-7\"],\"interval_days\":180}",
+    "version": "cadence@1",
+    "updated_at": "2026-01-01 00:00:00"
+  },
+  {
+    "config_key": "code_set:ldl",
+    "config_value": "{\"loinc\":[\"13457-7\"],\"interval_days\":365}",
+    "version": "cadence@1",
+    "updated_at": "2026-01-01 00:00:00"
+  },
+  {
+    "config_key": "unit:a1c",
+    "config_value": "{\"canonical\":\"%\",\"conversions\":{\"mmol/mol\":{\"formula\":\"ngsp = 0.09148 * x + 2.152\"}},\"conversion_version\":\"conv:a1c@1\"}",
+    "version": "cadence@1",
+    "updated_at": "2026-01-01 00:00:00",
+    "_note": "IFCC mmol/mol -> NGSP %; 69 mmol/mol -> ~8.46%"
+  },
+  {
+    "config_key": "unit:glucose",
+    "config_value": "{\"canonical\":\"mg/dL\",\"conversions\":{\"mmol/L\":{\"factor\":18.018}},\"conversion_version\":\"conv:glucose@1\"}",
+    "version": "cadence@1",
+    "updated_at": "2026-01-01 00:00:00"
+  },
+  {
+    "config_key": "threshold:a1c",
+    "config_value": "{\"target_max\":7.0,\"threshold_version\":\"thr:a1c@1\"}",
+    "version": "cadence@1",
+    "updated_at": "2026-01-01 00:00:00",
+    "_note": "ADA general target < 7.0% (out-of-range proof A)"
+  },
+  {
+    "config_key": "turnaround:a1c",
+    "config_value": "{\"days\":2}",
+    "version": "cadence@1",
+    "updated_at": "2026-01-01 00:00:00",
+    "_note": "expected_result_date = collection + 2d (PendingResults derived fact)"
+  },
+  {
+    "config_key": "turnaround:acr",
+    "config_value": "{\"days\":3}",
+    "version": "cadence@1",
+    "updated_at": "2026-01-01 00:00:00"
+  }
+]

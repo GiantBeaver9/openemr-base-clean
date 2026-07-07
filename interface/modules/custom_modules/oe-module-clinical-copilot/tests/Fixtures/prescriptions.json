@@ -1,0 +1,58 @@
+[
+  {
+    "id": 7101,
+    "patient_id": 9001,
+    "drug": "Metformin",
+    "drug_id": 0,
+    "rxnorm_drugcode": "860975",
+    "dosage": "500",
+    "quantity": "60",
+    "size": "500 mg",
+    "start_date": "2024-06-01",
+    "end_date": null,
+    "active": 1,
+    "note": "Unchanged 500 mg daily for >1 year while A1c climbs 7.1 -> 8.5 (med-dose-vs-A1c mismatch)"
+  },
+  {
+    "id": 7201,
+    "patient_id": 9002,
+    "drug": "Glipizide",
+    "drug_id": 0,
+    "rxnorm_drugcode": "310490",
+    "dosage": "5",
+    "quantity": "30",
+    "size": "5 mg",
+    "start_date": "2025-02-01",
+    "end_date": null,
+    "active": 1,
+    "note": ""
+  },
+  {
+    "id": 7301,
+    "patient_id": 9003,
+    "drug": "Metformin",
+    "drug_id": 0,
+    "rxnorm_drugcode": "861007",
+    "dosage": "1000",
+    "quantity": "60",
+    "size": "1000 mg",
+    "start_date": "2025-06-01",
+    "end_date": null,
+    "active": 1,
+    "note": ""
+  },
+  {
+    "id": 7401,
+    "patient_id": 9004,
+    "drug": "Insulin glargine",
+    "drug_id": 0,
+    "rxnorm_drugcode": "285018",
+    "dosage": "20",
+    "quantity": "1",
+    "size": "100 unit/mL",
+    "start_date": "2025-01-10",
+    "end_date": null,
+    "active": 1,
+    "note": "Also present in lists(type=medication) to exercise MedResponse union+dedup"
+  }
+]
