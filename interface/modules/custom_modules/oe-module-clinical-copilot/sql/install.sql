@@ -1,0 +1,184 @@
+--
+-- Clinical Co-Pilot Module
+-- Table definitions and initial config seed.
+--
+-- @package   OpenEMR\Modules\ClinicalCopilot
+-- @link      https://www.open-emr.org
+-- @author    Clinical Co-Pilot Team
+-- @copyright Copyright (c) 2026 OpenEMR Foundation
+-- @license   https://github.com/openemr/openemr/blob/master/LICENSE GNU General Public License 3
+--
+-- All existing OpenEMR tables are read-only to this module (I9 additivity).
+-- Only the five mod_copilot_* tables below are module-owned/writable, plus
+-- one background_services row registered here and managed (activated /
+-- deactivated) by ModuleManagerListener on enable/disable.
+--
+
+-- ============================================================================
+-- mod_copilot_doc — narratives are content-addressed by (pid, fact_digest).
+-- Facts are never cached (I2); this table caches narratives only. Append-only
+-- in code (no UPDATE/DELETE path is ever implemented against it — I3/E7).
+-- ============================================================================
+#IfNotTable mod_copilot_doc
+CREATE TABLE IF NOT EXISTS `mod_copilot_doc` (
+    `id` BIGINT(20) NOT NULL AUTO_INCREMENT,
+    `pid` BIGINT(20) NOT NULL COMMENT 'references patient_data.pid (read-only reference, no FK against core)',
+    `fact_digest` VARCHAR(64) NOT NULL COMMENT 'hash(facts || capability versions || cadence/config version || code-set version || doc_type || reduce prompt+schema version), I1',
+    `doc_type` VARCHAR(64) NOT NULL DEFAULT 'endo-previsit-v1' COMMENT 'digest input; column exists for querying by doc type',
+    `appt_id` BIGINT(20) DEFAULT NULL COMMENT 'metadata only, references openemr_postcalendar_events.pc_eid; NOT part of any key',
+    `doc` LONGTEXT NOT NULL COMMENT 'JSON: facts + citations + narrative',
+    `capability_versions` LONGTEXT NOT NULL COMMENT 'JSON map of capability => capability_version, a digest input',
+    `prompt_version` VARCHAR(64) NOT NULL COMMENT 'reduce prompt+schema version, a digest input',
+    `computed_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'display only; staleness is cache addressing via fact_digest, never a timestamp check (I4)',
+    `correlation_id` VARCHAR(64) NOT NULL COMMENT 'I12: every invocation leaves a trace',
+    `llm_latency_ms` INT(11) DEFAULT NULL,
+    `tokens_in` INT(11) DEFAULT NULL,
+    `tokens_out` INT(11) DEFAULT NULL,
+    `cost_usd` DECIMAL(10,6) DEFAULT NULL,
+    `excluded_counts` LONGTEXT DEFAULT NULL COMMENT 'JSON, per-analyte exclusion counts incl. unitless-exclusion rate (I5)',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `idx_pid_fact_digest` (`pid`, `fact_digest`),
+    KEY `idx_pid_computed_at` (`pid`, `computed_at`)
+) ENGINE=InnoDB COMMENT='Clinical Co-Pilot: content-addressed pre-visit synthesis documents (append-only)';
+#EndIf
+
+-- ============================================================================
+-- mod_copilot_cadence — versioned config: monitoring cadences, canonical-unit
+-- conversion whitelist, lab-turnaround (expected_result_date), rate-limit /
+-- circuit-breaker values (§3.7), synthesis auto-retry count. This is the one
+-- module table where UPDATE is permitted in code — config only (I3 exempts
+-- config rows, not the ledgers).
+-- ============================================================================
+#IfNotTable mod_copilot_cadence
+CREATE TABLE IF NOT EXISTS `mod_copilot_cadence` (
+    `id` BIGINT(20) NOT NULL AUTO_INCREMENT,
+    `code_set` VARCHAR(64) NOT NULL COMMENT 'config key, e.g. cadence:acr, cadence:a1c, cadence:lipids, unit_conversion, lab_turnaround, rate_limit_breaker, synthesis_retry',
+    `interval` VARCHAR(32) DEFAULT NULL COMMENT 'human-scale interval for cadence rows, e.g. "P1Y", "P3M"; NULL for non-cadence config rows',
+    `config_json` LONGTEXT DEFAULT NULL COMMENT 'JSON: structured config payload (thresholds, conversion factors, breaker limits, retry counts, etc.)',
+    `version` VARCHAR(32) NOT NULL COMMENT 'digest input; bump (never in-place semantic change without one, E5)',
+    `updated_at` DATETIME DEFAULT NULL COMMENT 'nullable; module-owned config, UPDATE allowed here only',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `idx_code_set` (`code_set`)
+) ENGINE=InnoDB COMMENT='Clinical Co-Pilot: versioned cadence/unit/turnaround/rate-limit config';
+#EndIf
+
+-- ============================================================================
+-- mod_copilot_chat_session — one session per pid-pinned chat (I10). Frozen on
+-- a verifier V3 sev-1 trip and preserved as evidence, never resumed.
+-- ============================================================================
+#IfNotTable mod_copilot_chat_session
+CREATE TABLE IF NOT EXISTS `mod_copilot_chat_session` (
+    `id` BIGINT(20) NOT NULL AUTO_INCREMENT,
+    `pid` BIGINT(20) NOT NULL COMMENT 'references patient_data.pid; structurally pinned for the life of the session (I10)',
+    `user_id` BIGINT(20) NOT NULL COMMENT 'references users.id, the authed clinician',
+    `doc_id` BIGINT(20) DEFAULT NULL COMMENT 'references mod_copilot_doc.id this session was preloaded from',
+    `fact_digest` VARCHAR(64) NOT NULL COMMENT 'fact_digest at session preload time, for mid-conversation drift banners (T19)',
+    `status` VARCHAR(16) NOT NULL DEFAULT 'active' COMMENT 'active | frozen',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_pid` (`pid`),
+    KEY `idx_doc_id` (`doc_id`)
+) ENGINE=InnoDB COMMENT='Clinical Co-Pilot: pid-pinned chat sessions';
+#EndIf
+
+-- ============================================================================
+-- mod_copilot_chat_turn — append-only ledger, same philosophy as T7.
+-- ============================================================================
+#IfNotTable mod_copilot_chat_turn
+CREATE TABLE IF NOT EXISTS `mod_copilot_chat_turn` (
+    `id` BIGINT(20) NOT NULL AUTO_INCREMENT,
+    `session_id` BIGINT(20) NOT NULL COMMENT 'references mod_copilot_chat_session.id',
+    `seq` INT(11) NOT NULL COMMENT 'turn sequence number within the session',
+    `role` VARCHAR(16) NOT NULL COMMENT 'user | assistant | tool',
+    `content` LONGTEXT NOT NULL COMMENT 'JSON turn content',
+    `tool_calls` LONGTEXT DEFAULT NULL COMMENT 'JSON: tool calls issued this turn, if any',
+    `verification_verdict` LONGTEXT DEFAULT NULL COMMENT 'JSON, per-check V1-V6 verdicts',
+    `correlation_id` VARCHAR(64) NOT NULL,
+    `tokens_in` INT(11) DEFAULT NULL,
+    `tokens_out` INT(11) DEFAULT NULL,
+    `cost_usd` DECIMAL(10,6) DEFAULT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_session_id` (`session_id`)
+) ENGINE=InnoDB COMMENT='Clinical Co-Pilot: append-only chat turn ledger';
+#EndIf
+
+-- ============================================================================
+-- mod_copilot_trace — append-only observability source of truth (I12). PHI
+-- lives here deliberately (the chart's own MySQL protection domain), never in
+-- third-party observability SaaS (T16).
+-- ============================================================================
+#IfNotTable mod_copilot_trace
+CREATE TABLE IF NOT EXISTS `mod_copilot_trace` (
+    `id` BIGINT(20) NOT NULL AUTO_INCREMENT,
+    `correlation_id` VARCHAR(64) NOT NULL,
+    `span_id` VARCHAR(64) NOT NULL,
+    `parent_span_id` VARCHAR(64) DEFAULT NULL,
+    `kind` VARCHAR(32) NOT NULL COMMENT 'extract | digest | cache_lookup | llm_reduce | chat_turn | tool_call | verify | render | warm | alert_eval',
+    `started_at` DATETIME(6) NOT NULL,
+    `duration_ms` INT(11) DEFAULT NULL,
+    `status` VARCHAR(16) NOT NULL COMMENT 'ok | error | retried | degraded',
+    `error_class` VARCHAR(128) DEFAULT NULL,
+    `error_detail` TEXT DEFAULT NULL,
+    `model` VARCHAR(64) DEFAULT NULL,
+    `tokens_in` INT(11) DEFAULT NULL,
+    `tokens_out` INT(11) DEFAULT NULL,
+    `cost_usd` DECIMAL(10,6) DEFAULT NULL,
+    `pid` BIGINT(20) DEFAULT NULL,
+    `user_id` BIGINT(20) DEFAULT NULL,
+    `payload_ref` VARCHAR(255) DEFAULT NULL COMMENT 'pointer to full request/response payload if persisted out-of-row',
+    PRIMARY KEY (`id`),
+    KEY `idx_correlation_id` (`correlation_id`)
+) ENGINE=InnoDB COMMENT='Clinical Co-Pilot: append-only trace/span ledger (observability source of truth)';
+#EndIf
+
+-- ============================================================================
+-- background_services row — the warm worker (I7: warmer only, failure
+-- degrades latency, never correctness). Inserted inactive; ModuleManagerListener
+-- activates it on enable() and deactivates on disable(), so the tick only ever
+-- runs while the module is actively enabled. A cron entry hitting
+-- library/ajax/execute_background_services.php every 5 minutes is a hard
+-- deployment requirement documented in build-notes.md — never added to core.
+-- ============================================================================
+#IfNotRow background_services name clinical_copilot_worker
+INSERT INTO `background_services` (`name`, `title`, `active`, `running`, `next_run`, `execute_interval`, `function`, `require_once`, `sort_order`) VALUES
+    ('clinical_copilot_worker', 'Clinical Co-Pilot Warm Worker', 0, 0, CURRENT_TIMESTAMP(), 5, 'clinicalCopilotWorkerRun', '/interface/modules/custom_modules/oe-module-clinical-copilot/src/worker_entry.php', 100);
+#EndIf
+
+-- ============================================================================
+-- Initial mod_copilot_cadence seed rows (versioned config, v1).
+-- ============================================================================
+#IfNotRow mod_copilot_cadence code_set cadence:acr
+INSERT INTO `mod_copilot_cadence` (`code_set`, `interval`, `config_json`, `version`, `updated_at`) VALUES
+    ('cadence:acr', 'P1Y', '{"analyte":"acr","loinc":["14957-5"],"description":"Urine albumin/creatinine ratio - annual"}', 'v1', CURRENT_TIMESTAMP());
+#EndIf
+
+#IfNotRow mod_copilot_cadence code_set cadence:a1c
+INSERT INTO `mod_copilot_cadence` (`code_set`, `interval`, `config_json`, `version`, `updated_at`) VALUES
+    ('cadence:a1c', 'P3M', '{"analyte":"a1c","loinc":["4548-4"],"description":"Hemoglobin A1c - quarterly"}', 'v1', CURRENT_TIMESTAMP());
+#EndIf
+
+#IfNotRow mod_copilot_cadence code_set cadence:lipids
+INSERT INTO `mod_copilot_cadence` (`code_set`, `interval`, `config_json`, `version`, `updated_at`) VALUES
+    ('cadence:lipids', 'P1Y', '{"analyte":"lipids","loinc":["2093-3","18262-6","2085-9","2571-8"],"description":"Lipid panel - annual"}', 'v1', CURRENT_TIMESTAMP());
+#EndIf
+
+#IfNotRow mod_copilot_cadence code_set unit_conversion
+INSERT INTO `mod_copilot_cadence` (`code_set`, `interval`, `config_json`, `version`, `updated_at`) VALUES
+    ('unit_conversion', NULL, '{"a1c":{"canonical":"%","from":{"mmol/mol":{"formula":"ngsp_percent = (ifcc_mmol_mol / 10.929) + 2.15"}}},"glucose":{"canonical":"mg/dL","from":{"mmol/L":{"multiplier":18.018}}},"cholesterol":{"canonical":"mg/dL","from":{"mmol/L":{"multiplier":38.67}}},"triglycerides":{"canonical":"mg/dL","from":{"mmol/L":{"multiplier":88.57}}}}', 'v1', CURRENT_TIMESTAMP());
+#EndIf
+
+#IfNotRow mod_copilot_cadence code_set lab_turnaround
+INSERT INTO `mod_copilot_cadence` (`code_set`, `interval`, `config_json`, `version`, `updated_at`) VALUES
+    ('lab_turnaround', NULL, '{"default_days":3,"per_analyte_days":{"a1c":2,"acr":3,"lipids":2}}', 'v1', CURRENT_TIMESTAMP());
+#EndIf
+
+#IfNotRow mod_copilot_cadence code_set rate_limit_breaker
+INSERT INTO `mod_copilot_cadence` (`code_set`, `interval`, `config_json`, `version`, `updated_at`) VALUES
+    ('rate_limit_breaker', NULL, '{"max_requests_per_minute":30,"breaker_error_threshold":5,"breaker_window_seconds":60,"breaker_cooldown_seconds":120}', 'v1', CURRENT_TIMESTAMP());
+#EndIf
+
+#IfNotRow mod_copilot_cadence code_set synthesis_retry
+INSERT INTO `mod_copilot_cadence` (`code_set`, `interval`, `config_json`, `version`, `updated_at`) VALUES
+    ('synthesis_retry', NULL, '{"auto_retry_count":3}', 'v1', CURRENT_TIMESTAMP());
+#EndIf
