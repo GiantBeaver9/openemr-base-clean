@@ -147,6 +147,39 @@ V1–V6 stays the only gate (T15). The agent scores and watches; it never approv
 - Deterministic wherever possible: density/utilization/drilldown are pure trace math
   (no LLM). Only concurrence/salience use the Flash verdict, and both are advisory.
 
+## I14 — Extraction conservation / parse-yield telemetry (user decision of record)
+
+Guards **over-stripping**: the deterministic PHP extraction can silently drop a source
+entity BEFORE it is ever classified — schema drift (`valueString` vs `valueQuantity`,
+a renamed/new key after an OpenEMR update), a join edge — so it never becomes even an
+I5 exclusion fact. I5 only accounts for rows the reader *chose* to exclude; it cannot
+see a row the reader never counted. I14 closes that gap.
+
+- **Conservation invariant, per capability extraction:**
+  `raw_input_rows == presented_facts + exclusion_facts`. Every source row ends as exactly
+  one of {presented, excluded-with-reason}. `unaccounted = raw − (presented + excluded)`
+  must be **0**. Pure, deterministic, LLM-free.
+- **Captured at extraction** (where raw rows are known): each capability's `extract`
+  (and the LabSlice reader) counts the raw rows its source query/service returned and
+  exposes it on the result — `CapabilityResult.rawInputCount` + `accountedCount`
+  (= presented + excluded). LabSlice exposes its raw join-row count so capabilities can
+  aggregate it.
+- **Telemetry (U12 wires span + metric + alert):** every `extract` trace span records
+  `raw_count`, `presented_count`, `exclusion_count`, `unaccounted`. Dashboard metric
+  `unaccounted_entity_rate` (parse-yield shortfall). **Alert on any `unaccounted > 0`**
+  — a data-shape surprise (§6.3 root-cause class 2): pull the span payload, add the case
+  to fixtures BEFORE fixing the mapping.
+- **Capability-crash composition:** `unaccounted > 0` does NOT itself abort the synthesis
+  (the accounted facts are still valid); it flags the mapping bug loudly. A capability
+  that *throws* still follows the §6.1 capability-crash rule (no digest, no ledger write).
+- **Tested:** a conservation eval per capability — inject a raw row with an unmapped
+  shape; assert it surfaces as an exclusion (accounted) OR trips `unaccounted>0`, never
+  silently vanishes.
+
+Owner: **U5** adds `rawInputCount`/`accountedCount` to `CapabilityResult` (and exposes
+the LabSlice raw count); **U12** wires the span field, the `unaccounted_entity_rate`
+metric, and the alert.
+
 ## Warm timing + QA-driven rerun (T22 — user decision of record)
 
 **Warm earlier, leave a QA buffer.** Each appointment's synthesis must be generated
