@@ -15,6 +15,7 @@ declare(strict_types=1);
 namespace OpenEMR\Modules\ClinicalCopilot\Observability\Qa;
 
 use OpenEMR\Common\Database\QueryUtils;
+use OpenEMR\Common\Logging\SystemLogger;
 
 /**
  * Mirrors {@see \OpenEMR\Modules\ClinicalCopilot\DocStore}'s discipline: the
@@ -28,6 +29,11 @@ use OpenEMR\Common\Database\QueryUtils;
  */
 final class QaStore
 {
+    public function __construct(
+        private readonly SystemLogger $logger = new SystemLogger(),
+    ) {
+    }
+
     public function insert(NewQaVerdict $verdict): int
     {
         $sql = 'INSERT INTO `mod_copilot_qa`
@@ -68,6 +74,10 @@ final class QaStore
     }
 
     /**
+     * A row whose `target_type` does not parse (a corrupt/hand-edited row)
+     * is skipped from the listing rather than crashing the whole dashboard
+     * -- see {@see self::hydrate()}.
+     *
      * @return list<QaVerdictRow>
      */
     public function recent(int $limit = 200): array
@@ -76,14 +86,38 @@ final class QaStore
             'SELECT * FROM `mod_copilot_qa` ORDER BY `id` DESC LIMIT ' . QueryUtils::escapeLimit($limit),
         );
 
-        return array_map(self::hydrate(...), $rows);
+        $verdicts = [];
+        foreach ($rows as $row) {
+            $verdict = $this->hydrate($row);
+            if ($verdict !== null) {
+                $verdicts[] = $verdict;
+            }
+        }
+
+        return $verdicts;
     }
 
     /**
+     * Returns null -- and logs once -- when `target_type` does not parse
+     * into {@see QaTargetType}: a corrupt/hand-edited row, not a value this
+     * method can safely coerce into either target type. The caller
+     * ({@see self::recent()}) skips it rather than including a fabricated
+     * target type in the dashboard listing.
+     *
      * @param array<string, mixed> $row
      */
-    private static function hydrate(array $row): QaVerdictRow
+    private function hydrate(array $row): ?QaVerdictRow
     {
+        $targetType = QaTargetType::tryFrom((string)$row['target_type']);
+        if ($targetType === null) {
+            $this->logger->error('ClinicalCopilot: skipping mod_copilot_qa row with unrecognised target_type', [
+                'qa_id' => (int)$row['id'],
+                'target_type' => $row['target_type'],
+            ]);
+
+            return null;
+        }
+
         $flagsRaw = $row['flags'] ?? null;
         $flagsDecoded = is_string($flagsRaw) ? json_decode($flagsRaw, true) : null;
         $flags = [];
@@ -101,7 +135,7 @@ final class QaStore
 
         return new QaVerdictRow(
             (int)$row['id'],
-            QaTargetType::from((string)$row['target_type']),
+            $targetType,
             (int)$row['target_id'],
             (string)$row['correlation_id'],
             (int)$row['pid'],

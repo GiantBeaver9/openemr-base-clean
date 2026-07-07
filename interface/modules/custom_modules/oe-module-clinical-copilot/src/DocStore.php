@@ -141,10 +141,10 @@ final class DocStore
             $row['tokens_out'] !== null ? (int)$row['tokens_out'] : null,
             $row['cost_usd'] !== null ? (float)$row['cost_usd'] : null,
             is_array($excludedCounts) ? $excludedCounts : null,
-            QaStatus::from((string)$row['qa_status']),
+            QaStatus::tryFrom((string)$row['qa_status']) ?? QaStatus::Pending,
             $row['qa_score'] !== null ? (float)$row['qa_score'] : null,
-            RegenReason::from((string)$row['regen_reason']),
-            VerifyStatus::from((string)$row['verify_status']),
+            RegenReason::tryFrom((string)$row['regen_reason']) ?? RegenReason::None,
+            VerifyStatus::tryFrom((string)$row['verify_status']) ?? VerifyStatus::Degraded,
         );
     }
 

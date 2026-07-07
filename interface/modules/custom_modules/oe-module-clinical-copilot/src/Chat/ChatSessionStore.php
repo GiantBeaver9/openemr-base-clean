@@ -75,7 +75,7 @@ final class ChatSessionStore
             (int)$row['user_id'],
             $row['doc_id'] !== null ? (int)$row['doc_id'] : null,
             (string)$row['fact_digest'],
-            ChatSessionStatus::from((string)$row['status']),
+            ChatSessionStatus::tryFrom((string)$row['status']) ?? ChatSessionStatus::Frozen,
             self::parseDateTime((string)$row['created_at']),
         );
     }

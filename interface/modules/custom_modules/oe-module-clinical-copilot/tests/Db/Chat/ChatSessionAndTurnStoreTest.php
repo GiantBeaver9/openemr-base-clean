@@ -72,6 +72,28 @@ final class ChatSessionAndTurnStoreTest extends TestCase
         // class docblock.
     }
 
+    /**
+     * Hardening eval: a `mod_copilot_chat_session.status` value this
+     * module's enum no longer recognises (`status` is VARCHAR, not a DB
+     * ENUM, so a legacy/hand-edited value is a real possibility) must not
+     * crash session resume. It fails closed to {@see ChatSessionStatus::Frozen}
+     * -- never silently resumed as {@see ChatSessionStatus::Active}.
+     */
+    public function testFindFailsClosedToFrozenOnUnrecognisedStoredStatus(): void
+    {
+        $id = $this->sessionStore->insert(new NewChatSession($this->pid, 1, 42, 'digest-abc'));
+
+        QueryUtils::sqlStatementThrowException(
+            "UPDATE `mod_copilot_chat_session` SET `status` = 'legacy_status' WHERE `id` = ?",
+            [$id],
+        );
+
+        $session = $this->sessionStore->find($id);
+
+        self::assertNotNull($session);
+        self::assertSame(ChatSessionStatus::Frozen, $session->status, 'an unrecognised stored status must fail closed, never be treated as Active');
+    }
+
     public function testTurnsAreAppendOnlyAndOrderedBySeq(): void
     {
         $sessionId = $this->sessionStore->insert(new NewChatSession($this->pid, 1, 42, 'digest-abc'));
@@ -89,6 +111,43 @@ final class ChatSessionAndTurnStoreTest extends TestCase
 
         $byCorrelation = $this->turnStore->findByCorrelationId($correlationId);
         self::assertCount(2, $byCorrelation);
+    }
+
+    /**
+     * Hardening eval: a `mod_copilot_chat_turn` row whose `role` does not
+     * parse into {@see ChatTurnRole} (a legacy/hand-edited/drifted row --
+     * `ChatTurnStore::insert()` itself only ever writes a valid role, so
+     * this can only arrive via a direct SQL write) must not crash the whole
+     * session replay. It is skipped, and the surviving rows keep their
+     * `seq` order.
+     */
+    public function testForSessionSkipsRowWithUnrecognisedRoleButKeepsOthersInOrder(): void
+    {
+        $sessionId = $this->sessionStore->insert(new NewChatSession($this->pid, 1, 42, 'digest-abc'));
+        $correlationId = Uuid::uuid7()->toString();
+
+        $this->turnStore->insert(new NewChatTurn($sessionId, 1, ChatTurnRole::User, ['text' => 'q1'], null, null, $correlationId, null, null, null));
+
+        // Bypasses ChatTurnRole entirely -- simulates a row this module's
+        // enum no longer recognises.
+        QueryUtils::sqlInsert(
+            'INSERT INTO `mod_copilot_chat_turn` (`session_id`, `seq`, `role`, `content`, `correlation_id`)
+             VALUES (?, ?, ?, ?, ?)',
+            [$sessionId, 2, 'legacy_role', '{}', $correlationId],
+        );
+
+        $this->turnStore->insert(new NewChatTurn($sessionId, 3, ChatTurnRole::Assistant, ['claims' => []], null, null, $correlationId, 10, 20, null));
+
+        $turns = $this->turnStore->forSession($sessionId);
+
+        self::assertCount(2, $turns, 'the corrupt-role row must be skipped, not crash the whole replay');
+        self::assertSame(1, $turns[0]->seq);
+        self::assertSame(ChatTurnRole::User, $turns[0]->role);
+        self::assertSame(3, $turns[1]->seq);
+        self::assertSame(ChatTurnRole::Assistant, $turns[1]->role);
+
+        $byCorrelation = $this->turnStore->findByCorrelationId($correlationId);
+        self::assertCount(2, $byCorrelation, 'findByCorrelationId() must also skip the corrupt-role row');
     }
 
     private static function insertSyntheticPatient(): int
