@@ -1,0 +1,23 @@
+# phpstan-module.neon — read-only enforcement layer 1 (ARCHITECTURE.md §4).
+#
+# Registers the module-scoped ForbiddenWriteRule and points PHPStan at the module's src/ tree. The
+# rule self-scopes to files under oe-module-clinical-copilot/, so it is also safe to fold into a
+# full-codebase run; this standalone config is the fast, targeted gate the module's CI invokes.
+#
+# Run from the repo root (the composer autoloader resolves host + module classes automatically):
+#
+#   vendor/bin/phpstan analyse \
+#     -c interface/modules/custom_modules/oe-module-clinical-copilot/ci/phpstan/phpstan-module.neon
+#
+# See README.md in this directory for the full gate story (incl. layer 2: the SELECT-only DB user).
+
+parameters:
+    level: 0
+    paths:
+        - ../../src
+    bootstrapFiles:
+        - ForbiddenWriteRule.php
+    reportUnmatchedIgnoredErrors: false
+
+rules:
+    - OpenEMR\Modules\ClinicalCopilot\PHPStan\ForbiddenWriteRule
