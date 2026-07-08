@@ -87,6 +87,11 @@ $_GET['site'] = 'default';
 $ignoreAuth = true;
 require_once($interfaceDir . '/globals.php');
 
+// globals.php boots the module's runtime autoloader for `src/` only, not the
+// `...\Tests\` namespace, so the shared helper trait (a sibling file) must be
+// required explicitly for this script to run standalone.
+require_once __DIR__ . '/SeedCoreTableHelpers.php';
+
 use OpenEMR\Common\Database\QueryUtils;
 
 /**

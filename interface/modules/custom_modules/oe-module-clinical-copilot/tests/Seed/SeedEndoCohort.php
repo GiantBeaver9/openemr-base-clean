@@ -31,11 +31,20 @@
  * other patient in the database untouched.
  *
  * Safety guard: refuses to run unless (a) invoked from the CLI, (b) the
- * `--force` flag is passed, and (c) a dev-stack marker directory
- * (`docker/development-easy/`) is present at the project root.
+ * `--force` flag is passed, and (c) EITHER a dev-stack marker directory
+ * (`docker/development-easy/`) is present at the project root OR the operator
+ * has set `CLINICAL_COPILOT_SEED_ALLOW=1`. The env-var branch is the
+ * deliberate "this is a synthetic-only box, seed it" assertion a cloud target
+ * (Railway, T24/OPEN-3) sets, so the SAME script seeds both the local dev
+ * stack and a Railway deploy without ever running by accident against a
+ * real-PHI deployment. Never point it at real PHI.
  *
  * Usage (inside the openemr container):
  *   php tests/Seed/SeedEndoCohort.php --force
+ *
+ * On Railway (or any synthetic-only cloud target), run it as the web user
+ * with the opt-in set -- see ops/railway/README.md and ops/railway/seed.sh:
+ *   CLINICAL_COPILOT_SEED_ALLOW=1 php tests/Seed/SeedEndoCohort.php --force
  *
  * @package   OpenEMR\Modules\ClinicalCopilot
  * @link      https://www.open-emr.org
@@ -56,11 +65,22 @@ if (PHP_SAPI !== 'cli') {
 $projectRoot = dirname(__DIR__, 6);
 $interfaceDir = dirname(__DIR__, 5);
 
+// Authorize a run one of two ways so the SAME script seeds the local dev
+// stack AND a synthetic-only cloud target (Railway) without ever running by
+// accident against a real-PHI deployment: (a) the dev-stack marker
+// `docker/development-easy/` is present, or (b) the operator has explicitly
+// set CLINICAL_COPILOT_SEED_ALLOW=1 (see ops/railway/README.md). `--force` is
+// still required on top of either.
 $devMarker = $projectRoot . '/docker/development-easy';
+$seedAllowEnv = strtolower(trim((string) (getenv('CLINICAL_COPILOT_SEED_ALLOW') ?: '')));
+$seedAllowed = in_array($seedAllowEnv, ['1', 'true', 'yes', 'on'], true);
 $forced = in_array('--force', $argv, true);
 
-if (!is_dir($devMarker)) {
-    fwrite(STDERR, "Refusing to run: dev-stack marker '$devMarker' not found. This seeder only runs against the OpenEMR dev checkout.\n");
+if (!is_dir($devMarker) && !$seedAllowed) {
+    fwrite(STDERR, "Refusing to run: no dev-stack marker ('$devMarker') and CLINICAL_COPILOT_SEED_ALLOW is not set.\n");
+    fwrite(STDERR, "This seeder writes SYNTHETIC patients into core tables. Run it only against the dev\n");
+    fwrite(STDERR, "checkout or a synthetic-only cloud target. For the latter (e.g. Railway) set\n");
+    fwrite(STDERR, "CLINICAL_COPILOT_SEED_ALLOW=1 -- see ops/railway/README.md. Never point it at real PHI.\n");
     exit(1);
 }
 
@@ -70,9 +90,16 @@ if (!$forced) {
     exit(1);
 }
 
+fwrite(STDOUT, 'Clinical Co-Pilot endo cohort seed: authorized via ' . (is_dir($devMarker) ? 'dev-stack marker' : 'CLINICAL_COPILOT_SEED_ALLOW') . ".\n");
+
 $_GET['site'] = 'default';
 $ignoreAuth = true;
 require_once($interfaceDir . '/globals.php');
+
+// globals.php boots the module's runtime autoloader for `src/` only, not the
+// `...\Tests\` namespace, so the shared helper trait (a sibling file) must be
+// required explicitly for this script to run standalone (dev stack or Railway).
+require_once __DIR__ . '/SeedCoreTableHelpers.php';
 
 use OpenEMR\Common\Database\QueryUtils;
 
