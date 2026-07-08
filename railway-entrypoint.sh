@@ -1,6 +1,10 @@
 #!/bin/sh
-# Map Railway MySQL plugin variables to OpenEMR flex expectations.
+# Railway entrypoint: env mapping, bootstrap, DB prep, then flex openemr.sh (starts Apache).
 set -eu
+
+trap 'echo "Railway entrypoint failed (line ${LINENO})" >&2' ERR
+
+echo "Railway entrypoint: starting"
 
 if [ -z "${MYSQL_HOST:-}" ] && [ -n "${MYSQLHOST:-}" ]; then
     export MYSQL_HOST="${MYSQLHOST}"
@@ -34,26 +38,25 @@ if [ -z "${MYSQL_PASS:-}" ] && [ -n "${OPENEMR_MYSQL_PASS:-}" ]; then
     export MYSQL_PASS="${OPENEMR_MYSQL_PASS}"
 fi
 
-# OpenEMR installer defaults; Railway MySQL plugin does not create this user.
 export MYSQL_USER="${MYSQL_USER:-openemr}"
 export MYSQL_PASS="${MYSQL_PASS:-pass}"
 export MYSQL_DATABASE="${MYSQL_DATABASE:-railway}"
 
 if [ -z "${MYSQL_HOST:-}" ] || [ -z "${MYSQL_ROOT_PASS:-}" ]; then
     echo "Railway OpenEMR: missing database connection variables." >&2
-    echo "Add references on this service (replace MySQL with your DB service name):" >&2
-    echo "  MYSQLHOST=\${{MySQL.MYSQLHOST}}" >&2
-    echo "  MYSQLPORT=\${{MySQL.MYSQLPORT}}" >&2
-    echo "  MYSQLUSER=\${{MySQL.MYSQLUSER}}" >&2
-    echo "  MYSQLPASSWORD=\${{MySQL.MYSQLPASSWORD}}" >&2
-    echo "  MYSQLDATABASE=\${{MySQL.MYSQLDATABASE}}" >&2
     exit 1
 fi
 
+/usr/local/bin/railway-configure-apache.sh
+
 rm -rf /openemr /openemr-base-clean
 
+echo "Railway entrypoint: flex bootstrap"
 /usr/local/bin/railway-flex-bootstrap.sh
+
+echo "Railway entrypoint: database prep"
 /usr/local/bin/railway-preinstall-db.sh
 
+echo "Railway entrypoint: launching openemr.sh (composer/npm/setup, then Apache on PORT=${PORT:-8080})"
 cd /var/www/localhost/htdocs
 exec ./openemr.sh
