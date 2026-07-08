@@ -1,13 +1,5 @@
 # OpenEMR Fork — Pre-Build Audit
 
-**Purpose.** This audit is the hard-gate deliverable that precedes building the Clinical Co-Pilot AI layer. It is a grounded, code-level assessment of the OpenEMR fork the co-pilot will be embedded in — what is safe to inherit, what is a landmine, and what the AI layer must therefore own itself. Every finding cites real code (`file:line`). The findings visibly feed the design decisions recorded in [ARCHITECTURE.md](ARCHITECTURE.md), [ARCHITECTURE_COMPLETE.md](ARCHITECTURE_COMPLETE.md), and [docs/clinical-copilot-tradeoffs.md](docs/clinical-copilot-tradeoffs.md); the traceability table at the end maps each load-bearing finding to the decision it drove.
-
-**Method.** The codebase map (`INDEX.md` / `repomap.json`, produced by a brownfield-index fan-out) was reused as the starting point. Six focused investigations then read the actual source: auth/session, ACL/authorization, output-escaping/injection, performance/schema, audit-logging/compliance, and clinical-data quality. Line citations are to this fork's tree (`sql/database.sql`, `src/`, `library/`, `interface/`, `apis/`, `ccdaservice/`).
-
-**Severity scale.** CRITICAL (exploitable or safety-critical for an AI reading the chart), HIGH (systemic weakness, exploitable under realistic conditions), MEDIUM (real risk, bounded or config-dependent), LOW (hardening), STRENGTH (a property the co-pilot can rely on).
-
----
-
 ## Executive Summary
 
 The OpenEMR fork is a mature, defensively-built monolith whose security architecture is **fail-open by design**: strong primitives exist (modern password hashing, HMAC CSRF, a real audit subsystem, envelope encryption), but their correctness depends on developers remembering to invoke them at every call site rather than on a framework enforcing them centrally. For an AI clinical co-pilot, three consequences dominate, and each one shaped the architecture.
@@ -21,6 +13,16 @@ The OpenEMR fork is a mature, defensively-built monolith whose security architec
 Supporting findings reinforce the shape of the design. Twig autoescape is **globally disabled** ([TwigContainer.php:70](src/Common/Twig/TwigContainer.php:70)) with 78 unescaped sinks across 199 templates — so LLM-generated prose must be escaped explicitly at every Twig sink. The one existing side-daemon, `ccdaservice`, has a cross-patient concurrency race from mutable module-global state written after an `await` ([serveccda.js:3622](ccdaservice/serveccda.js:3622)) — the track record that argued against a sidecar (T2) and for an in-process module. Performance is favorable where it matters: per-patient reads are genuinely cheap for labs, meds, and vitals because the join columns are indexed, validating the recompute-facts-on-every-read freshness model (T5) — with two exceptions to engineer around (an unindexed calendar `pc_pid`, and an N+1 in `ProcedureService::getAll()`).
 
 The bottom line: **the host gives the co-pilot auth, session, CSRF, audit plumbing, and cheap indexed reads for free — but it does not give patient-level authorization, typed clinical data, or any PHI-egress control. Those three gaps are precisely what the deterministic fact layer, structural patient pinning, and the LLM trust boundary in the architecture exist to close.**
+
+---
+
+## Scope, Method & Severity Scale
+
+**Purpose.** This audit is the hard-gate deliverable that precedes building the Clinical Co-Pilot AI layer. It is a grounded, code-level assessment of the OpenEMR fork the co-pilot will be embedded in — what is safe to inherit, what is a landmine, and what the AI layer must therefore own itself. Every finding cites real code (`file:line`). The findings visibly feed the design decisions recorded in [ARCHITECTURE.md](ARCHITECTURE.md), [ARCHITECTURE_COMPLETE.md](ARCHITECTURE_COMPLETE.md), and [docs/clinical-copilot-tradeoffs.md](docs/clinical-copilot-tradeoffs.md); the traceability table at the end maps each load-bearing finding to the decision it drove.
+
+**Method.** The codebase map (`INDEX.md` / `repomap.json`, produced by a brownfield-index fan-out) was reused as the starting point. Six focused investigations then read the actual source: auth/session, ACL/authorization, output-escaping/injection, performance/schema, audit-logging/compliance, and clinical-data quality. Line citations are to this fork's tree (`sql/database.sql`, `src/`, `library/`, `interface/`, `apis/`, `ccdaservice/`).
+
+**Severity scale.** CRITICAL (exploitable or safety-critical for an AI reading the chart), HIGH (systemic weakness, exploitable under realistic conditions), MEDIUM (real risk, bounded or config-dependent), LOW (hardening), STRENGTH (a property the co-pilot can rely on).
 
 ---
 

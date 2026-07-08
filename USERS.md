@@ -1,5 +1,9 @@
 # USERS.md — Clinical Co-Pilot: Target User, Workflow, Use Cases
 
+> Canonical target-user deliverable. The case study's submission table also
+> refers to it as `./USER.md`; a pointer stub at [`USER.md`](USER.md) redirects
+> here so either name resolves.
+
 **This document is the source of truth.** [ARCHITECTURE.md](ARCHITECTURE.md) and [ARCHITECTURE_COMPLETE.md](ARCHITECTURE_COMPLETE.md) must trace back to it; every capability built points to a use case here (traceability table at the bottom). Rationale for design decisions lives in [docs/clinical-copilot-tradeoffs.md](docs/clinical-copilot-tradeoffs.md).
 
 ---

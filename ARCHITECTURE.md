@@ -1,9 +1,5 @@
 # Clinical Co-Pilot — Architecture
 
-**Companion documents:** [USERS.md](USERS.md) (target user + use cases UC1–UC6 — the source of truth every capability traces to) · [ARCHITECTURE_COMPLETE.md](ARCHITECTURE_COMPLETE.md) (the complete build spec: fact layer, lab contracts, digest model, build units) · [docs/clinical-copilot-tradeoffs.md](docs/clinical-copilot-tradeoffs.md) (decision record T1–T21, rejected alternatives).
-
----
-
 ## High-Level Architecture — One-Page Summary
 
 The Clinical Co-Pilot is an AI agent embedded in this OpenEMR fork for one deliberately narrow user: an outpatient endocrinologist reviewing twenty type-2-diabetes follow-ups before clinic. It has two surfaces sharing one machinery: a **pre-warmed, cited pre-visit synthesis** per scheduled patient, and a **multi-turn chat agent pinned to that patient**, preloaded with the exact facts and narrative the physician is reading, able to answer follow-ups by invoking tools over the chart.
@@ -19,6 +15,10 @@ The Clinical Co-Pilot is an AI agent embedded in this OpenEMR fork for one delib
 **Key decision 5 — observability from the first request.** Every invocation gets a correlation ID threaded through every capability call, LLM call, verification verdict, and log line. Per-step spans (duration, status, error, tokens, cost) land in an append-only trace table inside the module's own database — PHI never leaves the EMR's boundary for a third-party observability SaaS. An in-app dashboard shows requests, errors, p50/p95 latency, tool calls, retries, and verification pass rate, with click-through from any request to its full trace.
 
 **Main tradeoffs accepted:** an in-process PHP module (inheriting OpenEMR's auth, ACL, CSRF, and audit logging) over a separate service; **Google Gemini on Vertex AI** — the HIPAA-eligible, BAA-covered surface, chosen for provider-enforced JSON schemas and context caching that makes multi-turn cost sane (T18); vertical-first scaling on GCP (T20); deterministic verification that cannot catch misleading emphasis — bounded by facts-first rendering and adversarial evals; synthetic patients only until a real redaction story exists.
+
+---
+
+**Companion documents:** [USERS.md](USERS.md) (target user + use cases UC1–UC6 — the source of truth every capability traces to) · [ARCHITECTURE_COMPLETE.md](ARCHITECTURE_COMPLETE.md) (the complete build spec: fact layer, lab contracts, digest model, build units) · [docs/clinical-copilot-tradeoffs.md](docs/clinical-copilot-tradeoffs.md) (decision record T1–T21, rejected alternatives).
 
 ---
 
