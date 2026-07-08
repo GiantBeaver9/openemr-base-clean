@@ -10,6 +10,7 @@ COPY patch-flex-openemr.sh railway-flex-bootstrap.sh railway-entrypoint.sh /tmp/
 RUN chmod 755 /tmp/railway/patch-flex-openemr.sh /tmp/railway/railway-flex-bootstrap.sh /tmp/railway/railway-entrypoint.sh \
     && cp /tmp/railway/railway-flex-bootstrap.sh /usr/local/bin/railway-flex-bootstrap.sh \
     && /tmp/railway/patch-flex-openemr.sh \
+    && chmod 755 /var/www/localhost/htdocs/openemr.sh \
     && cp /tmp/railway/railway-entrypoint.sh /usr/local/bin/railway-entrypoint.sh \
     && rm -rf /tmp/railway
 
