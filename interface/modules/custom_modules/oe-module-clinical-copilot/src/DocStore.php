@@ -24,9 +24,15 @@ use OpenEMR\Modules\ClinicalCopilot\Doc\VerifyStatus;
 /**
  * I3/E7 (append-only): this class has exactly two public methods,
  * {@see self::insert()} and {@see self::findBest()}. There is no update or
- * delete method anywhere in this class -- deliberately; a reader auditing
- * "can this ledger be mutated in code" only needs to read this file's method
- * list, not trace call sites.
+ * delete method anywhere in this class or its own call sites -- deliberately.
+ * The one documented exception, module-wide, is
+ * {@see \OpenEMR\Modules\ClinicalCopilot\Observability\Qa\DocQaAnnotator}'s
+ * advisory `qa_status`/`qa_score` UPDATE (T22 carve-out, guarded by
+ * `WHERE qa_status = 'pending'` so it's idempotent; it never touches served
+ * content -- `doc`, `verify_status`, `regen_reason` -- see docs/build-notes.md).
+ * A reader auditing "can this ledger's SERVED content be mutated" only needs
+ * this file's method list; auditing "can ANY column ever change post-insert"
+ * also needs to check DocQaAnnotator.
  *
  * T22 (docs/build-notes.md "Warm timing + QA-driven rerun"): `mod_copilot_doc`
  * now carries best-of-N candidate narratives per `(pid, fact_digest)`

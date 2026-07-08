@@ -43,13 +43,9 @@ final class LlmRuntimeConfig
             return self::VERTEX_REDUCE_CHAT_MODEL;
         }
 
-        $override = LlmEnv::getString(self::ENV_GEMINI_API_MODEL);
-        if ($override !== '') {
-            return $override;
-        }
-
         if (self::usesGeminiApiKey()) {
-            return self::API_KEY_DEFAULT_MODEL;
+            $override = LlmEnv::getString(self::ENV_GEMINI_API_MODEL);
+            return $override !== '' ? $override : self::API_KEY_DEFAULT_MODEL;
         }
 
         return self::VERTEX_REDUCE_CHAT_MODEL;

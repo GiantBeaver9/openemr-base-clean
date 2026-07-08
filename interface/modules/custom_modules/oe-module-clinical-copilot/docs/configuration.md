@@ -38,6 +38,16 @@ All variables are read once per request via `getenv()` by
 factory-selected client — see "Selection precedence" below). None are read
 anywhere else, and none are ever logged.
 
+**Local dev-only fallback:** `LlmEnv::getString()` (`src/Config/LlmEnv.php`)
+checks `getenv()`, then `$_SERVER`, then `$_ENV`, and — only for a key not
+already set by one of those three — lazy-loads `ops/local/gemini.local.env`
+(see `ops/local/gemini.local.env.example`) once per request and merges any
+keys found there in via `putenv()`. This fallback can only *fill a gap*, never
+override a variable already set through the normal three sources, but it is
+easy to forget a stale `ops/local/gemini.local.env` is present in a dev image
+and be confused about where a value is coming from — if a variable's value is
+a mystery, check that file before anything else.
+
 | Variable | Required for | Description | Example |
 |---|---|---|---|
 | `CLINICAL_COPILOT_GCP_PROJECT_ID` | Vertex (production) | GCP project id hosting the Vertex AI endpoint. Setting this is what turns Vertex on. | `CLINICAL_COPILOT_GCP_PROJECT_ID=my-clinic-prod-123456` |
