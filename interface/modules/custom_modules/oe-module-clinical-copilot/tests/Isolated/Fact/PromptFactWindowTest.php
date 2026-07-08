@@ -20,57 +20,50 @@ use PHPUnit\Framework\TestCase;
 
 final class PromptFactWindowTest extends TestCase
 {
-    public function testDenseSeriesAreCappedPerCapabilityUnitWithinTheWindow(): void
+    public function testChatKeepsEverythingWithinTwoYearsEvenBeyondTheMinimum(): void
     {
+        // 40 A1c (%) + 40 glucose (mg/dL) within ~17 months -- a frequent
+        // patient. All kept: the 2-year window WINS over the 15 minimum; they
+        // are a union, they do not both cap. Two series (by unit) are separate.
         $facts = [];
-        // 30 A1c (%) + 30 glucose (mg/dL), all within the last ~10 months so
-        // the 2-year window keeps them and the per-series count cap (15) binds.
-        // Two distinct series (by unit) must NOT share one cap.
         $base = new \DateTimeImmutable('2026-06-01');
-        for ($i = 1; $i <= 30; $i++) {
-            $date = $base->modify('-' . ($i * 10) . ' days')->format('Y-m-d');
-            $facts[] = self::trend('a1c-' . $i, '%', $date, 7.0, $i);
+        for ($i = 0; $i < 40; $i++) {
+            $date = $base->modify('-' . ($i * 13) . ' days')->format('Y-m-d');
+            $facts[] = self::trend('a1c-' . $i, '%', $date, 7.0, $i + 1);
             $facts[] = self::trend('glu-' . $i, 'mg/dL', $date, 120.0, 1000 + $i);
         }
-        $facts[] = self::nonValue('med-1', 'med_response', 'med_event', '2026-01-01', 2001);
-        $facts[] = self::nonValue('med-2', 'med_response', 'med_event', '2026-01-01', 2002);
-        $facts[] = self::nonValue('od-1', 'overdue_tests', 'overdue_item', '2026-01-01', 3001);
 
-        $windowed = PromptFactWindow::forChat($facts);
-
-        $byKind = [];
         $byUnit = [];
-        foreach ($windowed as $f) {
-            $byKind[$f->kind->value] = ($byKind[$f->kind->value] ?? 0) + 1;
+        foreach (PromptFactWindow::forChat($facts) as $f) {
             if ($f->kind->value === 'trend_point') {
                 $unit = $f->value?->unitCanonical ?? '';
                 $byUnit[$unit] = ($byUnit[$unit] ?? 0) + 1;
             }
         }
 
-        self::assertSame(15, $byUnit['%'], 'A1c trend capped to 15 within the window');
-        self::assertSame(15, $byUnit['mg/dL'], 'glucose trend capped to 15, independent of A1c');
-        self::assertSame(2, $byKind['med_event'], 'medications are sparse and all kept');
-        self::assertSame(1, $byKind['overdue_item'], 'overdue items are sparse and all kept');
+        self::assertSame(40, $byUnit['%'], 'all A1c within 2 years kept, not capped to 15');
+        self::assertSame(40, $byUnit['mg/dL'], 'all glucose within 2 years kept, independent of A1c');
     }
 
-    public function testDenseHistoryOlderThanTwoYearsIsDroppedButSparseFactsSurvive(): void
+    public function testChatKeepsTheLastFifteenForASparsePatientAndDropsBeyondBoth(): void
     {
-        $facts = [
-            self::trend('recent-1', '%', '2026-05-01', 7.2, 1),
-            self::trend('recent-2', '%', '2026-01-01', 7.4, 2),
-            self::trend('old-1', '%', '2023-01-01', 9.0, 3),   // > 2yr before the newest (2026-05)
-            self::trend('old-2', '%', '2021-06-01', 9.5, 4),
-            // A medication started 5 years ago but still on the chart: sparse, kept.
-            self::nonValue('med-active', 'med_response', 'med_event', '2021-03-01', 9),
-        ];
+        // 20 semi-annual A1c over ~10 years: only ~5 fall in the last 2 years,
+        // but the 15 minimum surfaces recent history; the oldest (beyond BOTH
+        // the window and the last 15) are dropped. A 2016 med is sparse => kept.
+        $facts = [];
+        $base = new \DateTimeImmutable('2026-01-01');
+        for ($i = 0; $i < 20; $i++) {
+            $date = $base->modify('-' . ($i * 6) . ' months')->format('Y-m-d');
+            $facts[] = self::trend('a1c-' . $i, '%', $date, 7.0, $i + 1);
+        }
+        $facts[] = self::nonValue('med-active', 'med_response', 'med_event', '2016-01-01', 99);
 
         $ids = array_map(static fn (Fact $f): string => $f->factId, PromptFactWindow::forChat($facts));
+        $trendKept = count(array_filter($ids, static fn (string $id): bool => str_starts_with($id, 'a1c-')));
 
-        self::assertContains('recent-1', $ids);
-        self::assertContains('recent-2', $ids);
-        self::assertNotContains('old-1', $ids, 'trend history older than 2 years must not travel to the model');
-        self::assertNotContains('old-2', $ids);
+        self::assertSame(15, $trendKept, 'the last 15 of a sparse series are kept (the 2yr window is smaller here)');
+        self::assertContains('a1c-0', $ids, 'the most recent draw is kept');
+        self::assertNotContains('a1c-19', $ids, 'the oldest draw, beyond both the window and the last 15, is dropped');
         self::assertContains('med-active', $ids, 'a still-listed medication is kept regardless of age');
     }
 

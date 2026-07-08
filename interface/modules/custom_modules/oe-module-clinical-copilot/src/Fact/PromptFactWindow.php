@@ -31,9 +31,11 @@ use OpenEMR\Modules\ClinicalCopilot\Fact\Enum\FactKind;
  * surfaces have different budgets:
  *
  * - {@see self::forChat()} -- LEANER. The whole block is re-sent on every round
- *   of a multi-round chat turn, so dense trend history is bounded to the last
- *   {@see self::MAX_AGE_MONTHS} months, with a {@see self::DEFAULT_PER_SERIES}
- *   per-(capability, unit)-series cap within it.
+ *   of a multi-round chat turn, so per dense (capability, unit) series it keeps
+ *   the last {@see self::MAX_AGE_MONTHS} months OR the last
+ *   {@see self::MIN_PER_SERIES}, whichever is MORE (a union, never both capping
+ *   each other) -- 40 visits in two years all survive; a patient not seen in
+ *   years still gets their last 15.
  * - {@see self::forNarrative()} -- RICHER. The synthesis is a one-shot call, so
  *   it gets the last {@see self::MAX_NARRATIVE_VISITS} visits' worth of trend
  *   history instead of the tighter 2-year window.
@@ -43,15 +45,20 @@ use OpenEMR\Modules\ClinicalCopilot\Fact\Enum\FactKind;
  * derived_count / derived_span summaries that describe the WHOLE series in one
  * fact) regardless of age -- a five-year-old medication may still be active.
  *
+ * TODO(config): the three tuning knobs (MAX_AGE_MONTHS, MIN_PER_SERIES,
+ * MAX_NARRATIVE_VISITS) are the intended surface of a future per-office control
+ * panel -- how much chat history to send, how to construct the narrative --
+ * so a practice can dial recency/verbosity itself. Constants for now.
+ *
  * Pure and deterministic: same facts in, same subset out.
  */
 final class PromptFactWindow
 {
-    /** Chat window: dense trend history older than this never travels to a chat round. */
+    /** Chat window: keep dense trend history from the last this-many months... */
     public const MAX_AGE_MONTHS = 24;
 
-    /** Chat secondary cap: most recent facts kept per dense (capability, unit) series within the window. */
-    public const DEFAULT_PER_SERIES = 15;
+    /** ...OR at least the last this-many per series, whichever is MORE (never both-capped). */
+    public const MIN_PER_SERIES = 15;
 
     /** Narrative window: the synthesis is a one-shot call, so it gets a richer slice -- the last N visits. */
     public const MAX_NARRATIVE_VISITS = 20;
@@ -63,17 +70,19 @@ final class PromptFactWindow
 
     /**
      * The CHAT window: leaner, because the whole fact block is re-sent on every
-     * round of a multi-round turn. Dense trend history is bounded to the last
-     * {@see self::MAX_AGE_MONTHS} months, with a per-series count cap within it.
+     * round of a multi-round turn. Per dense (capability, unit) series, keep a
+     * fact if it is within the last {@see self::MAX_AGE_MONTHS} months OR among
+     * the last {@see self::MIN_PER_SERIES} of that series -- a UNION, not both
+     * capping each other. So a patient with 40 visits in two years keeps all 40
+     * (the window wins), while a patient who has not been seen in years still
+     * gets their last 15 (the minimum wins). Both are anchored to the most
+     * recent datum, so this stays a pure "last N of available data" function.
      *
      * @param list<Fact> $facts
      * @return list<Fact>
      */
-    public static function forChat(array $facts, int $perSeries = self::DEFAULT_PER_SERIES, int $maxAgeMonths = self::MAX_AGE_MONTHS): array
+    public static function forChat(array $facts, int $minPerSeries = self::MIN_PER_SERIES, int $maxAgeMonths = self::MAX_AGE_MONTHS): array
     {
-        // The recency floor is anchored to the patient's most recent datum
-        // (~the visit), not the wall clock, so this stays a pure function --
-        // it is "the last N months of available data".
         $cutoff = self::cutoffDate($facts, $maxAgeMonths);
 
         $kept = [];
@@ -86,11 +95,6 @@ final class PromptFactWindow
                 // medication started five years ago may still be active, and an
                 // overdue/pending item is about now, not its origin date.
                 $kept[] = $fact;
-                continue;
-            }
-            $date = $fact->clinicalDate?->format('Y-m-d');
-            if ($cutoff !== null && $date !== null && $date < $cutoff) {
-                // Dense trend history beyond the window -- do not send it.
                 continue;
             }
             $unit = $fact->value?->unitCanonical ?? $fact->value?->unitOriginal ?? '';
@@ -106,8 +110,13 @@ final class PromptFactWindow
                 return $bd <=> $ad;
             });
 
-            foreach (array_slice($series, 0, max(0, $perSeries)) as $fact) {
-                $kept[] = $fact;
+            foreach ($series as $index => $fact) {
+                $date = $fact->clinicalDate?->format('Y-m-d');
+                $withinWindow = $cutoff === null || $date === null || $date >= $cutoff;
+                $withinMinimum = $index < max(0, $minPerSeries);
+                if ($withinWindow || $withinMinimum) {
+                    $kept[] = $fact;
+                }
             }
         }
 
