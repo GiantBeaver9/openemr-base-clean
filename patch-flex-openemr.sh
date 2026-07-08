@@ -31,6 +31,20 @@ while IFS= read -r line || [ -n "${line}" ]; do
             printf '%s\n' "${line}" >> "${OUT}"
             skip_clone_body=1
             ;;
+        *'(( setup_retries++ ))'*)
+            printf '%s\n' "${line}" >> "${OUT}"
+            printf '%s\n' \
+                '            if [[ ${setup_retries} -ge 30 ]]; then' \
+                '                echo "ERROR: OpenEMR auto_setup failed after 30 attempts; aborting."' \
+                '                exit 1' \
+                '            fi' >> "${OUT}"
+            ;;
+        *'exec /usr/sbin/httpd -D FOREGROUND'*)
+            printf '%s\n' \
+                '    /usr/local/bin/railway-configure-apache.sh' \
+                '    echo "Starting apache!"' \
+                '    exec /usr/sbin/httpd -D FOREGROUND' >> "${OUT}"
+            ;;
         *)
             printf '%s\n' "${line}" >> "${OUT}"
             ;;
@@ -47,5 +61,10 @@ if grep -Fq 'git clone "${FLEX_REPOSITORY}" --branch "${FLEX_REPOSITORY_BRANCH}"
     exit 1
 fi
 
+if ! grep -Fq 'railway-configure-apache.sh' "${OUT}"; then
+    echo "patch-flex-openemr: apache configure injection failed" >&2
+    exit 1
+fi
+
 mv "${OUT}" "${OPENEMR_SH}"
-echo "patch-flex-openemr: replaced flex git clone with railway-flex-bootstrap.sh"
+echo "patch-flex-openemr: applied Railway flex patches"

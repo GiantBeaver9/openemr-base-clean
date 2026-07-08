@@ -57,6 +57,6 @@ echo "Railway entrypoint: flex bootstrap"
 echo "Railway entrypoint: database prep"
 /usr/local/bin/railway-preinstall-db.sh
 
-echo "Railway entrypoint: launching openemr.sh (composer/npm/setup, then Apache on PORT=${PORT:-8080})"
+echo "Railway entrypoint: launching openemr.sh (composer/npm/setup, then Apache on PORT=${PORT:-80})"
 cd /var/www/localhost/htdocs
 exec ./openemr.sh

@@ -20,6 +20,6 @@ RUN chmod 755 /tmp/railway/*.sh \
     && cp /tmp/railway/railway-entrypoint.sh /usr/local/bin/railway-entrypoint.sh \
     && rm -rf /tmp/railway
 
-EXPOSE 8080
+EXPOSE 80
 
 ENTRYPOINT ["/usr/local/bin/railway-entrypoint.sh"]

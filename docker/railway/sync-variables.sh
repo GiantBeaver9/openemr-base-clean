@@ -34,6 +34,7 @@ railway variable set \
     "MYSQLDATABASE=\${{${MYSQL_SERVICE}.MYSQLDATABASE}}" \
     "MYSQL_USER=openemr" \
     "MYSQL_PASS=${OE_PASS_VALUE}" \
+    "PORT=80" \
     --service "${SVC_ID}" \
     ${ENV_FLAG} \
     --skip-deploys
