@@ -27,20 +27,25 @@ use OpenEMR\Modules\ClinicalCopilot\Fact\Enum\FactKind;
  *
  * This trims ONLY what the model is shown, not the fact set the digest and the
  * verifier operate on (those stay full, so a claim citing a windowed fact
- * still resolves -- the window is a subset). The dense, per-visit kinds
- * (trend points, vitals, and the between-visit deltas) are capped to the most
- * recent {@see self::DEFAULT_PER_SERIES} per (capability, unit) series -- so
- * the A1c (%) trend keeps its recent history independent of the mg/dL labs --
- * while every sparse, decision-bearing fact (results, medications, overdue and
- * pending items, preliminary results, exclusions, conflicts, and the
- * derived_count / derived_span summaries that describe the WHOLE series in one
- * fact) is always kept.
+ * still resolves -- the window is a subset). The dense, per-visit kinds (trend
+ * points, vitals, and the between-visit deltas) are bounded two ways: a hard
+ * {@see self::MAX_AGE_MONTHS}-month recency window (nothing older than ~2 years
+ * of trend history travels to the model) and, within that, a
+ * {@see self::DEFAULT_PER_SERIES} cap per (capability, unit) series -- so the
+ * A1c (%) trend keeps its recent history independent of the mg/dL labs. Every
+ * sparse, decision-bearing fact (results, medications, overdue and pending
+ * items, preliminary results, exclusions, conflicts, and the derived_count /
+ * derived_span summaries that describe the WHOLE series in one fact) is always
+ * kept, regardless of age -- a five-year-old medication may still be active.
  *
  * Pure and deterministic: same facts in, same subset out.
  */
 final class PromptFactWindow
 {
-    /** Most recent facts kept per dense (capability, unit) series. */
+    /** Hard recency window: dense trend history older than this never travels to the model. */
+    public const MAX_AGE_MONTHS = 24;
+
+    /** Secondary cap: most recent facts kept per dense (capability, unit) series within the window. */
     public const DEFAULT_PER_SERIES = 15;
 
     private function __construct()
@@ -52,15 +57,28 @@ final class PromptFactWindow
      * @param list<Fact> $facts
      * @return list<Fact>
      */
-    public static function forPrompt(array $facts, int $perSeries = self::DEFAULT_PER_SERIES): array
+    public static function forPrompt(array $facts, int $perSeries = self::DEFAULT_PER_SERIES, int $maxAgeMonths = self::MAX_AGE_MONTHS): array
     {
+        // The recency floor is anchored to the patient's most recent datum
+        // (~the visit), not the wall clock, so this stays a pure function --
+        // it is "the last N months of available data".
+        $cutoff = self::cutoffDate($facts, $maxAgeMonths);
+
         $kept = [];
         /** @var array<string, list<Fact>> $denseSeries */
         $denseSeries = [];
 
         foreach ($facts as $fact) {
             if (!self::isDense($fact->kind)) {
+                // Sparse, decision-bearing facts are kept regardless of age: a
+                // medication started five years ago may still be active, and an
+                // overdue/pending item is about now, not its origin date.
                 $kept[] = $fact;
+                continue;
+            }
+            $date = $fact->clinicalDate?->format('Y-m-d');
+            if ($cutoff !== null && $date !== null && $date < $cutoff) {
+                // Dense trend history beyond the window -- do not send it.
                 continue;
             }
             $unit = $fact->value?->unitCanonical ?? $fact->value?->unitOriginal ?? '';
@@ -82,6 +100,29 @@ final class PromptFactWindow
         }
 
         return array_values($kept);
+    }
+
+    /**
+     * The `Y-m-d` floor: `$maxAgeMonths` before the most recent dated fact, or
+     * null when no fact carries a date (then nothing is age-filtered).
+     *
+     * @param list<Fact> $facts
+     */
+    private static function cutoffDate(array $facts, int $maxAgeMonths): ?string
+    {
+        $newest = null;
+        foreach ($facts as $fact) {
+            $date = $fact->clinicalDate?->format('Y-m-d');
+            if ($date !== null && ($newest === null || $date > $newest)) {
+                $newest = $date;
+            }
+        }
+
+        if ($newest === null) {
+            return null;
+        }
+
+        return (new \DateTimeImmutable($newest))->modify("-{$maxAgeMonths} months")->format('Y-m-d');
     }
 
     /**

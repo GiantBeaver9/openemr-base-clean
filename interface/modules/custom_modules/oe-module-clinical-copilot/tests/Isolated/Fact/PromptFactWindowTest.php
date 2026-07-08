@@ -1,7 +1,7 @@
 <?php
 
 /**
- * PromptFactWindow: caps dense series to a recent slice, keeps sparse facts whole.
+ * PromptFactWindow: 2-year recency window + per-series cap on dense facts; sparse facts kept whole.
  *
  * @package   OpenEMR\Modules\ClinicalCopilot
  * @link      https://www.open-emr.org
@@ -20,47 +20,69 @@ use PHPUnit\Framework\TestCase;
 
 final class PromptFactWindowTest extends TestCase
 {
-    public function testDenseSeriesAreCappedPerCapabilityUnitAndSparseFactsKeptWhole(): void
+    public function testDenseSeriesAreCappedPerCapabilityUnitWithinTheWindow(): void
     {
         $facts = [];
-        // 30 A1c (%) trend points + 30 glucose (mg/dL) trend points -- two
-        // distinct series that must NOT share one cap.
+        // 30 A1c (%) + 30 glucose (mg/dL), all within the last ~10 months so
+        // the 2-year window keeps them and the per-series count cap (15) binds.
+        // Two distinct series (by unit) must NOT share one cap.
+        $base = new \DateTimeImmutable('2026-06-01');
         for ($i = 1; $i <= 30; $i++) {
-            $facts[] = self::trend('a1c-' . $i, '%', sprintf('2020-%02d-01', ($i % 12) + 1), 7.0, $i);
-            $facts[] = self::trend('glu-' . $i, 'mg/dL', sprintf('2019-%02d-01', ($i % 12) + 1), 120.0, 1000 + $i);
+            $date = $base->modify('-' . ($i * 10) . ' days')->format('Y-m-d');
+            $facts[] = self::trend('a1c-' . $i, '%', $date, 7.0, $i);
+            $facts[] = self::trend('glu-' . $i, 'mg/dL', $date, 120.0, 1000 + $i);
         }
-        // Sparse, decision-bearing facts: always kept.
-        $facts[] = self::nonValue('med-1', 'med_response', 'med_event', 2001);
-        $facts[] = self::nonValue('med-2', 'med_response', 'med_event', 2002);
-        $facts[] = self::nonValue('od-1', 'overdue_tests', 'overdue_item', 3001);
+        $facts[] = self::nonValue('med-1', 'med_response', 'med_event', '2026-01-01', 2001);
+        $facts[] = self::nonValue('med-2', 'med_response', 'med_event', '2026-01-01', 2002);
+        $facts[] = self::nonValue('od-1', 'overdue_tests', 'overdue_item', '2026-01-01', 3001);
 
-        $windowed = PromptFactWindow::forPrompt($facts, 15);
+        $windowed = PromptFactWindow::forPrompt($facts);
 
         $byKind = [];
         $byUnit = [];
         foreach ($windowed as $f) {
             $byKind[$f->kind->value] = ($byKind[$f->kind->value] ?? 0) + 1;
-            $unit = $f->value?->unitCanonical ?? '';
             if ($f->kind->value === 'trend_point') {
+                $unit = $f->value?->unitCanonical ?? '';
                 $byUnit[$unit] = ($byUnit[$unit] ?? 0) + 1;
             }
         }
 
-        self::assertSame(15, $byUnit['%'], 'A1c trend capped to 15');
+        self::assertSame(15, $byUnit['%'], 'A1c trend capped to 15 within the window');
         self::assertSame(15, $byUnit['mg/dL'], 'glucose trend capped to 15, independent of A1c');
         self::assertSame(2, $byKind['med_event'], 'medications are sparse and all kept');
         self::assertSame(1, $byKind['overdue_item'], 'overdue items are sparse and all kept');
     }
 
-    public function testUnderTheCapEverythingSurvives(): void
+    public function testDenseHistoryOlderThanTwoYearsIsDroppedButSparseFactsSurvive(): void
+    {
+        $facts = [
+            self::trend('recent-1', '%', '2026-05-01', 7.2, 1),
+            self::trend('recent-2', '%', '2026-01-01', 7.4, 2),
+            self::trend('old-1', '%', '2023-01-01', 9.0, 3),   // > 2yr before the newest (2026-05)
+            self::trend('old-2', '%', '2021-06-01', 9.5, 4),
+            // A medication started 5 years ago but still on the chart: sparse, kept.
+            self::nonValue('med-active', 'med_response', 'med_event', '2021-03-01', 9),
+        ];
+
+        $ids = array_map(static fn (Fact $f): string => $f->factId, PromptFactWindow::forPrompt($facts));
+
+        self::assertContains('recent-1', $ids);
+        self::assertContains('recent-2', $ids);
+        self::assertNotContains('old-1', $ids, 'trend history older than 2 years must not travel to the model');
+        self::assertNotContains('old-2', $ids);
+        self::assertContains('med-active', $ids, 'a still-listed medication is kept regardless of age');
+    }
+
+    public function testUnderTheCapEverythingRecentSurvives(): void
     {
         $facts = [
             self::trend('a', '%', '2026-01-01', 7.1, 1),
             self::trend('b', '%', '2026-04-01', 7.3, 2),
-            self::nonValue('m', 'med_response', 'med_event', 9),
+            self::nonValue('m', 'med_response', 'med_event', '2026-01-01', 9),
         ];
 
-        self::assertCount(3, PromptFactWindow::forPrompt($facts, 15));
+        self::assertCount(3, PromptFactWindow::forPrompt($facts));
     }
 
     private static function trend(string $id, string $unit, string $date, float $parsed, int $pk): Fact
@@ -80,7 +102,7 @@ final class PromptFactWindowTest extends TestCase
         ]);
     }
 
-    private static function nonValue(string $id, string $capability, string $kind, int $pk): Fact
+    private static function nonValue(string $id, string $capability, string $kind, string $date, int $pk): Fact
     {
         return Fact::fromArray([
             'fact_id' => $id,
@@ -88,7 +110,7 @@ final class PromptFactWindowTest extends TestCase
             'capability_version' => '1',
             'kind' => $kind,
             'pid' => 42,
-            'clinical_date' => '2026-01-01',
+            'clinical_date' => $date,
             'date_source' => 'collected',
             'value' => null,
             'status' => 'final',
