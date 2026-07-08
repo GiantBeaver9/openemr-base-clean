@@ -45,6 +45,7 @@ anywhere else, and none are ever logged.
 | `GOOGLE_APPLICATION_CREDENTIALS` | Vertex (production) | Standard ADC variable (`google/auth`, not module-specific) — path to a service-account JSON key file. Required by Vertex's ADC resolution; the module never reads this itself. | `GOOGLE_APPLICATION_CREDENTIALS=/etc/openemr/gcp-copilot-sa.json` |
 | `CLINICAL_COPILOT_GEMINI_API_KEY` | Gemini API key (dev/test) | Google AI Studio API key. Setting this (with no Vertex project id set) turns the dev/test fast-path on. **Synthetic-data-only — see warning above.** | `CLINICAL_COPILOT_GEMINI_API_KEY=AIza...` |
 | `CLINICAL_COPILOT_GEMINI_API_MODEL` | Gemini API key (dev/test, optional) | Model id for synthesis + chat when using the API-key path. Defaults to `gemini-2.5-flash` (free-tier friendly). Vertex keeps `gemini-2.5-pro` regardless. Folded into `prompt_version` via {@see \OpenEMR\Modules\ClinicalCopilot\Config\LlmRuntimeConfig}. | `CLINICAL_COPILOT_GEMINI_API_MODEL=gemini-2.5-flash` |
+| `CLINICAL_COPILOT_WORKER_LLM_ENABLED` | Background worker (optional) | When `true`, the `clinical_copilot_worker` cron may call Gemini for pre-visit warm, QA sweep, and QA-driven reruns. **Defaults to off** — narration runs on user-facing doc/chat/regenerate only. Set `true` only when you want headless pre-warm in production. | `CLINICAL_COPILOT_WORKER_LLM_ENABLED=true` |
 
 None of these are set in this environment by default — the module ships
 configured to degrade cleanly (see below).

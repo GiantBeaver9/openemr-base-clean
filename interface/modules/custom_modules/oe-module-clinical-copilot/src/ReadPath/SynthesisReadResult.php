@@ -85,6 +85,40 @@ final readonly class SynthesisReadResult
     }
 
     /**
+     * Cache miss when the caller forbids background LLM (worker warm). Facts
+     * are fresh (I2); narration is deferred until a user-facing read.
+     *
+     * @param list<Fact> $facts
+     */
+    public static function cacheMissLlmDeferred(
+        string $correlationId,
+        int $pid,
+        array $facts,
+        string $factDigest,
+    ): self {
+        return new self(
+            $correlationId,
+            $pid,
+            false,
+            null,
+            $facts,
+            $factDigest,
+            null,
+            null,
+            null,
+            null,
+            null,
+            [],
+            0,
+            false,
+            null,
+            null,
+            null,
+            null,
+        );
+    }
+
+    /**
      * @param list<Fact> $facts fresh facts, recomputed this read (I2)
      * @param list<Claim>|null $claims from the served doc row's payload
      * @param list<Verdict> $verdicts from the served doc row's payload
