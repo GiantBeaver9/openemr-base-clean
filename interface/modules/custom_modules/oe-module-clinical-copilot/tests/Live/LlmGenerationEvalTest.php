@@ -1,8 +1,9 @@
 <?php
 
 /**
- * Live LLM generation eval: calls the real configured provider and asserts on
- * real outputs. Groundwork for deployment smoke/eval runs.
+ * Live LLM generation eval: sends (query + data) to the real configured
+ * provider and asserts the answer matches an expected pattern. Groundwork for
+ * deployment smoke/eval runs.
  *
  * @package   OpenEMR\Modules\ClinicalCopilot
  * @link      https://www.open-emr.org
@@ -19,6 +20,7 @@ use OpenEMR\Modules\ClinicalCopilot\ReadPath\LlmClientFactory;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\UnavailableLlmClient;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\LlmClientInterface;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\PromptRequest;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -30,26 +32,35 @@ use PHPUnit\Framework\TestCase;
  * and we send real prompts through {@see LlmClientInterface::generateStructured()}
  * and assert on what comes back.
  *
- * It is DOUBLE-GATED so it can never fire by accident in normal CI:
+ * Each scenario is a row in {@see self::scenarioProvider()}: a natural-language
+ * `query` plus a short `data` series, and an expected-answer matcher
+ * (CONTAINS / CONTAINS_ANY / CONTAINS_ALL / NOT_CONTAINS, all case-insensitive).
+ * Example:
+ *
+ *   query: "What is the A1c trend?"   data: "8.0, 8.5, 9.0"
+ *   expect: CONTAINS "increasing"
+ *
+ * Add a scenario by adding one row. Matchers use ANY-of / structural checks
+ * where clinical phrasing legitimately varies, so the eval measures whether the
+ * model got the answer RIGHT without being brittle about exact words.
+ *
+ * DOUBLE-GATED so it can never fire by accident in normal CI:
  *   1. `CLINICAL_COPILOT_LIVE_EVAL=1` must be set (explicit opt-in), and
- *   2. a provider must actually be configured (otherwise the factory hands
- *      back {@see UnavailableLlmClient} and we skip).
- * With neither condition met the whole suite is skipped -- green, no calls,
- * no cost. On a deployment where credentials are present you run it with the
- * opt-in flag to confirm the model is reachable and behaving:
+ *   2. a provider must actually be configured (else the factory hands back
+ *      {@see UnavailableLlmClient} and every scenario skips).
+ * Run it on a deployment (or locally against synthetic-data credentials) with:
  *
  *   CLINICAL_COPILOT_LIVE_EVAL=1 \
  *   CLINICAL_COPILOT_GEMINI_API_KEY=... \
  *   vendor/bin/phpunit -c interface/modules/custom_modules/oe-module-clinical-copilot/phpunit-live.xml
- *
- * Cases span difficulty on purpose: the arithmetic and classification cases
- * are deterministic at temperature 0 and should pass every run; the extraction
- * and free-list cases assert structural/semantic properties that tolerate the
- * model's wording latitude. Add a case by writing one more `test*` method that
- * calls {@see self::generate()} and asserts on the decoded output.
  */
 final class LlmGenerationEvalTest extends TestCase
 {
+    private const CONTAINS = 'contains';
+    private const CONTAINS_ANY = 'contains_any';
+    private const CONTAINS_ALL = 'contains_all';
+    private const NOT_CONTAINS = 'not_contains';
+
     /** Cheap, fast default; override per deployment with CLINICAL_COPILOT_EVAL_MODEL. */
     private const DEFAULT_MODEL = 'gemini-2.5-flash';
 
@@ -77,110 +88,94 @@ final class LlmGenerationEvalTest extends TestCase
         $this->client = $client;
     }
 
-    /** Deterministic at temperature 0 -- must be exact every run. */
-    public function testArithmeticIsExact(): void
+    /**
+     * @param list<string> $expected
+     */
+    #[DataProvider('scenarioProvider')]
+    public function testScenario(string $query, string $data, string $matcher, array $expected): void
     {
-        $out = $this->generate(
-            'You are a precise calculator. Respond only with JSON matching the schema.',
-            'Compute 17 + 25.',
-            ['type' => 'object', 'properties' => ['answer' => ['type' => 'integer']], 'required' => ['answer']],
-        );
+        $answer = $this->ask($query, $data);
 
-        self::assertIsArray($out);
-        self::assertSame(42, $out['answer'] ?? null);
-    }
-
-    /** Deterministic factual recall -- tolerant of surrounding wording. */
-    public function testFactualRecall(): void
-    {
-        $out = $this->generate(
-            'Answer factually. Respond only with JSON matching the schema.',
-            'In which city is the Eiffel Tower located?',
-            ['type' => 'object', 'properties' => ['city' => ['type' => 'string']], 'required' => ['city']],
-        );
-
-        self::assertIsArray($out);
-        self::assertIsString($out['city'] ?? null);
-        self::assertStringContainsStringIgnoringCase('paris', (string)$out['city']);
-    }
-
-    /** Structured extraction -- the numeric value is pinned, wording is not. */
-    public function testStructuredExtractionFromClinicalSentence(): void
-    {
-        $out = $this->generate(
-            'Extract the single lab result described by the user as JSON matching the schema.',
-            'Most recent HbA1c: 6.4 percent, drawn 2026-01-05.',
-            [
-                'type' => 'object',
-                'properties' => [
-                    'analyte' => ['type' => 'string'],
-                    'value' => ['type' => 'number'],
-                    'unit' => ['type' => 'string'],
-                ],
-                'required' => ['analyte', 'value', 'unit'],
-            ],
-        );
-
-        self::assertIsArray($out);
-        self::assertEqualsWithDelta(6.4, (float)($out['value'] ?? 0), 0.001);
-        self::assertStringContainsStringIgnoringCase('a1c', (string)($out['analyte'] ?? ''));
-        self::assertNotSame('', trim((string)($out['unit'] ?? '')));
-    }
-
-    /** Constrained (enum) classification -- one of exactly two labels. */
-    public function testBinaryClassification(): void
-    {
-        $out = $this->generate(
-            'Classify the reading. Respond only with JSON matching the schema.',
-            'For an adult at rest, a blood pressure reading of 152/96 mmHg is:',
-            [
-                'type' => 'object',
-                'properties' => ['category' => ['type' => 'string', 'enum' => ['normal', 'elevated']]],
-                'required' => ['category'],
-            ],
-        );
-
-        self::assertIsArray($out);
-        self::assertSame('elevated', $out['category'] ?? null);
-    }
-
-    /** Hardest / least deterministic -- assert SHAPE, not exact content. */
-    public function testFreeListIsWellFormed(): void
-    {
-        $out = $this->generate(
-            'Respond only with a JSON array of 2 to 3 short strings matching the schema.',
-            'List up to three common differential considerations for acute chest pain in an adult.',
-            ['type' => 'array', 'items' => ['type' => 'string']],
-        );
-
-        self::assertIsArray($out);
-        self::assertGreaterThanOrEqual(1, count($out));
-        self::assertLessThanOrEqual(5, count($out));
-        foreach ($out as $item) {
-            self::assertIsString($item);
-            self::assertNotSame('', trim($item));
-        }
+        $this->assertAnswerMatches($answer, $matcher, $expected, $query, $data);
     }
 
     /**
-     * Issues one real structured-generation call and returns the decoded JSON.
+     * Each row: query, data series, matcher, expected token(s). Ordered roughly
+     * easy -> hard: unambiguous trends first, then classification against
+     * reference ranges, then goal assessment and simple numeric reasoning.
      *
-     * Also asserts the response is a genuine metered result (non-empty text,
-     * a model version, and both token counts > 0) so a silently degraded or
-     * empty reply fails loudly rather than passing a vacuous decode. Any
-     * provider/transport failure surfaces as a thrown LlmUnavailableException
-     * -- exactly the signal a deployment smoke run wants.
+     * @return array<string, array{string, string, string, list<string>}>
      *
-     * @param array<string, mixed> $responseSchema
-     *
-     * @return mixed decoded JSON (associative array for object schemas, list for array schemas)
+     * @codeCoverageIgnore Data providers run before coverage instrumentation starts.
      */
-    private function generate(string $systemInstructions, string $userContent, array $responseSchema): mixed
+    public static function scenarioProvider(): array
+    {
+        return [
+            'a1c trend increasing' => [
+                'What is the A1c trend?', '8.0, 8.5, 9.0',
+                self::CONTAINS, ['increasing'],
+            ],
+            'a1c trend decreasing' => [
+                'What is the A1c trend?', '9.2, 7.8, 6.5',
+                self::CONTAINS_ANY, ['decreasing', 'declining', 'improving', 'downward'],
+            ],
+            'a1c trend stable' => [
+                'What is the A1c trend?', '7.0, 7.1, 7.0',
+                self::CONTAINS_ANY, ['stable', 'unchanged', 'flat', 'no significant'],
+            ],
+            'fasting glucose elevated' => [
+                'Is this fasting glucose within the normal range?', '185 mg/dL',
+                self::CONTAINS_ANY, ['no', 'not', 'high', 'elevated', 'above'],
+            ],
+            'blood pressure hypertension' => [
+                'How would you classify this blood pressure?', '152/96 mmHg',
+                self::CONTAINS_ANY, ['hypertension', 'elevated', 'high', 'stage'],
+            ],
+            'weight loss trend' => [
+                'Describe the weight trend.', '212, 204, 197 lb',
+                self::CONTAINS_ANY, ['decreasing', 'declining', 'loss', 'losing', 'downward', 'down'],
+            ],
+            'a1c above goal' => [
+                'Is this A1c at the usual adult diabetes goal of under 7%?', '9.0%',
+                self::CONTAINS_ANY, ['no', 'not', 'above', 'poor', 'uncontrolled'],
+            ],
+            'ldl high' => [
+                'Is this LDL cholesterol high?', '190 mg/dL',
+                self::CONTAINS_ANY, ['high', 'elevated', 'above'],
+            ],
+            'tsh hypothyroid' => [
+                'Does this TSH suggest an underactive or overactive thyroid?', '8.5 mIU/L (reference 0.4-4.0)',
+                self::CONTAINS, ['hypo'],
+            ],
+            'highest value in series' => [
+                'Which single value in this series is the highest?', '8.0, 8.5, 9.0',
+                self::CONTAINS, ['9'],
+            ],
+        ];
+    }
+
+    /**
+     * Sends one (query + data) turn and returns the model's answer text.
+     *
+     * Uses a `{ "answer": string }` structured-output contract so the reply is
+     * a clean, parseable string, and asserts the response is a genuine metered
+     * result (non-empty, model version set, token counts > 0) so a silently
+     * degraded/empty reply fails loudly rather than passing a vacuous match.
+     */
+    private function ask(string $query, string $data): string
     {
         $request = new PromptRequest(
-            systemInstructions: $systemInstructions,
-            userContent: $userContent,
-            responseSchema: $responseSchema,
+            systemInstructions:
+                'You are a clinical data assistant for an endocrinology clinic. You are given a short '
+                . 'patient data series and a question about it. Answer concisely in plain clinical language. '
+                . 'When describing a trend, state whether it is increasing, decreasing, or stable. '
+                . 'Respond only with JSON matching the schema.',
+            userContent: $query . "\n\nData: " . $data,
+            responseSchema: [
+                'type' => 'object',
+                'properties' => ['answer' => ['type' => 'string']],
+                'required' => ['answer'],
+            ],
             model: self::model(),
             promptVersion: 'live-eval-v1',
             temperature: 0.0,
@@ -196,9 +191,67 @@ final class LlmGenerationEvalTest extends TestCase
         self::assertGreaterThanOrEqual(0, $response->latencyMs);
 
         try {
-            return json_decode($response->rawJson, true, 512, JSON_THROW_ON_ERROR);
+            $decoded = json_decode($response->rawJson, true, 512, JSON_THROW_ON_ERROR);
         } catch (\JsonException) {
             self::fail('model output was not valid JSON: ' . $response->rawJson);
+        }
+
+        self::assertIsArray($decoded);
+        $answer = $decoded['answer'] ?? null;
+        self::assertIsString($answer, 'response JSON had no string "answer" field: ' . $response->rawJson);
+
+        return $answer;
+    }
+
+    /**
+     * @param list<string> $expected
+     */
+    private function assertAnswerMatches(
+        string $answer,
+        string $matcher,
+        array $expected,
+        string $query,
+        string $data,
+    ): void {
+        $context = sprintf(
+            "query=%s | data=%s | expected %s [%s] | model answered: %s",
+            $query,
+            $data,
+            $matcher,
+            implode(', ', $expected),
+            $answer,
+        );
+        $haystack = strtolower($answer);
+
+        switch ($matcher) {
+            case self::CONTAINS:
+                self::assertStringContainsStringIgnoringCase($expected[0], $answer, $context);
+                return;
+
+            case self::CONTAINS_ALL:
+                foreach ($expected as $needle) {
+                    self::assertStringContainsStringIgnoringCase($needle, $answer, $context);
+                }
+                return;
+
+            case self::CONTAINS_ANY:
+                foreach ($expected as $needle) {
+                    if (str_contains($haystack, strtolower($needle))) {
+                        // Surface the passing assertion count so the test is not "risky".
+                        self::assertTrue(true, $context);
+                        return;
+                    }
+                }
+                self::fail($context);
+
+            case self::NOT_CONTAINS:
+                foreach ($expected as $needle) {
+                    self::assertStringNotContainsStringIgnoringCase($needle, $answer, $context);
+                }
+                return;
+
+            default:
+                self::fail('unknown matcher: ' . $matcher);
         }
     }
 
