@@ -63,7 +63,10 @@ final class VertexLlmClient implements LlmClientInterface
 
     private const API_VERSION = 'v1';
     private const OAUTH_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
-    private const TIMEOUT_SECONDS = 20.0;
+    // Matches the AI-Studio client's 90s: a synthesis over a real fact set
+    // routinely runs longer than 20s, and a 20s cut left the narrative
+    // ungenerated (degraded to facts-only on a timeout that was not a failure).
+    private const TIMEOUT_SECONDS = 90.0;
 
     private readonly ClientInterface $httpClient;
 

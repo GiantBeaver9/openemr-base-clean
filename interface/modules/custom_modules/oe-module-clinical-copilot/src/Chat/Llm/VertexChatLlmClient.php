@@ -56,7 +56,10 @@ final class VertexChatLlmClient implements ChatLlmClientInterface
 
     private const API_VERSION = 'v1';
     private const OAUTH_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
-    private const TIMEOUT_SECONDS = 20.0;
+    // Matches the AI-Studio client's 90s: a chart-grounded reasoning call over
+    // a real fact set routinely runs longer than 20s, and a 20s cut surfaced to
+    // the physician as a mid-turn network error / an ungenerated narrative.
+    private const TIMEOUT_SECONDS = 90.0;
 
     private readonly ClientInterface $httpClient;
 

@@ -16,6 +16,7 @@ namespace OpenEMR\Modules\ClinicalCopilot\Reduce;
 
 use OpenEMR\Modules\ClinicalCopilot\Fact\CanonicalSerializer;
 use OpenEMR\Modules\ClinicalCopilot\Fact\Fact;
+use OpenEMR\Modules\ClinicalCopilot\Fact\PromptFactWindow;
 
 /**
  * Contract this class exists to hold (docs/build-notes.md, U7): the fact
@@ -98,12 +99,17 @@ final class PromptAssembler
         PatientIdentifiers $identifiers,
         ?string $priorFindings = null,
     ): PromptRequest {
+        // Show the model a recent, prompt-sized window of the chart -- a
+        // 20-year fact set is ~60K tokens re-sent every round and stalls the
+        // call. The digest and the verifier still see the full $facts; this
+        // only bounds what is serialized into the prompt (a subset, so every
+        // cited fact still resolves).
         $sections = [
             self::PATIENT_HEADER,
             self::patientBlock($identifiers),
             '',
             self::FACTS_HEADER,
-            CanonicalSerializer::serializeFacts($facts),
+            CanonicalSerializer::serializeFacts(PromptFactWindow::forPrompt($facts)),
         ];
 
         if ($priorFindings !== null && trim($priorFindings) !== '') {

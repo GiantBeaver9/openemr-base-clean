@@ -20,6 +20,7 @@ use OpenEMR\Modules\ClinicalCopilot\Chat\Tool\ChainBudget;
 use OpenEMR\Modules\ClinicalCopilot\Chat\Tool\ToolCatalog;
 use OpenEMR\Modules\ClinicalCopilot\Chat\Tool\ToolExecutorInterface;
 use OpenEMR\Modules\ClinicalCopilot\Fact\Fact;
+use OpenEMR\Modules\ClinicalCopilot\Fact\PromptFactWindow;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\Claim;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\ClaimType;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\LlmUnavailableException;
@@ -105,8 +106,11 @@ final class AgentLoop
             $this->emitStatus($budget->roundsUsed() === 1 ? 'thinking…' : 'checking whether more data is needed…');
             $toolsOffered = $budget->remainingCalls() > 0 ? ToolCatalog::all() : [];
 
+            // Bound only what the model is shown; $facts stays full for
+            // accumulation and for the verifier's fact set (a windowed cited
+            // fact still resolves against the superset).
             $request = $this->promptAssembler->assemble(
-                $facts,
+                PromptFactWindow::forPrompt($facts),
                 $narrativeClaims,
                 $transcript,
                 $userQuestion,
@@ -186,7 +190,7 @@ final class AgentLoop
         string $priorFindings,
     ): AgentLoopResult {
         $request = $this->promptAssembler->assemble(
-            $sessionFacts,
+            PromptFactWindow::forPrompt($sessionFacts),
             $narrativeClaims,
             $conversationTranscript,
             $userQuestion,
