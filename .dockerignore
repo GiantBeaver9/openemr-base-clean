@@ -4,3 +4,4 @@
 # Keep Railway metadata (small).
 !railway.toml
 !docker/railway/Dockerfile
+!docker/railway/railway-entrypoint.sh
