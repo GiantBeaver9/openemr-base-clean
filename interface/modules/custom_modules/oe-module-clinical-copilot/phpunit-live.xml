@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Opt-in LIVE LLM eval suite (tests/Live/). This makes REAL calls to whichever
+provider the environment configures via LlmClientFactory (Vertex, or the Gemini
+API-key fast-path). It is double-gated and safe to leave in the tree: with
+CLINICAL_COPILOT_LIVE_EVAL unset, or with no provider credentials, every test
+skips, so it is never part of normal CI and never incurs cost by accident.
+
+Run it on a deployment (or locally against synthetic-data credentials) with:
+
+  CLINICAL_COPILOT_LIVE_EVAL=1 \
+  CLINICAL_COPILOT_GEMINI_API_KEY=... \
+  vendor/bin/phpunit -c interface/modules/custom_modules/oe-module-clinical-copilot/phpunit-live.xml
+
+Optionally set CLINICAL_COPILOT_EVAL_MODEL to pin a specific model version.
+-->
+<phpunit bootstrap="tests/live-bootstrap.php"
+         colors="true"
+         failOnWarning="true"
+         failOnRisky="true">
+  <testsuites>
+    <testsuite name="live">
+      <directory>tests/Live</directory>
+    </testsuite>
+  </testsuites>
+</phpunit>
