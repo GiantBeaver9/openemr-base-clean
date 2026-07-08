@@ -158,9 +158,9 @@ final class SynthesisReadPath
      * call; a miss runs one unforced reduce+verify attempt
      * (`regen_reason='none'` or `'verify_retry'`, per U10's own retry).
      */
-    public function read(int $pid, ?int $userId): SynthesisReadResult
+    public function read(int $pid, ?int $userId, bool $allowLlmOnMiss = true): SynthesisReadResult
     {
-        return $this->run($pid, $userId, self::mintCorrelationId(), forceRegenerate: false);
+        return $this->run($pid, $userId, self::mintCorrelationId(), forceRegenerate: false, allowLlmOnMiss: $allowLlmOnMiss);
     }
 
     /**
@@ -246,6 +246,7 @@ final class SynthesisReadPath
         bool $forceRegenerate,
         RegenReason $regenReason = RegenReason::Manual,
         ?\Closure $onStatus = null,
+        bool $allowLlmOnMiss = true,
     ): SynthesisReadResult {
         $extraction = $this->extractAll($pid, $correlationId, $userId, $onStatus);
 
@@ -280,6 +281,17 @@ final class SynthesisReadPath
                 $this->recordSpan($correlationId, 'render', microtime(true), $existing->verifyStatus === VerifyStatus::Passed ? 'ok' : 'degraded', $pid, $userId);
 
                 return $this->toServedResult($correlationId, $pid, $extraction->survivingFacts, $existing, servedFromCache: true);
+            }
+
+            if (!$allowLlmOnMiss) {
+                $this->recordSpan($correlationId, 'render', microtime(true), 'deferred', $pid, $userId);
+
+                return SynthesisReadResult::cacheMissLlmDeferred(
+                    $correlationId,
+                    $pid,
+                    $extraction->survivingFacts,
+                    $digest,
+                );
             }
         }
 

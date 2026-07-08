@@ -23,6 +23,7 @@ use OpenEMR\Modules\ClinicalCopilot\Capability\MedResponse;
 use OpenEMR\Modules\ClinicalCopilot\Capability\OverdueTests;
 use OpenEMR\Modules\ClinicalCopilot\Capability\PendingResults;
 use OpenEMR\Modules\ClinicalCopilot\Capability\VitalsTrend;
+use OpenEMR\Modules\ClinicalCopilot\Config\WorkerConfig;
 use OpenEMR\Modules\ClinicalCopilot\Doc\QaStatus;
 use OpenEMR\Modules\ClinicalCopilot\DocStore;
 use OpenEMR\Modules\ClinicalCopilot\Lab\Config\DbLabContractConfigProvider;
@@ -81,6 +82,11 @@ final class WorkerTest extends TestCase
     protected function tearDown(): void
     {
         QueryUtils::rollbackTransaction();
+        putenv(WorkerConfig::ENV_BACKGROUND_LLM_ENABLED);
+        unset(
+            $_ENV[WorkerConfig::ENV_BACKGROUND_LLM_ENABLED],
+            $_SERVER[WorkerConfig::ENV_BACKGROUND_LLM_ENABLED],
+        );
     }
 
     /**
@@ -110,6 +116,8 @@ final class WorkerTest extends TestCase
      */
     public function testWarmHitServesWithoutAnLlmCall(): void
     {
+        putenv(WorkerConfig::ENV_BACKGROUND_LLM_ENABLED . '=true');
+
         self::insertA1cResult($this->pid, '7.2', '2026-01-10');
         $now = new \DateTimeImmutable('2026-03-02 08:00:00');
         self::insertScheduleEvent($this->pid, $now->modify('+20 minutes'));
@@ -127,6 +135,23 @@ final class WorkerTest extends TestCase
         self::assertSame(1, $second->warmedCount);
         self::assertSame(1, $this->llmClient->callCount(), 'an unchanged fact set must be a cache hit -- no second LLM call');
         self::assertSame(1, self::countDocRows($this->pid), 'a cache hit must never insert a second row');
+    }
+
+    public function testWorkerWarmDoesNotCallLlmWhenBackgroundDisabled(): void
+    {
+        putenv(WorkerConfig::ENV_BACKGROUND_LLM_ENABLED . '=false');
+
+        self::insertA1cResult($this->pid, '7.2', '2026-01-10');
+        $now = new \DateTimeImmutable('2026-03-02 08:00:00');
+        self::insertScheduleEvent($this->pid, $now->modify('+20 minutes'));
+
+        $worker = $this->buildWorker($now, new AppointmentWindowReader());
+        $result = $worker->runTick();
+
+        self::assertTrue($result->warmOk);
+        self::assertSame(0, $result->warmedCount);
+        self::assertSame(0, $this->llmClient->callCount());
+        self::assertSame(0, self::countDocRows($this->pid));
     }
 
     /**

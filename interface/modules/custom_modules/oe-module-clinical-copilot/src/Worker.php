@@ -18,6 +18,7 @@ use OpenEMR\BC\ServiceContainer;
 use OpenEMR\Common\Database\QueryUtils;
 use OpenEMR\Common\Logging\SystemLogger;
 use OpenEMR\Modules\ClinicalCopilot\Chat\RateLimit\CircuitBreakerInterface;
+use OpenEMR\Modules\ClinicalCopilot\Config\WorkerConfig;
 use OpenEMR\Modules\ClinicalCopilot\Doc\QaStatus;
 use OpenEMR\Modules\ClinicalCopilot\Doc\RegenReason;
 use OpenEMR\Modules\ClinicalCopilot\Observability\Qa\QaSweepSummary;
@@ -142,13 +143,16 @@ final class Worker
         });
 
         $qaSummary = null;
-        $qaSweepOk = $this->safely('qa_sweep', function () use (&$qaSummary): void {
-            $qaSummary = $this->tick->runQaSweep(self::QA_SWEEP_LIMIT);
-        });
+        $qaSweepOk = true;
+        if (WorkerConfig::backgroundLlmEnabled()) {
+            $qaSweepOk = $this->safely('qa_sweep', function () use (&$qaSummary): void {
+                $qaSummary = $this->tick->runQaSweep(self::QA_SWEEP_LIMIT);
+            });
+        }
 
         $qaReruns = 0;
         $qaRerunOk = true;
-        if ($qaSummary !== null) {
+        if ($qaSummary !== null && WorkerConfig::backgroundLlmEnabled()) {
             $qaRerunOk = $this->safely('qa_rerun', function () use ($qaSummary, $now, &$qaReruns): void {
                 $qaReruns = $this->runQaDrivenReruns($qaSummary, $now);
             });
@@ -189,22 +193,32 @@ final class Worker
     {
         $until = $now->modify('+' . self::WARM_LOOKAHEAD_HOURS . ' hours');
         $due = $this->appointments->dueForWarm($now, $until);
+        $allowLlmOnMiss = WorkerConfig::backgroundLlmEnabled();
 
-        $maxGenerations = $this->maxGenerationsPerTick();
+        $maxGenerations = $allowLlmOnMiss ? $this->maxGenerationsPerTick() : 0;
         $warmed = 0;
         $skipped = 0;
         $generations = 0;
 
         foreach ($due as $appt) {
-            if ($this->breaker->isOpen() || $generations >= $maxGenerations) {
+            if ($allowLlmOnMiss && ($this->breaker->isOpen() || $generations >= $maxGenerations)) {
                 $skipped++;
                 continue;
             }
 
             try {
-                $result = $this->readPath->read($appt->pid, null);
-                $warmed++;
-                if (!$result->capabilityCrash && !$result->servedFromCache) {
+                $result = $this->readPath->read($appt->pid, null, $allowLlmOnMiss);
+                if ($result->capabilityCrash) {
+                    continue;
+                }
+
+                if ($result->servedFromCache) {
+                    $warmed++;
+                    continue;
+                }
+
+                if ($allowLlmOnMiss && !$result->servedFromCache) {
+                    $warmed++;
                     $generations++;
                 }
             } catch (\Throwable $e) {
