@@ -63,12 +63,14 @@ trait GeminiGenerateContentContract
             throw LlmUnavailableException::providerError(new \RuntimeException('Gemini candidate contained no content parts'));
         }
 
-        $text = $parts[0]['text'] ?? null;
-        if (!is_string($text) || $text === '') {
-            throw LlmUnavailableException::providerError(new \RuntimeException('Gemini candidate part contained no text'));
+        foreach ($parts as $part) {
+            $text = is_array($part) ? ($part['text'] ?? null) : null;
+            if (is_string($text) && $text !== '') {
+                return $text;
+            }
         }
 
-        return $text;
+        throw LlmUnavailableException::providerError(new \RuntimeException('Gemini candidate contained no non-empty text part'));
     }
 
     /**
