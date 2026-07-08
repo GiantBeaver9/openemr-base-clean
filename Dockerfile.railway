@@ -2,7 +2,7 @@
 # Kept at repo root so `railway up` archives include it (.railwayignore allow-list).
 #
 # ENTRYPOINT -> railway-entrypoint.sh -> ./openemr.sh -> exec httpd -D FOREGROUND
-# Apache is configured to listen on Railway's PORT (default 8080).
+# Apache listens on Railway's PORT (default 80, matching flex image).
 
 FROM openemr/openemr:flex
 

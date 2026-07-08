@@ -8,19 +8,24 @@ export PORT="${APACHE_PORT}"
 HTTPD_CONF=/etc/apache2/httpd.conf
 OPENEMR_CONF=/etc/apache2/conf.d/openemr.conf
 
-if [ -f "${HTTPD_CONF}" ]; then
-    sed -i "s/^Listen 0\.0\.0\.0:80$/Listen 0.0.0.0:${APACHE_PORT}/" "${HTTPD_CONF}"
-    sed -i "s/^Listen 80$/Listen 0.0.0.0:${APACHE_PORT}/" "${HTTPD_CONF}"
-    sed -i "s/^Listen 443$/# Listen 443 disabled for Railway HTTP/" "${HTTPD_CONF}"
-fi
+if [ "${APACHE_PORT}" = "80" ]; then
+    # Flex defaults: keep openemr.conf intact (partial VirtualHost edits break httpd -t).
+    if [ -f "${HTTPD_CONF}" ] && ! grep -qE '^Listen 0\.0\.0\.0:80$' "${HTTPD_CONF}"; then
+        sed -i 's/^Listen 80$/Listen 0.0.0.0:80/' "${HTTPD_CONF}"
+    fi
+else
+    if [ -f "${HTTPD_CONF}" ]; then
+        sed -i "s/^Listen 0\.0\.0\.0:80$/Listen 0.0.0.0:${APACHE_PORT}/" "${HTTPD_CONF}"
+        sed -i "s/^Listen 80$/Listen 0.0.0.0:${APACHE_PORT}/" "${HTTPD_CONF}"
+    fi
 
-if [ -f "${OPENEMR_CONF}" ]; then
-    sed -i "s/<VirtualHost \\*:80>/<VirtualHost *:${APACHE_PORT}>/" "${OPENEMR_CONF}"
-    sed -i "s/^<VirtualHost _default_:443>/# <VirtualHost _default_:443> disabled for Railway/" "${OPENEMR_CONF}"
-fi
+    if [ -f "${OPENEMR_CONF}" ]; then
+        sed -i "s/<VirtualHost \\*:80>/<VirtualHost *:${APACHE_PORT}>/" "${OPENEMR_CONF}"
+    fi
 
-if [ -f "${HTTPD_CONF}" ] && ! grep -qE "^Listen (0\.0\.0\.0:)?${APACHE_PORT}$" "${HTTPD_CONF}"; then
-    echo "Listen 0.0.0.0:${APACHE_PORT}" >> "${HTTPD_CONF}"
+    if [ -f "${HTTPD_CONF}" ] && ! grep -qE "^Listen (0\.0\.0\.0:)?${APACHE_PORT}$" "${HTTPD_CONF}"; then
+        echo "Listen 0.0.0.0:${APACHE_PORT}" >> "${HTTPD_CONF}"
+    fi
 fi
 
 httpd -t
