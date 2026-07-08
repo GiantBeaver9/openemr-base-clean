@@ -196,6 +196,8 @@
     "autoload-dev": {
         "psr-4": {
             "OpenEMR\\": "tests",
+            "OpenEMR\\Modules\\ClinicalCopilot\\": "interface/modules/custom_modules/oe-module-clinical-copilot/src",
+            "OpenEMR\\Modules\\ClinicalCopilot\\Tests\\": "interface/modules/custom_modules/oe-module-clinical-copilot/tests",
             "OpenEMR\\Release\\": "tools/release/src"
         }
     },

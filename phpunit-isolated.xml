@@ -74,5 +74,12 @@ This file configures the kind that does not require initialization.
       <directory>tests/Tests/Unit/PaymentProcessing</directory>
       <directory>tests/Tests/Unit/library</directory>
     </testsuite>
+
+    <!-- Custom-module isolated tests: pure, no-DB suites that ship with in-tree
+         modules. They are the module's "primary green gate" (see each module's
+         build notes) and must run on every push/PR alongside core isolated tests. -->
+    <testsuite name="module-isolated">
+      <directory>interface/modules/custom_modules/oe-module-clinical-copilot/tests/Isolated</directory>
+    </testsuite>
   </testsuites>
 </phpunit>
