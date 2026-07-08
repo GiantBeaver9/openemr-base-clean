@@ -8,8 +8,8 @@ ENV FLEX_REPOSITORY=https://github.com/GiantBeaver9/openemr-base-clean.git \
 
 COPY patch-flex-openemr.sh railway-flex-bootstrap.sh railway-entrypoint.sh /tmp/railway/
 RUN chmod 755 /tmp/railway/patch-flex-openemr.sh /tmp/railway/railway-flex-bootstrap.sh /tmp/railway/railway-entrypoint.sh \
-    && /tmp/railway/patch-flex-openemr.sh \
     && cp /tmp/railway/railway-flex-bootstrap.sh /usr/local/bin/railway-flex-bootstrap.sh \
+    && /tmp/railway/patch-flex-openemr.sh \
     && cp /tmp/railway/railway-entrypoint.sh /usr/local/bin/railway-entrypoint.sh \
     && rm -rf /tmp/railway
 

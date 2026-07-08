@@ -45,6 +45,8 @@ if [ -z "${MYSQL_HOST:-}" ] || [ -z "${MYSQL_ROOT_PASS:-}" ]; then
     exit 1
 fi
 
+rm -rf /openemr /openemr-base-clean
+
 /usr/local/bin/railway-flex-bootstrap.sh
 
 cd /var/www/localhost/htdocs

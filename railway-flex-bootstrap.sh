@@ -13,6 +13,12 @@ if [ -f "${HTDOCS}/openemr/composer.json" ]; then
     exit 0
 fi
 
+# Drop partial trees from a crashed prior start.
+if [ -d "${HTDOCS}/openemr" ]; then
+    echo "Railway flex: removing incomplete openemr tree."
+    rm -rf "${HTDOCS}/openemr"
+fi
+
 REPO="${FLEX_REPOSITORY:-https://github.com/GiantBeaver9/openemr-base-clean.git}"
 BRANCH="${FLEX_REPOSITORY_BRANCH:-main}"
 
@@ -21,5 +27,5 @@ cd /
 rm -rf openemr-base-clean openemr
 git clone --branch "${BRANCH}" --depth 1 "${REPO}" openemr
 rsync --ignore-existing --recursive --links --exclude .git openemr "${HTDOCS}/"
-rm -rf openemr
+rm -rf openemr openemr-base-clean
 echo "Railway flex: source copied to ${HTDOCS}/openemr"
