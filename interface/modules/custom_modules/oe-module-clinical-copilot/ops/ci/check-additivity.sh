@@ -53,6 +53,14 @@ ALLOWED_SPEC_DOCS=(
   "ARCHITECTURE.md"
   "ARCHITECTURE_COMPLETE.md"
   "docs/clinical-copilot-tradeoffs.md"
+  # Plain-text copies of the root deliverables, for upload/review tools that
+  # only scan for .txt. Same content as the .md source; keep them in sync.
+  "README.txt"
+  "AUDIT.txt"
+  "USERS.txt"
+  "USER.txt"
+  "ARCHITECTURE.txt"
+  "ARCHITECTURE_COMPLETE.txt"
 )
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
