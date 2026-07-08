@@ -1,7 +1,5 @@
-# Default: ignore everything when a Dockerfile only extends a public base image.
+# Docker build context for Railway flex wrapper only.
 *
 
-# Keep Railway metadata (small).
-!railway.toml
-!docker/railway/Dockerfile
-!docker/railway/railway-entrypoint.sh
+!Dockerfile.railway
+!railway-entrypoint.sh
