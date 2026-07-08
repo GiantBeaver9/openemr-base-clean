@@ -61,6 +61,8 @@ ALLOWED_SPEC_DOCS=(
   "USER.txt"
   "ARCHITECTURE.txt"
   "ARCHITECTURE_COMPLETE.txt"
+  # Repo tooling that maintains the .txt copies above (not a deliverable).
+  "scripts/sync-txt.sh"
 )
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
