@@ -61,7 +61,12 @@
 
 {% macro fact_row(fact, visit_label) %}
     <tr class="{% if fact.flags is defined and 'conflict' in fact.flags %}table-warning{% elseif fact.is_excluded is defined and fact.is_excluded %}table-light text-muted{% endif %}">
-        <td>{{ fact.kind_label|default(fact.kind)|text }}</td>
+        <td>
+            {{ fact.analyte_label|default(fact.kind_label|default(fact.kind))|text }}
+            {%- if fact.analyte_label and fact.kind_label -%}
+                <span class="text-muted small d-block">{{ fact.kind_label|text }}</span>
+            {%- endif -%}
+        </td>
         <td>
             {%- if fact.parsed is not null -%}
                 {{ fact.comparator != 'none' ? (fact.comparator == 'lt' ? '<' : (fact.comparator == 'lte' ? '<=' : (fact.comparator == 'gt' ? '>' : '>='))) : '' }}{{ fact.parsed }}{{ fact.unit ? ' ' ~ fact.unit|text : '' }}

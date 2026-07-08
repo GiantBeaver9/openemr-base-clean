@@ -53,28 +53,23 @@ final class DocViewModel
      */
     private const MAX_FACTS_PER_GROUP = 20;
 
-    /**
-     * Clinical reading order for the capability tabs (what a physician sweeps
-     * first). Capabilities not listed here keep their first-seen order after
-     * these; in-flight always leads and exclusions always trail, set in
-     * {@see self::buildFactGroups()}.
-     *
-     * @var list<string>
-     */
-    private const CAPABILITY_ORDER = ['control_proxy', 'overdue_tests', 'med_response', 'vitals_trend'];
-
     private function __construct()
     {
         // static-only
     }
 
     /**
+     * @param array<string, array{key: string, label: string}> $analyteByFactId
+     *        fact_id => analyte (lab type) for lab facts, from
+     *        {@see FactAnalyteResolver}; empty is fine (labs then group by
+     *        capability, unsplit). Threaded in rather than resolved here so
+     *        this presenter stays DB-free.
      * @return array{
      *     narrative: list<array{text: string, claim_type: string, flags: list<string>, emphasis: ?string, citations: list<array{label: string, url: ?string}>}>,
      *     fact_groups: list<array{key: string, label: string, total: int, shown: int, facts: list<array<string, mixed>>}>
      * }
      */
-    public static function build(SynthesisReadResult $result, string $webRoot): array
+    public static function build(SynthesisReadResult $result, string $webRoot, array $analyteByFactId = []): array
     {
         /** @var array<string, Fact> $factById */
         $factById = [];
@@ -84,7 +79,7 @@ final class DocViewModel
 
         return [
             'narrative' => self::buildNarrative($result->claims, $factById, $webRoot),
-            'fact_groups' => self::buildFactGroups($result->facts, $webRoot),
+            'fact_groups' => self::buildFactGroups($result->facts, $webRoot, $analyteByFactId),
         ];
     }
 
@@ -206,53 +201,87 @@ final class DocViewModel
 
     /**
      * The ordered, clamped groups the tabbed Chart Facts panel renders: one
-     * tab per non-empty group -- In flight first, then each capability in
-     * clinical reading order, then Excluded -- each sorted most-recent-first
-     * and capped to {@see self::MAX_FACTS_PER_GROUP} with its true `total`
-     * carried through so the UI can show "N most recent of TOTAL".
+     * tab per non-empty group, each sorted most-recent-first and capped to
+     * {@see self::MAX_FACTS_PER_GROUP} with its true `total` carried through so
+     * the UI can show "N most recent of TOTAL".
+     *
+     * The trend labs (control_proxy) are split into ONE group per analyte --
+     * A1c, Glucose, LDL, HDL, ... -- so units never mix within a tab and each
+     * lab type gets its own last-20 (the actual A1c's go back 10-20 draws
+     * instead of sharing a budget with glucose and lipids). Every other
+     * capability stays a single group; in-flight and exclusions are their own
+     * buckets. Group order is clinical: A1c first, other analytes, then
+     * overdue / in-flight / meds / vitals, exclusions last.
      *
      * @param list<Fact> $facts
+     * @param array<string, array{key: string, label: string}> $analyteByFactId
      * @return list<array{key: string, label: string, total: int, shown: int, facts: list<array<string, mixed>>}>
      */
-    private static function buildFactGroups(array $facts, string $webRoot): array
+    private static function buildFactGroups(array $facts, string $webRoot, array $analyteByFactId): array
     {
-        $inFlight = self::buildBucket($facts, self::inFlightKinds(), $webRoot);
-        $exclusions = self::buildBucket($facts, [FactKind::Exclusion], $webRoot);
+        $inFlight = self::buildBucket($facts, self::inFlightKinds(), $webRoot, $analyteByFactId);
+        $exclusions = self::buildBucket($facts, [FactKind::Exclusion], $webRoot, $analyteByFactId);
 
         $capabilityKinds = [...self::inFlightKinds(), FactKind::Exclusion];
-        /** @var array<string, list<array<string, mixed>>> $byCapability */
-        $byCapability = [];
+        /** @var array<string, array{label: string, rows: list<array<string, mixed>>}> $grouped */
+        $grouped = [];
         foreach ($facts as $fact) {
             if (in_array($fact->kind, $capabilityKinds, true)) {
                 continue;
             }
-            $byCapability[$fact->capability->value][] = self::factRow($fact, $webRoot);
+            $row = self::factRow($fact, $webRoot, $analyteByFactId);
+            $analyte = $analyteByFactId[$fact->factId] ?? null;
+
+            if ($fact->capability->value === 'control_proxy' && $analyte !== null) {
+                $key = 'lab:' . $analyte['key'];
+                $label = $analyte['label'];
+            } else {
+                $key = $fact->capability->value;
+                $label = is_string($row['capability_label'] ?? null) ? $row['capability_label'] : $key;
+            }
+
+            $grouped[$key]['label'] ??= $label;
+            $grouped[$key]['rows'][] = $row;
         }
-
-        // In-flight leads; capabilities in clinical reading order (unlisted
-        // ones keep their first-seen order after); exclusions trail.
-        uksort($byCapability, static function (string $a, string $b): int {
-            $ai = array_search($a, self::CAPABILITY_ORDER, true);
-            $bi = array_search($b, self::CAPABILITY_ORDER, true);
-            $ai = $ai === false ? PHP_INT_MAX : $ai;
-            $bi = $bi === false ? PHP_INT_MAX : $bi;
-
-            return $ai <=> $bi;
-        });
 
         $groups = [];
         if ($inFlight !== []) {
             $groups[] = self::group('in_flight', 'In flight', $inFlight);
         }
-        foreach ($byCapability as $capability => $rows) {
-            $label = $rows[0]['capability_label'] ?? $capability;
-            $groups[] = self::group($capability, is_string($label) ? $label : $capability, $rows);
+        foreach ($grouped as $key => $bucket) {
+            $groups[] = self::group($key, $bucket['label'], $bucket['rows']);
         }
         if ($exclusions !== []) {
             $groups[] = self::group('exclusions', 'Excluded', $exclusions);
         }
 
+        usort($groups, static fn (array $a, array $b): int => self::groupOrder($a['key']) <=> self::groupOrder($b['key']));
+
         return $groups;
+    }
+
+    /**
+     * Clinical reading order for the tabs: the trend labs lead (A1c is the
+     * headline), then the rest of the panel, exclusions last. Unlisted keys
+     * sort into the middle, keeping their insertion order relative to each
+     * other (PHP's sort is stable).
+     */
+    private static function groupOrder(string $key): int
+    {
+        return match ($key) {
+            'lab:a1c' => 0,
+            'lab:glucose' => 1,
+            'lab:cholesterol' => 2,
+            'lab:ldl' => 3,
+            'lab:hdl' => 4,
+            'lab:triglycerides' => 5,
+            'overdue_tests' => 20,
+            'in_flight' => 21,
+            'med_response' => 22,
+            'vitals_trend' => 23,
+            'exclusions' => 99,
+            default => 50,
+        };
     }
 
     /**
@@ -288,14 +317,15 @@ final class DocViewModel
     /**
      * @param list<Fact> $facts
      * @param list<FactKind> $kinds
+     * @param array<string, array{key: string, label: string}> $analyteByFactId
      * @return list<array<string, mixed>>
      */
-    private static function buildBucket(array $facts, array $kinds, string $webRoot): array
+    private static function buildBucket(array $facts, array $kinds, string $webRoot, array $analyteByFactId): array
     {
         $rows = [];
         foreach ($facts as $fact) {
             if (in_array($fact->kind, $kinds, true)) {
-                $rows[] = self::factRow($fact, $webRoot);
+                $rows[] = self::factRow($fact, $webRoot, $analyteByFactId);
             }
         }
 
@@ -303,12 +333,17 @@ final class DocViewModel
     }
 
     /**
+     * @param array<string, array{key: string, label: string}> $analyteByFactId
      * @return array<string, mixed>
      */
-    private static function factRow(Fact $fact, string $webRoot): array
+    private static function factRow(Fact $fact, string $webRoot, array $analyteByFactId): array
     {
+        $analyte = $analyteByFactId[$fact->factId] ?? null;
+
         return [
             'capability' => $fact->capability->value,
+            'analyte_key' => $analyte['key'] ?? null,
+            'analyte_label' => $analyte['label'] ?? null,
             'kind' => $fact->kind->value,
             'raw' => $fact->value?->raw,
             'parsed' => $fact->value?->parsed,

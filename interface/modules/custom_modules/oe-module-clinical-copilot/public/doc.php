@@ -28,6 +28,7 @@ use OpenEMR\Menu\PatientMenuRole;
 use OpenEMR\Modules\ClinicalCopilot\Config\LlmRuntimeConfig;
 use OpenEMR\Modules\ClinicalCopilot\Controller\DocController;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\DocViewModel;
+use OpenEMR\Modules\ClinicalCopilot\ReadPath\FactAnalyteResolver;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\ChartLinkResolver;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\ScheduledPatientRow;
 use OpenEMR\OeUI\OemrUI;
@@ -86,7 +87,7 @@ if ($pid <= 0) {
         'patient' => null,
         'history_rows' => [],
         'doc' => ['capability_crash' => false],
-        'view_model' => ['narrative' => [], 'facts_by_capability' => [], 'in_flight' => [], 'exclusions' => []],
+        'view_model' => ['narrative' => [], 'fact_groups' => []],
         'visit_label' => null,
     ];
 } elseif ($isPost && ($_POST['action'] ?? '') === 'regenerate') {
@@ -189,10 +190,11 @@ function buildDocTemplateVars(
 
     if ($viewData['found']) {
         $templateVars['doc'] = DocViewModel::summary($viewData['result']);
-        $templateVars['view_model'] = DocViewModel::build($viewData['result'], $webRoot);
+        $analyteByFactId = (new FactAnalyteResolver())->labelByFactId($viewData['result']->facts);
+        $templateVars['view_model'] = DocViewModel::build($viewData['result'], $webRoot, $analyteByFactId);
     } else {
         $templateVars['doc'] = ['capability_crash' => false];
-        $templateVars['view_model'] = ['narrative' => [], 'facts_by_capability' => [], 'in_flight' => [], 'exclusions' => []];
+        $templateVars['view_model'] = ['narrative' => [], 'fact_groups' => []];
     }
 
     return $templateVars;

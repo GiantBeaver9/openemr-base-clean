@@ -138,6 +138,42 @@ final class DocViewModelTest extends TestCase
         self::assertSame($sortedDesc, $dates, 'facts must be ordered most-recent-first');
     }
 
+    public function testControlProxyLabsSplitPerAnalyteWhenAnalyteMapProvided(): void
+    {
+        $a1c = self::trendPointOn('2026-06-01', 1, 7.2);
+        $ldl = self::trendPointOn('2026-05-01', 2, 98.0);
+
+        $map = [
+            $a1c->factId => ['key' => 'a1c', 'label' => 'A1c'],
+            $ldl->factId => ['key' => 'ldl', 'label' => 'LDL Cholesterol'],
+        ];
+
+        $viewModel = DocViewModel::build(self::servedResult([$a1c, $ldl], null), 'https://example.test', $map);
+
+        $a1cGroup = self::group($viewModel, 'lab:a1c');
+        $ldlGroup = self::group($viewModel, 'lab:ldl');
+        self::assertNotNull($a1cGroup);
+        self::assertNotNull($ldlGroup);
+        self::assertSame('A1c', $a1cGroup['label']);
+        self::assertSame('LDL Cholesterol', $ldlGroup['label']);
+        self::assertNull(
+            self::group($viewModel, 'control_proxy'),
+            'labs must split per analyte, not fall back to one control_proxy group, when analytes are known'
+        );
+        self::assertSame('A1c', $a1cGroup['facts'][0]['analyte_label'], 'each lab row carries its analyte label');
+        self::assertSame('lab:a1c', $viewModel['fact_groups'][0]['key'], 'A1c is the headline tab and sorts first');
+    }
+
+    public function testWithoutAnAnalyteMapLabsStayGroupedByCapability(): void
+    {
+        // Back-compat: no map => the trend labs remain a single control_proxy
+        // group (the caller simply did not resolve analytes).
+        $viewModel = DocViewModel::build(self::servedResult([self::trendPointFact()], null), 'https://example.test');
+
+        self::assertNotNull(self::group($viewModel, 'control_proxy'));
+        self::assertNull(self::group($viewModel, 'lab:a1c'));
+    }
+
     /**
      * @param array{narrative: mixed, fact_groups: list<array{key: string, label: string, total: int, shown: int, facts: list<array<string, mixed>>}>} $viewModel
      * @return array{key: string, label: string, total: int, shown: int, facts: list<array<string, mixed>>}|null

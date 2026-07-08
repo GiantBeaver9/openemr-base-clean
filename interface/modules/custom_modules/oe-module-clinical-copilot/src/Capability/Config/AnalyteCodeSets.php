@@ -100,4 +100,40 @@ final class AnalyteCodeSets
             default => null,
         };
     }
+
+    /**
+     * The fine-grained analyte key for a LOINC -- one per distinct lab the
+     * panel shows as its own trend (finer than {@see self::cadenceBucketForLoinc()},
+     * which folds the whole lipid panel into "lipids"). Gives each lab type its
+     * own tab in the Chart Facts panel so units never mix within a group (A1c
+     * in %, glucose/lipids in mg/dL, ACR in mg/g).
+     */
+    public static function analyteKeyForLoinc(string $loincCode): ?string
+    {
+        return match ($loincCode) {
+            self::LOINC_A1C => 'a1c',
+            self::LOINC_GLUCOSE => 'glucose',
+            self::LOINC_CHOL_TOTAL => 'cholesterol',
+            self::LOINC_LDL => 'ldl',
+            self::LOINC_HDL => 'hdl',
+            self::LOINC_TRIGLYCERIDES => 'triglycerides',
+            self::LOINC_ACR => 'acr',
+            default => null,
+        };
+    }
+
+    /** Human label for a LOINC -- the tab/row title in the Chart Facts panel. */
+    public static function analyteLabelForLoinc(string $loincCode): ?string
+    {
+        return match ($loincCode) {
+            self::LOINC_A1C => 'A1c',
+            self::LOINC_GLUCOSE => 'Glucose',
+            self::LOINC_CHOL_TOTAL => 'Total Cholesterol',
+            self::LOINC_LDL => 'LDL Cholesterol',
+            self::LOINC_HDL => 'HDL Cholesterol',
+            self::LOINC_TRIGLYCERIDES => 'Triglycerides',
+            self::LOINC_ACR => 'Urine ACR',
+            default => null,
+        };
+    }
 }
