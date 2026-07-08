@@ -6,6 +6,9 @@
 # Set these in GitLab → Settings → CI/CD → Variables:
 #   RAILWAY_TOKEN          — Railway project token (masked + protected)
 #   RAILWAY_SERVICE_ID     — OpenEMR service id (Railway: Cmd/Ctrl+K → Copy → Service ID)
+#   RAILWAY_OE_PASS        — OpenEMR admin password (synced to Railway OE_PASS)
+#   CLINICAL_COPILOT_GEMINI_API_KEY — Gemini key (optional; synced to Railway)
+#   RAILWAY_MYSQL_SERVICE_NAME — (optional) MySQL service name if not "MySQL"
 #   RAILWAY_PUBLIC_URL     — (optional) deployed URL for the GitLab environment link
 #   RAILWAY_ENVIRONMENT    — (optional) Railway environment name when not using the default
 
@@ -45,6 +48,8 @@ railway-deploy:
         echo "then add variable RAILWAY_SERVICE_ID in GitLab CI/CD settings."
         exit 1
       fi
+    - chmod +x docker/railway/sync-variables.sh
+    - docker/railway/sync-variables.sh
     - railway up --service="$SVC_ID" --detach ${RAILWAY_ENVIRONMENT:+-e "$RAILWAY_ENVIRONMENT"}
   environment:
     name: railway
