@@ -23,6 +23,8 @@ fi
 
 echo "Syncing MySQL reference variables for service ${SVC_ID} (db service: ${MYSQL_SERVICE})..."
 
+OE_PASS_VALUE="${RAILWAY_OE_PASS:-pass}"
+
 # shellcheck disable=SC2086
 railway variable set \
     "MYSQLHOST=\${{${MYSQL_SERVICE}.MYSQLHOST}}" \
@@ -30,6 +32,8 @@ railway variable set \
     "MYSQLUSER=\${{${MYSQL_SERVICE}.MYSQLUSER}}" \
     "MYSQLPASSWORD=\${{${MYSQL_SERVICE}.MYSQLPASSWORD}}" \
     "MYSQLDATABASE=\${{${MYSQL_SERVICE}.MYSQLDATABASE}}" \
+    "MYSQL_USER=openemr" \
+    "MYSQL_PASS=${OE_PASS_VALUE}" \
     --service "${SVC_ID}" \
     ${ENV_FLAG} \
     --skip-deploys
