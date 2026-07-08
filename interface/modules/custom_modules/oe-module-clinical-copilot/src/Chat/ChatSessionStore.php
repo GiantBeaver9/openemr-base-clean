@@ -28,6 +28,17 @@ use OpenEMR\Common\Database\QueryUtils;
  */
 final class ChatSessionStore
 {
+    /**
+     * How long a session may sit idle before it auto-closes. A conversation
+     * resumed after this window mints a fresh session instead. Matches the
+     * "20 minutes after each session" lifecycle: the clock is measured from
+     * the session's LAST activity (its most recent turn), so every turn
+     * resets it. Deliberately a plain constant for now, the same way the
+     * per-user caps live in config -- a future per-office control panel is the
+     * right home for making this tunable.
+     */
+    public const IDLE_TIMEOUT_MINUTES = 20;
+
     public function insert(NewChatSession $newSession): int
     {
         $sql = 'INSERT INTO `mod_copilot_chat_session` (`pid`, `user_id`, `doc_id`, `fact_digest`, `status`)
@@ -80,6 +91,64 @@ final class ChatSessionStore
             'UPDATE `mod_copilot_chat_session` SET `status` = ? WHERE `id` = ?',
             [ChatSessionStatus::Frozen->value, $id],
         );
+    }
+
+    /**
+     * Auto-close ("expire") a user's stale chat sessions: every ACTIVE
+     * session of theirs whose last activity is older than `$idleMinutes`.
+     * "Last activity" is the most recent turn on the session, or the
+     * session's own creation time when it has no turns yet -- so an untouched,
+     * just-opened session is given the full idle window before it can expire.
+     *
+     * This is the counterpart to the per-user active-session cap enforced in
+     * {@see \OpenEMR\Modules\ClinicalCopilot\Observability\RateLimit\CadenceRateLimiter}:
+     * without it, sessions only ever leave `active` on a V3 freeze, so a
+     * clinician who opens chat across a handful of charts over a shift steadily
+     * accumulates active sessions until the cap denies every new turn BEFORE
+     * the LLM is ever called. Expiring idle sessions keeps the count honest --
+     * an abandoned session frees its slot instead of pinning it forever.
+     *
+     * Purely a status transition: it never creates or reads a session, so it
+     * is safe on any user-facing request. It is deliberately NOT called from
+     * the background worker -- the worker must neither create nor maintain
+     * chat sessions.
+     *
+     * Frozen sessions are untouched (a frozen session is preserved as
+     * evidence, ARCHITECTURE.md §2.3; the `status = 'active'` predicate
+     * already excludes them).
+     *
+     * @param int|null $exceptSessionId a session to leave untouched even if it
+     *        looks idle -- the one the current turn runs on, whose activity
+     *        (the message being answered) has not been written to the ledger
+     *        yet at the point this sweep runs.
+     */
+    public function expireIdleForUser(int $userId, ?int $exceptSessionId = null, int $idleMinutes = self::IDLE_TIMEOUT_MINUTES): void
+    {
+        $cutoff = (new \DateTimeImmutable("-{$idleMinutes} minutes"))->format('Y-m-d H:i:s');
+
+        $sql = 'UPDATE `mod_copilot_chat_session`
+                SET `status` = ?
+                WHERE `user_id` = ?
+                  AND `status` = ?
+                  AND COALESCE(
+                        (SELECT MAX(`t`.`created_at`)
+                           FROM `mod_copilot_chat_turn` `t`
+                          WHERE `t`.`session_id` = `mod_copilot_chat_session`.`id`),
+                        `mod_copilot_chat_session`.`created_at`
+                      ) < ?';
+        $params = [
+            ChatSessionStatus::Expired->value,
+            $userId,
+            ChatSessionStatus::Active->value,
+            $cutoff,
+        ];
+
+        if ($exceptSessionId !== null) {
+            $sql .= ' AND `id` <> ?';
+            $params[] = $exceptSessionId;
+        }
+
+        QueryUtils::sqlStatementThrowException($sql, $params);
     }
 
     /**

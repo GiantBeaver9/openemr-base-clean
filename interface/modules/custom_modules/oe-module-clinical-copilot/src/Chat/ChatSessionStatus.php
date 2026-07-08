@@ -20,9 +20,18 @@ namespace OpenEMR\Modules\ClinicalCopilot\Chat;
  * (ARCHITECTURE.md §2.3): "the session is frozen ... preserved as evidence,
  * never resumed." There is no path back from Frozen to Active in this
  * module's code -- a frozen session is a dead end by design.
+ *
+ * {@see self::Expired} is the ordinary end of life: a session auto-closes
+ * once it has been idle past {@see ChatSessionStore::IDLE_TIMEOUT_MINUTES}
+ * (see {@see ChatSessionStore::expireIdleForUser()}). Like Frozen it is
+ * terminal -- resuming a conversation always mints a fresh session -- but it
+ * carries no incident semantics. It exists so abandoned sessions stop
+ * counting against the per-user active-session cap instead of pinning a slot
+ * forever and eventually blocking every new turn before the LLM is reached.
  */
 enum ChatSessionStatus: string
 {
     case Active = 'active';
     case Frozen = 'frozen';
+    case Expired = 'expired';
 }

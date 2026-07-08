@@ -155,6 +155,12 @@ final class ChatController
             return ['ok' => false, 'session_id' => null, 'reason' => 'patient not found', 'resumed' => false, 'stale' => false, 'turns' => []];
         }
 
+        // Close out this clinician's idle sessions first, so the resume lookup
+        // below reflects only genuinely-live sessions: a chart reopened after
+        // the idle window mints a fresh session rather than resuming a stale
+        // one, and abandoned sessions stop counting toward the per-user cap.
+        $this->sessionStore->expireIdleForUser($userId);
+
         $existingId = null;
         $existing = $this->sessionStore->findLatestActiveForUserAndPid($userId, $pid);
         if ($existing !== null) {
@@ -191,6 +197,10 @@ final class ChatController
         if (!$this->identifierLookup->exists($pid)) {
             return ['ok' => false, 'session_id' => null, 'reason' => 'patient not found', 'resumed' => false, 'stale' => false, 'turns' => []];
         }
+
+        // Same idle sweep as startSession: a manual re-seed is a fresh start,
+        // so retire the clinician's stale sessions before minting the new one.
+        $this->sessionStore->expireIdleForUser($userId);
 
         $session = $this->seeder->seed($pid, $userId, forceNew: true);
         if ($session === null) {
@@ -318,6 +328,14 @@ final class ChatController
         if ($this->turnStore->countAssistantTurns($session->id) >= self::MAX_TURNS_PER_SESSION) {
             return $this->errorResponse(429, 'this session has reached its turn limit -- start a fresh session from the current summary');
         }
+
+        // Retire this clinician's OTHER idle sessions before the per-user
+        // active-session cap is checked, so long-abandoned sessions do not pin
+        // the cap and reject this turn before the LLM is ever reached. The
+        // current session is excluded from the sweep: it is active by
+        // definition (a turn is running on it) and its activity for this turn
+        // is written to the ledger further down, not yet visible here.
+        $this->sessionStore->expireIdleForUser($session->userId, exceptSessionId: $session->id);
 
         $rateDecision = $this->rateLimiter->checkTurn($session->pid, $session->userId, $session->id);
         if (!$rateDecision->allowed) {

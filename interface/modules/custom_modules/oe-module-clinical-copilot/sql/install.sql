@@ -86,12 +86,19 @@ CREATE TABLE IF NOT EXISTS `mod_copilot_chat_session` (
     `user_id` BIGINT(20) NOT NULL COMMENT 'references users.id, the authed clinician',
     `doc_id` BIGINT(20) DEFAULT NULL COMMENT 'references mod_copilot_doc.id this session was preloaded from',
     `fact_digest` VARCHAR(64) NOT NULL COMMENT 'fact_digest at session preload time, for mid-conversation drift banners (T19)',
-    `status` VARCHAR(16) NOT NULL DEFAULT 'active' COMMENT 'active | frozen',
+    `status` VARCHAR(16) NOT NULL DEFAULT 'active' COMMENT 'active | frozen | expired (auto-closed after idle timeout)',
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     KEY `idx_pid` (`pid`),
-    KEY `idx_doc_id` (`doc_id`)
+    KEY `idx_doc_id` (`doc_id`),
+    KEY `idx_user_status` (`user_id`, `status`)
 ) ENGINE=InnoDB COMMENT='Clinical Co-Pilot: pid-pinned chat sessions';
+#EndIf
+
+-- Upgrade for installs predating idle-session auto-expiry: the (user_id, status)
+-- index backs both the per-turn active-session count and the idle-expiry sweep.
+#IfNotIndex mod_copilot_chat_session idx_user_status
+ALTER TABLE `mod_copilot_chat_session` ADD INDEX `idx_user_status` (`user_id`, `status`);
 #EndIf
 
 -- ============================================================================
