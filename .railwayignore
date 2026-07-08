@@ -1,0 +1,5 @@
+# Railway upload filter — keep the deploy context tiny (flex image clones from GitHub).
+*
+
+!railway.toml
+!docker/railway/Dockerfile

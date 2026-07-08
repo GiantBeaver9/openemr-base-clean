@@ -1,13 +1,6 @@
-.git
-.github
-.gitlab
-.cursor
-docker/development-easy
-docker/development-easy-light
-docker/development-easy-redis
-node_modules
-vendor
-**/node_modules
-**/vendor
-*.md
-!docker/release/README.md
+# Default: ignore everything when a Dockerfile only extends a public base image.
+*
+
+# Keep Railway metadata (small).
+!railway.toml
+!docker/railway/Dockerfile
