@@ -36,6 +36,7 @@ use OpenEMR\Modules\ClinicalCopilot\Chat\ChatSessionSeeder;
 use OpenEMR\Modules\ClinicalCopilot\Chat\ChatSessionStatus;
 use OpenEMR\Modules\ClinicalCopilot\Chat\ChatSessionStore;
 use OpenEMR\Modules\ClinicalCopilot\Chat\ChatTurn;
+use OpenEMR\Modules\ClinicalCopilot\Chat\ChatTurnConfidence;
 use OpenEMR\Modules\ClinicalCopilot\Chat\ChatTurnRole;
 use OpenEMR\Modules\ClinicalCopilot\Chat\ChatTurnStore;
 use OpenEMR\Modules\ClinicalCopilot\Chat\Llm\ChatLlmClientFactory;
@@ -244,6 +245,8 @@ final class ChatController
                     'spans' => $spans,
                     'turn' => [
                         'verify_status' => $turn->content['verify_status'] ?? null,
+                        'confidence' => $turn->content['confidence'] ?? null,
+                        'confidence_label' => $turn->content['confidence_label'] ?? null,
                         'degraded_message' => $turn->content['degraded_message'] ?? null,
                         'frozen' => $turn->content['frozen'] ?? false,
                         'claims' => $turn->content['claims'] ?? null,
@@ -370,8 +373,10 @@ final class ChatController
             $answer = $agent->answer($session->pid, $correlationId, $sessionFacts, $narrativeClaims, $conversationTranscript, $message);
         }
 
+        $confidence = ChatTurnConfidence::fromAnswer($answer);
+
         $this->persistToolTurns($session->id, $session->pid, $session->userId, $answer, $correlationId);
-        $this->persistAssistantTurn($session, $answer, $correlationId);
+        $this->persistAssistantTurn($session, $answer, $confidence, $correlationId);
 
         $this->recordSpan($correlationId, 'verify', $turnT0, $answer->verifyStatus->value === 'passed' ? 'ok' : 'degraded', $session->pid, $session->userId, model: $answer->usage->modelVersion, tokensIn: $answer->usage->tokensIn, tokensOut: $answer->usage->tokensOut);
         $this->recordSpan($correlationId, 'chat_turn', $turnT0, $answer->frozen ? 'error' : ($answer->verifyStatus->value === 'passed' ? 'ok' : 'degraded'), $session->pid, $session->userId, model: $answer->usage->modelVersion, tokensIn: $answer->usage->tokensIn, tokensOut: $answer->usage->tokensOut);
@@ -397,9 +402,10 @@ final class ChatController
             }
         }
 
-        $this->auditTurn($session->pid, $correlationId);
+        $this->logChatTurn($session, $message, $answer, $confidence, $correlationId);
+        $this->auditTurn($session->pid, $answer, $confidence, $correlationId);
 
-        return $this->turnResponse($session, $answer, $correlationId, $stale);
+        return $this->turnResponse($session, $answer, $confidence, $correlationId, $stale);
     }
 
     /**
@@ -556,7 +562,7 @@ final class ChatController
         }, $answer->claims);
     }
 
-    private function persistAssistantTurn(ChatSession $session, ChatAnswer $answer, string $correlationId): void
+    private function persistAssistantTurn(ChatSession $session, ChatAnswer $answer, ChatTurnConfidence $confidence, string $correlationId): void
     {
         $content = [
             'claims' => self::rehydratedClaimsArray($answer),
@@ -564,6 +570,8 @@ final class ChatController
             'degraded_reason' => $answer->degradedReason,
             'degraded_message' => $answer->degradedMessage,
             'frozen' => $answer->frozen,
+            'confidence' => $confidence->score,
+            'confidence_label' => $confidence->label,
         ];
 
         $verdictOut = array_map(static fn ($v): array => [
@@ -664,7 +672,7 @@ final class ChatController
     /**
      * @return array<string, mixed>
      */
-    private function turnResponse(ChatSession $session, ChatAnswer $answer, string $correlationId, bool $stale): array
+    private function turnResponse(ChatSession $session, ChatAnswer $answer, ChatTurnConfidence $confidence, string $correlationId, bool $stale): array
     {
         return [
             'ok' => true,
@@ -673,6 +681,8 @@ final class ChatController
             'stale' => $stale,
             'frozen' => $answer->frozen,
             'verify_status' => $answer->verifyStatus->value,
+            'confidence' => $confidence->score,
+            'confidence_label' => $confidence->label,
             'degraded_message' => $answer->degradedMessage,
             'claims' => self::rehydratedClaimsArray($answer),
             'verdicts' => array_map(static fn ($v): array => [
@@ -698,19 +708,85 @@ final class ChatController
         return ['ok' => false, 'http_status' => $httpStatus, 'reason' => $reason];
     }
 
-    private function auditTurn(int $pid, string $correlationId): void
+    private function auditTurn(int $pid, ChatAnswer $answer, ChatTurnConfidence $confidence, string $correlationId): void
     {
         $session = SessionWrapperFactory::getInstance()->getActiveSession();
         $authUser = (string)($session->get('authUser') ?? '');
         $authProvider = (string)($session->get('authProvider') ?? '');
+
+        // Audit-trail metadata only -- correlation id, outcome, and confidence,
+        // never the message/answer text (those live on the turn row and in the
+        // observability log). Keeps the HIPAA audit event PHI-free.
+        $summary = sprintf(
+            'Clinical Co-Pilot chat turn, correlation_id=%s, verify=%s, confidence=%s (%.2f)',
+            $correlationId,
+            $answer->verifyStatus->value,
+            $confidence->label,
+            $confidence->score,
+        );
 
         EventAuditLogger::getInstance()->newEvent(
             'patient-record',
             $authUser,
             $authProvider,
             1,
-            "Clinical Co-Pilot chat turn, correlation_id={$correlationId}",
+            $summary,
             $pid,
         );
+    }
+
+    /**
+     * Heightened-visibility log of one chat interaction (ARCHITECTURE.md §3
+     * observability): the provider's question, the assistant's answer, the
+     * deterministic confidence, and the turn's cost/latency/verification
+     * metadata -- one structured PSR-3 record per turn for oversight and
+     * dashboards, keyed by correlation id back to the turn ledger and traces.
+     *
+     * PHI NOTE: `provider_message` and `assistant_answer` carry patient
+     * clinical content. This is acceptable in the synthetic-only phase
+     * (OPEN-1); for a real-PHI deployment route these to a PHI-eligible sink
+     * or drop them and keep the metadata (the message/answer already persist
+     * on `mod_copilot_chat_turn`, the access-controlled store).
+     */
+    private function logChatTurn(ChatSession $session, string $message, ChatAnswer $answer, ChatTurnConfidence $confidence, string $correlationId): void
+    {
+        $this->logger->info('Clinical Co-Pilot chat turn', [
+            'correlation_id' => $correlationId,
+            'session_id' => $session->id,
+            'pid' => $session->pid,
+            'user_id' => $session->userId,
+            'verify_status' => $answer->verifyStatus->value,
+            'confidence' => $confidence->score,
+            'confidence_label' => $confidence->label,
+            'attempts' => $answer->attempts,
+            'frozen' => $answer->frozen,
+            'degraded_reason' => $answer->degradedReason,
+            'tool_calls' => array_map(static fn ($entry): string => $entry->request->name, $answer->toolCallLog),
+            'tokens_in' => $answer->usage->tokensIn,
+            'tokens_out' => $answer->usage->tokensOut,
+            'latency_ms' => $answer->usage->latencyMs,
+            'model' => $answer->usage->modelVersion,
+            'provider_message' => $message,
+            'assistant_answer' => self::answerText($answer),
+        ]);
+    }
+
+    /**
+     * The assistant's rendered answer as plain text: the rehydrated claim
+     * texts joined, or the degraded/frozen message when there are no claims.
+     */
+    private static function answerText(ChatAnswer $answer): string
+    {
+        $claims = self::rehydratedClaimsArray($answer);
+        if (is_array($claims) && $claims !== []) {
+            $texts = array_map(
+                static fn ($claim): string => is_string($claim['text'] ?? null) ? $claim['text'] : '',
+                $claims,
+            );
+
+            return trim(implode(' ', array_filter($texts, static fn (string $t): bool => $t !== '')));
+        }
+
+        return $answer->degradedMessage ?? '';
     }
 }
