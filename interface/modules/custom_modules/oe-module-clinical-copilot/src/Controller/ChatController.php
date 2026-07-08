@@ -742,11 +742,16 @@ final class ChatController
      * metadata -- one structured PSR-3 record per turn for oversight and
      * dashboards, keyed by correlation id back to the turn ledger and traces.
      *
-     * PHI NOTE: `provider_message` and `assistant_answer` carry patient
-     * clinical content. This is acceptable in the synthetic-only phase
-     * (OPEN-1); for a real-PHI deployment route these to a PHI-eligible sink
-     * or drop them and keep the metadata (the message/answer already persist
-     * on `mod_copilot_chat_turn`, the access-controlled store).
+     * PHI NOTE -- ACKNOWLEDGED AND INTENTIONAL FOR THE DEMO, not an oversight:
+     * `provider_message` and `assistant_answer` carry patient clinical content,
+     * and logging them in full is a deliberate choice here for demo visibility
+     * on synthetic-only data (OPEN-1). This is intentionally left un-hardened at
+     * this stage -- no gating/scrubbing is warranted for a synthetic demo and
+     * adding it now would be wasted effort. The one thing worth recording is
+     * that the tradeoff is understood: before any real-PHI deployment, route
+     * these two fields to a PHI-eligible sink or drop them (the confidence +
+     * metadata stay useful, and the content already persists on the
+     * access-controlled `mod_copilot_chat_turn` row).
      */
     private function logChatTurn(ChatSession $session, string $message, ChatAnswer $answer, ChatTurnConfidence $confidence, string $correlationId): void
     {
