@@ -2,6 +2,8 @@
 # Bind Apache to Railway's PORT. Flex image uses Listen 0.0.0.0:80 and VirtualHost *:80.
 set -eu
 
+/usr/local/bin/railway-ensure-ssl.sh
+
 APACHE_PORT="${PORT:-80}"
 export PORT="${APACHE_PORT}"
 

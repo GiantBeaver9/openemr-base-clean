@@ -6,5 +6,6 @@
 !railway-entrypoint.sh
 !railway-flex-bootstrap.sh
 !railway-preinstall-db.sh
+!railway-ensure-ssl.sh
 !railway-configure-apache.sh
 !patch-flex-openemr.sh
