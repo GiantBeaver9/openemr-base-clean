@@ -307,4 +307,4 @@ Every failure in the tables above traces to one of five classes, each with its o
 
 R-numbers label the case study's engineering requirements (R1 tests-document-failure-modes … R9 load tests); digest evals keep their original E1–E7 names in ARCHITECTURE_COMPLETE.md — two namespaces, deliberately distinct.
 
-Still owed as separate submission artifacts (tracked, not part of this doc): `AUDIT.md` (with its own ~500-word summary), AI cost analysis at 100/1K/10K/100K users, demo video, deployed URL, social post.
+Separate submission artifacts (tracked, not part of this doc). **Delivered:** `AUDIT.md` (with its own ~500-word summary); AI cost analysis at 100/1K/10K/100K users (`interface/modules/custom_modules/oe-module-clinical-copilot/ops/cost-analysis.md`); deployed URL — https://abundant-art-production-d560.up.railway.app (see `README.md`). **Still owed:** demo video, social post; and empirical R8/R9 load/baseline numbers (harness ships in `ops/load/`, not yet run against the live stack).
