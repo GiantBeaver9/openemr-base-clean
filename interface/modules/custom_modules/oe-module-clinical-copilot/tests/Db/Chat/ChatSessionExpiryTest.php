@@ -137,6 +137,23 @@ final class ChatSessionExpiryTest extends TestCase
         self::assertArrayNotHasKey('http_status', $result);
     }
 
+    public function testTurnOnAnExpiredSessionSignalsReseedInsteadOfAnswering(): void
+    {
+        $sessionId = $this->startSession();
+        // Simulate the session having auto-closed (e.g. swept by another tab's
+        // bootstrap) after the client had already loaded its id.
+        QueryUtils::sqlStatementThrowException(
+            'UPDATE `mod_copilot_chat_session` SET `status` = ? WHERE `id` = ?',
+            [ChatSessionStatus::Expired->value, $sessionId],
+        );
+
+        $result = $this->controller->submitTurn($sessionId, self::USER_ID, 'still there?');
+
+        self::assertFalse($result['ok']);
+        self::assertSame(409, $result['http_status']);
+        self::assertTrue($result['session_expired'] ?? false, 'the client needs the flag to re-seed and resend');
+    }
+
     private function startSession(): int
     {
         $result = $this->controller->startSession($this->pid, self::USER_ID);

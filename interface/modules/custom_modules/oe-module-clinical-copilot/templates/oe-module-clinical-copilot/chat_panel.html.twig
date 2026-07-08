@@ -216,7 +216,7 @@
         }
     }
 
-    async function submitTurn(message) {
+    async function submitTurn(message, isRetry) {
         if (!sessionId || frozen) {
             return;
         }
@@ -235,6 +235,17 @@
             setStatus(null);
             sendBtn.disabled = false;
             if (data.ok === false) {
+                // The session auto-closed after the idle timeout. Re-seed a
+                // fresh one and resend the message once (never loop: only the
+                // first, non-retry attempt is allowed to do this).
+                if (data.session_expired && !isRetry) {
+                    sessionId = null;
+                    await startSession();
+                    if (sessionId) {
+                        appendLine('System', 'your previous chat expired after a break -- continuing in a fresh session');
+                        return submitTurn(message, true);
+                    }
+                }
                 appendLine('System', data.reason || 'the turn could not be completed');
                 return;
             }

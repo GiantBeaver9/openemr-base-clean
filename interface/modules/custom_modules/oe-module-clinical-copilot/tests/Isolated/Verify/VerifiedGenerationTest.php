@@ -46,7 +46,7 @@ final class VerifiedGenerationTest extends TestCase
     public function testFirstAttemptCleanPassesWithoutAnyRetry(): void
     {
         $client = new QueuedLlmClient([self::cleanResponse()]);
-        $result = $this->run($client, VerificationPath::Synthesis);
+        $result = $this->runGeneration($client, VerificationPath::Synthesis);
 
         self::assertSame(VerifyStatus::Passed, $result->verifyStatus);
         self::assertSame(RegenReason::None, $result->regenReason);
@@ -60,7 +60,7 @@ final class VerifiedGenerationTest extends TestCase
     public function testAnOrdinaryFailureIsRetriedOnceAndThenPasses(): void
     {
         $client = new QueuedLlmClient([self::wrongNumberResponse(), self::cleanResponse()]);
-        $result = $this->run($client, VerificationPath::Synthesis);
+        $result = $this->runGeneration($client, VerificationPath::Synthesis);
 
         self::assertSame(VerifyStatus::Passed, $result->verifyStatus);
         self::assertSame(RegenReason::VerifyRetry, $result->regenReason);
@@ -76,7 +76,7 @@ final class VerifiedGenerationTest extends TestCase
     public function testTwoConsecutiveFailuresDiscardAndDegradeToFactsOnly(): void
     {
         $client = new QueuedLlmClient([self::wrongNumberResponse(), self::wrongNumberResponse()]);
-        $result = $this->run($client, VerificationPath::Synthesis);
+        $result = $this->runGeneration($client, VerificationPath::Synthesis);
 
         self::assertSame(VerifyStatus::Degraded, $result->verifyStatus);
         self::assertSame(RegenReason::VerifyRetry, $result->regenReason);
@@ -90,7 +90,7 @@ final class VerifiedGenerationTest extends TestCase
     public function testTwoConsecutiveFailuresOnChatDegradeWithTheChatMessage(): void
     {
         $client = new QueuedLlmClient([self::wrongNumberResponse(), self::wrongNumberResponse()]);
-        $result = $this->run($client, VerificationPath::Chat);
+        $result = $this->runGeneration($client, VerificationPath::Chat);
 
         self::assertSame(VerifyStatus::Degraded, $result->verifyStatus);
         self::assertSame("couldn't produce a verifiable answer", $result->degradedMessage);
@@ -99,7 +99,7 @@ final class VerifiedGenerationTest extends TestCase
     public function testLlmUnavailableDegradesImmediatelyWithNoVerificationAndNoRetry(): void
     {
         $client = self::downClient();
-        $result = $this->run($client, VerificationPath::Synthesis);
+        $result = $this->runGeneration($client, VerificationPath::Synthesis);
 
         self::assertSame(VerifyStatus::Degraded, $result->verifyStatus);
         self::assertSame(RegenReason::None, $result->regenReason);
@@ -149,7 +149,7 @@ final class VerifiedGenerationTest extends TestCase
         self::assertSame(1, $client->callCount());
     }
 
-    private function run(LlmClientInterface $client, VerificationPath $path): VerifiedGenerationResult
+    private function runGeneration(LlmClientInterface $client, VerificationPath $path): VerifiedGenerationResult
     {
         $facts = [VerifyTestFactory::a1cEarly(), VerifyTestFactory::a1cLater()];
         $reducer = new Reducer($client, new PromptAssembler(), new Redactor());

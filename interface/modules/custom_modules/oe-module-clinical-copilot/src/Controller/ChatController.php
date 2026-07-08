@@ -301,6 +301,20 @@ final class ChatController
             return $this->errorResponse(423, 'this chat session is frozen following a patient-identity verification incident and cannot be resumed');
         }
 
+        if ($session->status === ChatSessionStatus::Expired) {
+            // The session auto-closed after the idle timeout (a resumed
+            // conversation always starts fresh). Signal the client to re-seed
+            // and resend rather than answering under a closed session -- the
+            // `session_expired` flag is what the chat panel keys its one silent
+            // re-seed-and-retry on.
+            return [
+                'ok' => false,
+                'http_status' => 409,
+                'reason' => 'this chat session expired after a period of inactivity -- starting a fresh one',
+                'session_expired' => true,
+            ];
+        }
+
         if (trim($message) === '') {
             return $this->errorResponse(400, 'message must not be empty');
         }
