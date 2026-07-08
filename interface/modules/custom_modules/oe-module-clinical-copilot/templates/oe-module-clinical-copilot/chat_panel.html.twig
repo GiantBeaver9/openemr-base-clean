@@ -84,6 +84,10 @@
     var reseedLink = document.getElementById('ccpChatReseedLink');
     var sessionId = null;
     var frozen = false;
+    // Why the last session bootstrap failed (e.g. synthesis not generated yet,
+    // or a transient network error), so a send attempt with no session can tell
+    // the physician what to do instead of silently swallowing the message.
+    var startReason = null;
 
     function setStatus(text) {
         if (!text) {
@@ -121,9 +125,16 @@
         if (Array.isArray(result.claims) && result.claims.length > 0) {
             var texts = [];
             for (var i = 0; i < result.claims.length; i++) {
-                texts.push(result.claims[i].text);
+                var claimText = result.claims[i] && result.claims[i].text;
+                if (claimText) {
+                    texts.push(claimText);
+                }
             }
-            appendLine('Assistant', texts.join(' '));
+            if (texts.length > 0) {
+                appendLine('Assistant', texts.join(' '));
+            } else if (result.degraded_message) {
+                appendLine('Assistant', result.degraded_message);
+            }
         } else if (result.degraded_message) {
             appendLine('Assistant', result.degraded_message);
         }
@@ -186,6 +197,7 @@
             var data = await response.json();
             if (data.ok) {
                 sessionId = data.session_id;
+                startReason = null;
                 if (data.stale) {
                     staleBanner.style.display = '';
                 }
@@ -195,10 +207,12 @@
                     }
                 }
             } else {
-                setStatus(data.reason || 'chat unavailable');
+                startReason = data.reason || 'chat unavailable';
+                setStatus(startReason);
             }
         } catch (err) {
-            setStatus('chat unavailable');
+            startReason = 'chat unavailable -- could not reach the server';
+            setStatus(startReason);
         }
     }
 
@@ -232,12 +246,36 @@
         }
     }
 
-    form.addEventListener('submit', function (event) {
+    form.addEventListener('submit', async function (event) {
         event.preventDefault();
+        // A turn is already in flight (the button is disabled): ignore an
+        // Enter-key double-submit rather than firing a second request the
+        // server would only reject with a 409 anyway.
+        if (sendBtn.disabled) {
+            return;
+        }
         var message = input.value.trim();
         if (message === '') {
             return;
         }
+
+        // The panel never got a session -- the synthesis may not have been
+        // generated yet, or the bootstrap hit a transient error. Try once more
+        // before giving up so a single failed start does not leave chat
+        // permanently dead with no explanation.
+        if (!sessionId && !frozen) {
+            await startSession();
+        }
+        if (frozen) {
+            return;
+        }
+        if (!sessionId) {
+            appendLine('Physician', message);
+            input.value = '';
+            appendLine('System', startReason || 'chat is not ready yet -- generate the synthesis above, then try again');
+            return;
+        }
+
         appendLine('Physician', message);
         input.value = '';
         submitTurn(message);

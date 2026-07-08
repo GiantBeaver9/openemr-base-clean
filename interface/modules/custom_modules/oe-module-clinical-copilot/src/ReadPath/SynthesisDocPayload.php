@@ -93,13 +93,24 @@ final readonly class SynthesisDocPayload
      */
     public static function fromDocArray(array $doc): self
     {
+        // A single malformed entry in a persisted doc (schema drift on an old
+        // row, a hand-edited row, a value that no longer validates) must never
+        // crash the surfaces that replay this snapshot -- a chat turn, the doc
+        // render, and the QA sweep all call this on every read. Skip the bad
+        // entry and keep the rest, exactly as {@see \OpenEMR\Modules\ClinicalCopilot\Chat\ChatFactSetBuilder}
+        // does for the identical Fact::fromArray() call on tool-result rows.
         $factsRaw = $doc['facts'] ?? [];
         $facts = [];
         if (is_array($factsRaw)) {
             foreach ($factsRaw as $factData) {
-                if (is_array($factData)) {
+                if (!is_array($factData)) {
+                    continue;
+                }
+                try {
                     /** @var array<string, mixed> $factData */
                     $facts[] = Fact::fromArray($factData);
+                } catch (\InvalidArgumentException | \DomainException) {
+                    continue;
                 }
             }
         }
@@ -109,9 +120,14 @@ final readonly class SynthesisDocPayload
         if (is_array($claimsRaw)) {
             $claims = [];
             foreach ($claimsRaw as $claimData) {
-                if (is_array($claimData)) {
+                if (!is_array($claimData)) {
+                    continue;
+                }
+                try {
                     /** @var array<string, mixed> $claimData */
                     $claims[] = Claim::fromArray($claimData);
+                } catch (\InvalidArgumentException | \DomainException) {
+                    continue;
                 }
             }
         }
