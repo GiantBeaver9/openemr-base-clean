@@ -48,7 +48,7 @@ implementation.
 
 ```
 oe-module-clinical-copilot/
-├── composer.json, info.txt, version.php, moduleConfig.php   -- module metadata
+├── composer.json, info.txt, version.php                     -- module metadata
 ├── openemr.bootstrap.php, src/Bootstrap.php                 -- event subscription, menu, ACL gate
 ├── ModuleManagerListener.php                                 -- install/enable/disable/uninstall hooks
 ├── table.sql, sql/install.sql, sql/uninstall.sql             -- the 8 mod_copilot_* tables + background_services row
@@ -262,16 +262,28 @@ Everything else checked out clean:
   / `src/worker_entry.php`) matches the actual function defined there, in
   both `table.sql` and `sql/install.sql`, and matches
   `ModuleManagerListener`'s own constant.
-- The menu URL in `src/Bootstrap.php` (`public/doc.php`) and
-  `moduleConfig.php` both point at the real, existing `public/doc.php`.
-- `moduleConfig.php`'s `tables` list, `table.sql`'s 8
-  `#IfNotTable mod_copilot_*` blocks, `sql/uninstall.sql`'s 8 `DROP TABLE`
-  statements, and `ModuleManagerListener::OWNED_TABLES` all list the exact
-  same 8 tables (`mod_copilot_doc`, `mod_copilot_cadence`,
+- The menu URL in `src/Bootstrap.php` points at the real, existing
+  `public/doc.php`.
+- `table.sql`'s 8 `#IfNotTable mod_copilot_*` blocks, `sql/uninstall.sql`'s
+  8 `DROP TABLE` statements, and `ModuleManagerListener::OWNED_TABLES` all
+  list the exact same 8 tables (`mod_copilot_doc`, `mod_copilot_cadence`,
   `mod_copilot_chat_session`, `mod_copilot_chat_turn`, `mod_copilot_trace`,
   `mod_copilot_qa`, `mod_copilot_trace_payload`, `mod_copilot_ui_event`).
-- `version.php` (0.1.0), `info.txt` ("Clinical Co-Pilot v0.1.0"), and
-  `moduleConfig.php` (`'version' => '0.1.0'`) agree.
+- `version.php` (0.1.0) and `info.txt` ("Clinical Co-Pilot v0.1.0") agree.
+- `moduleConfig.php` was removed: OpenEMR's Module Manager iframes that file
+  directly as the "Configure" button's content when it exists
+  (`interface/modules/zend_modules/module/Installer/view/installer/installer/configure.phtml`),
+  but this module's version never bootstrapped `globals.php` or rendered
+  anything — clicking "Configure" showed a blank iframe. Its `install`/
+  `uninstall`/`tables` keys were never read by core; `sql/install.sql` and
+  `ModuleManagerListener` are the real, live install/uninstall paths.
+  Removing the file makes core correctly omit the "Configure" button instead
+  of showing a broken one; a real settings UI is a separate future addition.
+- `sql/uninstall.sql` is likewise **not executed by core** — uninstall goes
+  through `ModuleManagerListener::reset_module()`'s own `DROP TABLE` logic.
+  The file is kept only as a human-readable mirror of `OWNED_TABLES`; if you
+  add a table, update both `ModuleManagerListener::OWNED_TABLES` (the one
+  that matters) and this file together.
 - Every `public/*.php` bootstraps `globals.php` at the correct relative
   depth (`__DIR__ . '/../../../../globals.php'`) and performs CSRF → ACL →
   session identity in that order.

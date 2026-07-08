@@ -73,6 +73,13 @@ class Bootstrap
     public function addCustomMenuItem(MenuEvent $event): MenuEvent
     {
         try {
+            if (
+                !AclMain::aclCheckCore('patients', 'med')
+                || !AclMain::aclCheckCore(self::ACL_SECTION_NAME, 'copilot_access')
+            ) {
+                return $event;
+            }
+
             $menu = $event->getMenu();
 
             foreach ($menu as $menuItem) {

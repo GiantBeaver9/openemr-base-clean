@@ -69,7 +69,7 @@ if ($isPost) {
 EventAuditLogger::getInstance()->newEvent('security', $authUser, $authProvider, 1, 'Clinical Co-Pilot: observability dashboard viewed');
 
 $metricsService = new MetricsService();
-$windowHours = is_numeric($_GET['window_hours'] ?? null) ? max(1, (int)$_GET['window_hours']) : 24;
+$windowHours = is_numeric($_GET['window_hours'] ?? null) ? max(1, min(8760, (int)$_GET['window_hours'])) : 24;
 $since = new DateTimeImmutable("-{$windowHours} hours");
 
 $correlationId = (string)($_GET['correlation_id'] ?? '');
