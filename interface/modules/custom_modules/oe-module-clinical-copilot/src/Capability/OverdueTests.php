@@ -122,7 +122,7 @@ final class OverdueTests implements CapabilityInterface
                 continue;
             }
 
-            $dueDate = $lastDraw->clinicalDate->add(new \DateInterval($interval));
+            $dueDate = self::addCadenceInterval($lastDraw->clinicalDate, new \DateInterval($interval));
             if ($dueDate >= $now) {
                 continue;
             }
@@ -133,6 +133,28 @@ final class OverdueTests implements CapabilityInterface
         }
 
         return new CapabilityResult($presented, $exclusions, $rawInputCount, $accountedCount);
+    }
+
+    /**
+     * Adds a cadence interval (today only P3M/P1Y -- pure month/year, no
+     * day/time component) to a clinical date, clamping to the last day of
+     * the resulting month on overflow instead of letting PHP's DateInterval
+     * roll into the following month (e.g. 2024-01-31 + P3M must land on
+     * 2024-04-30, not 2024-05-01; 2024-02-29 + P1Y must land on 2025-02-28,
+     * not 2025-03-01). A day/time-bearing interval has no unambiguous
+     * "clamp" semantics, so it falls back to plain DateInterval::add().
+     */
+    private static function addCadenceInterval(\DateTimeImmutable $date, \DateInterval $interval): \DateTimeImmutable
+    {
+        if ($interval->d !== 0 || $interval->h !== 0 || $interval->i !== 0 || $interval->s !== 0 || $interval->invert !== 0) {
+            return $date->add($interval);
+        }
+
+        $totalMonths = $interval->y * 12 + $interval->m;
+        $targetMonth = $date->modify('first day of this month')->add(new \DateInterval("P{$totalMonths}M"));
+        $day = min((int)$date->format('d'), (int)$targetMonth->format('t'));
+
+        return $targetMonth->setDate((int)$targetMonth->format('Y'), (int)$targetMonth->format('m'), $day);
     }
 
     /**

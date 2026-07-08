@@ -58,6 +58,27 @@ final class DerivedFactsTest extends TestCase
     }
 
     /**
+     * Regression: number_format($delta, 2) with PHP's default ',' thousands
+     * separator corrupted FactValue.raw for deltas >= 1000 (e.g. a glucose
+     * swing during a DKA/HHS crisis, realistic for this population) into
+     * "+1,150.00" -- a malformed number the LLM could quote verbatim. The
+     * underlying parsed float was always correct; only the display string
+     * was wrong.
+     */
+    public function testDeltaRawStringHasNoThousandsSeparatorForLargeMagnitudeValues(): void
+    {
+        $series = [
+            CapabilityFactTestFactory::trendPoint(1, 1, 90.0, '2026-01-01', 'mg/dL'),
+            CapabilityFactTestFactory::trendPoint(1, 2, 1240.0, '2026-01-02', 'mg/dL'),
+        ];
+
+        $deltas = DerivedFacts::deltas(Capability::ControlProxy, '1', $series);
+
+        self::assertCount(1, $deltas);
+        self::assertSame('+1150.00', $deltas[0]->value?->raw);
+    }
+
+    /**
      * Eval: derived_span is the first-to-last magnitude, not a sum of the
      * consecutive deltas (though for a monotonic series they happen to
      * agree) -- it must cite ONLY the two endpoints, not every intermediate

@@ -234,7 +234,7 @@ final class VitalsTrend implements CapabilityInterface
 
     private static function formatNumber(float $value): string
     {
-        return rtrim(rtrim(number_format($value, 2), '0'), '.');
+        return rtrim(rtrim(number_format($value, 2, '.', ''), '0'), '.');
     }
 
     private static function parseDate(mixed $value): ?\DateTimeImmutable

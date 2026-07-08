@@ -127,7 +127,7 @@ final class DerivedFacts
         }
 
         $delta = $laterValue->parsed - $earlierValue->parsed;
-        $raw = ($delta >= 0.0 ? '+' : '') . number_format($delta, 2);
+        $raw = ($delta >= 0.0 ? '+' : '') . number_format($delta, 2, '.', '');
         $value = new FactValue($raw, $delta, Comparator::None, $laterValue->unitOriginal, $laterValue->unitCanonical, $laterValue->conversionVersion);
         $citations = [...$earlier->citations, ...$later->citations];
         $factId = FactId::compute($capability, $kind, $citations, $value);
