@@ -163,6 +163,18 @@
             max-height: calc(100vh - 10rem);
             overflow-y: auto;
         }
+        /* Zebra-stripe the per-analyte fact rows (A1c, glucose, ...) so
+           consecutive readings from similar visits are easy to tell apart
+           instead of blending into one block. Rows that already carry a
+           semantic colour keep it -- conflict rows stay `.table-warning`,
+           excluded rows stay `.table-light` -- so only the plain rows
+           alternate white / light grey. */
+        .ccp-facts-tab-content tbody tr:not(.table-warning):not(.table-light):nth-child(odd) {
+            background-color: #ffffff;
+        }
+        .ccp-facts-tab-content tbody tr:not(.table-warning):not(.table-light):nth-child(even) {
+            background-color: #f2f3f5;
+        }
         @media (max-width: 991.98px) {
             .ccp-facts-column {
                 position: static;
@@ -436,11 +448,17 @@
                         {% else %}
                             <ul class="nav nav-tabs ccp-facts-tabs" role="tablist">
                                 {% for g in view_model.fact_groups %}
+                                    {# g.key can contain a colon (e.g. "lab:glucose"), which is a valid
+                                       HTML id but breaks the CSS/jQuery selector Bootstrap builds from
+                                       the tab href (":glucose" parses as a pseudo-class) -- so every
+                                       non-active tab silently showed a blank pane. Emit a selector-safe
+                                       id here while leaving g.key itself (used for ordering/tests) alone. #}
+                                    {% set paneKey = g.key|replace({':': '-'}) %}
                                     <li class="nav-item">
                                         <a class="nav-link{% if loop.first %} active{% endif %}"
-                                           id="ccpFactsTab-{{ g.key|attr }}"
-                                           data-toggle="tab" href="#ccpFactsPane-{{ g.key|attr }}"
-                                           role="tab" aria-controls="ccpFactsPane-{{ g.key|attr }}"
+                                           id="ccpFactsTab-{{ paneKey|attr }}"
+                                           data-toggle="tab" href="#ccpFactsPane-{{ paneKey|attr }}"
+                                           role="tab" aria-controls="ccpFactsPane-{{ paneKey|attr }}"
                                            aria-selected="{{ loop.first ? 'true' : 'false' }}">
                                             {{ g.label|text }} <span class="badge badge-light ml-1">{{ g.total|text }}</span>
                                         </a>
@@ -449,9 +467,10 @@
                             </ul>
                             <div class="tab-content ccp-facts-tab-content">
                                 {% for g in view_model.fact_groups %}
+                                    {% set paneKey = g.key|replace({':': '-'}) %}
                                     <div class="tab-pane fade{% if loop.first %} show active{% endif %}"
-                                         id="ccpFactsPane-{{ g.key|attr }}" role="tabpanel"
-                                         aria-labelledby="ccpFactsTab-{{ g.key|attr }}">
+                                         id="ccpFactsPane-{{ paneKey|attr }}" role="tabpanel"
+                                         aria-labelledby="ccpFactsTab-{{ paneKey|attr }}">
                                         {% if g.total > g.shown %}
                                             <div class="text-muted small mt-2">
                                                 {{ "Showing"|xlt }} {{ g.shown|text }} {{ "of"|xlt }} {{ g.total|text }} — {{ "most recent first"|xlt }}
