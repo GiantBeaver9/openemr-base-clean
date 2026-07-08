@@ -32,11 +32,13 @@ The agent layer (chat loop, verification gate V1–V6, observability) is specifi
 One PHP module: `interface/modules/custom_modules/oe-module-clinical-copilot/`, PSR-4 namespace `OpenEMR\Modules\ClinicalCopilot\`. Standard custom-module pattern (composer.json, info.txt, openemr.bootstrap.php, table.sql, src/, templates/, tests/).
 
 **Additivity invariant (enforced, see U9):**
-1. Repo diff outside the module directory (and the spec docs: `ARCHITECTURE.md`, `USERS.md`, `docs/clinical-copilot-tradeoffs.md`) is empty.
+1. Repo diff outside the module directory (and the case-study root deliverables: `README.md`, `AUDIT.md`, `USERS.md`/`USER.md`, `ARCHITECTURE.md`, `ARCHITECTURE_COMPLETE.md`, `docs/clinical-copilot-tradeoffs.md`) is empty. These are the submission documents the case study requires at the repo root; the enforcing gate (`ops/ci/check-additivity.sh`) whitelists exactly this set.
 2. Module disabled ⇒ host behaves byte-for-byte identically.
 3. Uninstall drops only `mod_copilot_*` tables and the module's `background_services` row.
 
 Test 3 is in deliberate tension with T7's provenance-ledger value: uninstall destroys the "what did the physician see" record. Resolution: uninstall requires an explicit operator confirmation and offers export-before-drop; retention/disposal policy is OPEN-2 and ARCHITECTURE.md §4.
+
+**Known exception — deployment configuration.** Test 1 is scoped to *application* code and the root submission docs; it does **not** cover the deploy layer. Standing up the public deployment (the "Deploy It" hard gate) necessarily adds host-level files outside the module — currently `railway.toml`, `docker/railway/Dockerfile`, `.gitlab-ci.yml`, and `.dockerignore`. These are infrastructure-as-config, not host application changes: they do not alter OpenEMR's runtime behavior with the module disabled (Test 2 still holds byte-for-byte), and they touch no `mod_copilot_*` or core clinical table (Test 3 unaffected). The additivity gate deliberately does **not** whitelist them — a deploy-config change is a real, reviewable deviation that should show up in the diff, not be silently absorbed — so `check-additivity.sh` flags them by design; that flag is the acknowledgement, read together with this note, not a violation to suppress.
 
 All existing OpenEMR tables are **read-only** to this module — no rows, no columns, no triggers (T6). Reuse host service objects where they exist (notably `PrescriptionService` for the meds union, T4).
 

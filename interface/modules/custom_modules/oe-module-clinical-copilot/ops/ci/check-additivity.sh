@@ -2,14 +2,17 @@
 #
 # Clinical Co-Pilot I9 additivity gate -- repo-diff test 1
 # (ARCHITECTURE_COMPLETE.md "Additivity invariant (enforced, see U9)": "1.
-# Repo diff outside the module directory (and the spec docs: ARCHITECTURE.md,
-# USERS.md, docs/clinical-copilot-tradeoffs.md) is empty.").
+# Repo diff outside the module directory (and the case-study root docs) is
+# empty.").
 #
 # Fails (exit 1) if the diff between a base ref and the current working tree
 # touches ANY file outside interface/modules/custom_modules/oe-module-clinical-copilot/
-# other than the three whitelisted spec docs at repo root. Also fails on any
-# new, untracked file outside those paths -- a brand-new file is just as much
-# an additivity violation as a modified one.
+# other than the whitelisted case-study root docs (ALLOWED_SPEC_DOCS below:
+# README.md, AUDIT.md, USERS.md/USER.md, ARCHITECTURE.md,
+# ARCHITECTURE_COMPLETE.md, docs/clinical-copilot-tradeoffs.md -- the
+# submission deliverables the case study requires at the repo root). Also
+# fails on any new, untracked file outside those paths -- a brand-new file is
+# just as much an additivity violation as a modified one.
 #
 # Usage:
 #   ops/ci/check-additivity.sh [base-ref]
@@ -43,8 +46,12 @@ set -euo pipefail
 
 MODULE_DIR="interface/modules/custom_modules/oe-module-clinical-copilot"
 ALLOWED_SPEC_DOCS=(
-  "ARCHITECTURE.md"
+  "README.md"
+  "AUDIT.md"
   "USERS.md"
+  "USER.md"
+  "ARCHITECTURE.md"
+  "ARCHITECTURE_COMPLETE.md"
   "docs/clinical-copilot-tradeoffs.md"
 )
 
