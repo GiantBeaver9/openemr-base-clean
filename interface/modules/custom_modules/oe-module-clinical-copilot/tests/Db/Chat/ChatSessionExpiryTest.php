@@ -137,6 +137,24 @@ final class ChatSessionExpiryTest extends TestCase
         self::assertArrayNotHasKey('http_status', $result);
     }
 
+    public function testReleaseSessionsClearsOthersImmediatelyButKeepsCurrent(): void
+    {
+        // All three are fresh (1 min old) -- the idle sweep would NOT touch
+        // them. The manual release must clear them regardless, which is the
+        // whole point of the escape hatch for a clinician juggling live charts.
+        $current = $this->insertSessionAgedMinutes(1);
+        $other1 = $this->insertSessionAgedMinutes(1);
+        $other2 = $this->insertSessionAgedMinutes(1);
+
+        $result = $this->controller->releaseSessions(self::USER_ID, $current);
+
+        self::assertTrue($result['ok']);
+        self::assertSame(2, $result['released']);
+        self::assertSame(ChatSessionStatus::Active, $this->sessionStore->find($current)?->status, 'the current session is kept');
+        self::assertSame(ChatSessionStatus::Expired, $this->sessionStore->find($other1)?->status);
+        self::assertSame(ChatSessionStatus::Expired, $this->sessionStore->find($other2)?->status);
+    }
+
     public function testTurnOnAnExpiredSessionSignalsReseedInsteadOfAnswering(): void
     {
         $sessionId = $this->startSession();

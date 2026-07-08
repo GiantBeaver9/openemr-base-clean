@@ -152,6 +152,48 @@ final class ChatSessionStore
     }
 
     /**
+     * Count a user's currently-active sessions (optionally excluding one) --
+     * the same population the per-user cap counts. Used to tell the clinician
+     * how many the manual "release sessions" control just freed.
+     */
+    public function countActiveForUser(int $userId, ?int $exceptSessionId = null): int
+    {
+        $sql = 'SELECT COUNT(*) AS c FROM `mod_copilot_chat_session` WHERE `user_id` = ? AND `status` = ?';
+        $params = [$userId, ChatSessionStatus::Active->value];
+        if ($exceptSessionId !== null) {
+            $sql .= ' AND `id` <> ?';
+            $params[] = $exceptSessionId;
+        }
+
+        return (int)QueryUtils::fetchSingleValue($sql, 'c', $params);
+    }
+
+    /**
+     * Force-close ALL of a user's active sessions right now, regardless of how
+     * recently they were used (unlike {@see self::expireIdleForUser()}, which
+     * only releases sessions past the idle window). This backs the manual
+     * "release sessions" escape hatch: when a clinician is juggling more live
+     * charts than the per-user cap allows and every turn is being denied, one
+     * click frees the slots so chat works again immediately.
+     *
+     * `$exceptSessionId` keeps the session the clinician is actively in, so the
+     * current conversation survives while the abandoned ones are cleared.
+     * Frozen sessions are untouched (excluded by the `status = 'active'`
+     * predicate).
+     */
+    public function expireAllForUser(int $userId, ?int $exceptSessionId = null): void
+    {
+        $sql = 'UPDATE `mod_copilot_chat_session` SET `status` = ? WHERE `user_id` = ? AND `status` = ?';
+        $params = [ChatSessionStatus::Expired->value, $userId, ChatSessionStatus::Active->value];
+        if ($exceptSessionId !== null) {
+            $sql .= ' AND `id` <> ?';
+            $params[] = $exceptSessionId;
+        }
+
+        QueryUtils::sqlStatementThrowException($sql, $params);
+    }
+
+    /**
      * @param array<string, mixed> $row
      */
     private static function hydrate(array $row): ChatSession

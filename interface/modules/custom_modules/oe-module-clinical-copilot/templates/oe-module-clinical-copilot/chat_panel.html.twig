@@ -21,7 +21,16 @@
 <div class="card mb-3" id="ccpChatPanel" data-pid="{{ pid|attr }}">
     <div class="card-header d-flex justify-content-between align-items-center">
         <strong>{{ "Ask a follow-up"|xlt }}</strong>
-        <small class="text-muted">{{ "pinned to this patient -- answers cite the same facts as the synthesis above"|xlt }}</small>
+        <div class="d-flex align-items-center">
+            <small class="text-muted mr-2">{{ "pinned to this patient -- answers cite the same facts as the synthesis above"|xlt }}</small>
+            {# Manual escape hatch: if the per-user active-session cap is
+               rejecting turns, one click frees the clinician's other sessions
+               so chat works again without a reload. #}
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="ccpChatReleaseBtn"
+                    title="{{ 'Close your other chat sessions if new questions are being blocked'|attr }}">
+                {{ "Release sessions"|xlt }}
+            </button>
+        </div>
     </div>
     <div class="card-body">
         {# csrfToken() (no args) renders a whole <input type="hidden" ...> tag,
@@ -82,6 +91,7 @@
     var frozenBanner = document.getElementById('ccpChatFrozenBanner');
     var staleBanner = document.getElementById('ccpChatStaleBanner');
     var reseedLink = document.getElementById('ccpChatReseedLink');
+    var releaseBtn = document.getElementById('ccpChatReleaseBtn');
     var sessionId = null;
     var frozen = false;
     // Why the last session bootstrap failed (e.g. synthesis not generated yet,
@@ -295,6 +305,41 @@
     reseedLink.addEventListener('click', function (event) {
         event.preventDefault();
         reseedFromCurrentSummary(true);
+    });
+
+    // Manual "release sessions" escape hatch: closes the physician's OTHER
+    // active sessions (the current one is kept) so the per-user cap stops
+    // blocking turns. Keeps the open conversation intact -- no re-seed unless
+    // there was no live session to begin with.
+    releaseBtn.addEventListener('click', async function () {
+        releaseBtn.disabled = true;
+        setStatus('releasing sessions…');
+        var body = new FormData();
+        body.append('action', 'release');
+        if (sessionId) {
+            body.append('session_id', sessionId);
+        }
+        body.append('csrf_token_form', csrf);
+        try {
+            var response = await fetch(chatUrl, { method: 'POST', body: body, credentials: 'same-origin' });
+            var data = await response.json();
+            setStatus(null);
+            if (data.ok) {
+                var n = data.released || 0;
+                appendLine('System', n > 0
+                    ? ('released ' + n + ' earlier session' + (n === 1 ? '' : 's') + ' -- you can keep chatting')
+                    : 'no earlier sessions to release');
+                if (!sessionId) {
+                    await startSession();
+                }
+            } else {
+                appendLine('System', data.reason || 'could not release sessions');
+            }
+        } catch (err) {
+            setStatus(null);
+            appendLine('System', 'could not release sessions -- try again shortly');
+        }
+        releaseBtn.disabled = false;
     });
 
     document.addEventListener('ccp-summary-regenerated', function () {

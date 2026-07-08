@@ -218,6 +218,28 @@ final class ChatController
     }
 
     /**
+     * Manual "release sessions" escape hatch: force-close all of the caller's
+     * active sessions so the per-user active-session cap stops denying turns.
+     * The automatic idle sweep ({@see ChatSessionStore::expireIdleForUser()})
+     * only frees sessions past the idle window, which does not help a clinician
+     * who is actively juggling more live charts than the cap allows -- this
+     * gives them a one-click reset instead of a dead end.
+     *
+     * `$keepSessionId` preserves the session the clinician is currently in (the
+     * chat panel passes its own session id) so the open conversation survives
+     * while the abandoned ones are cleared.
+     *
+     * @return array{ok: bool, released: int}
+     */
+    public function releaseSessions(int $userId, ?int $keepSessionId = null): array
+    {
+        $released = $this->sessionStore->countActiveForUser($userId, $keepSessionId);
+        $this->sessionStore->expireAllForUser($userId, $keepSessionId);
+
+        return ['ok' => true, 'released' => $released];
+    }
+
+    /**
      * `public/status.php`'s polling fallback (ARCHITECTURE.md §1.3): reads
      * the SAME ledger the turn is writing rather than a parallel status
      * variable, so "what the progress UI shows" is provably what happened,

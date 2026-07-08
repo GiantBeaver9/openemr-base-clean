@@ -65,6 +65,17 @@ if ($action === 'reseed') {
     exit;
 }
 
+if ($action === 'release') {
+    // Manual escape hatch: free the caller's active-session slots so the
+    // per-user cap stops rejecting turns. Keeps the session the panel is
+    // currently in (if any) so the open conversation is not lost.
+    $keepSessionId = $sessionId > 0 ? $sessionId : null;
+    $result = $controller->releaseSessions($authUserId, $keepSessionId);
+    header('Content-Type: application/json');
+    echo json_encode($result);
+    exit;
+}
+
 if ($sessionId <= 0) {
     http_response_code(400);
     header('Content-Type: application/json');
