@@ -73,4 +73,77 @@ final class ClaimSchemaTest extends TestCase
         self::assertTrue($result->valid);
         self::assertCount(1, $result->claims);
     }
+
+    /**
+     * The answer-producing agent-loop round carries tool declarations, and
+     * Gemini function-calling and `responseSchema` are mutually exclusive, so
+     * that round is unconstrained: Flash-class models fence the array in
+     * ```json even when told not to. V1 is the documented client-side backstop
+     * (ARCHITECTURE.md §2.1) and must unwrap the fence, not reject the turn.
+     */
+    public function testFencedJsonIsUnwrappedAndParses(): void
+    {
+        $json = VerifyTestFactory::claimsJson([
+            VerifyTestFactory::claim('A1c was 7.2.', 'lab_value', ['f1'], [7.2]),
+        ]);
+
+        $result = (new ClaimSchema())->parse("```json\n{$json}\n```");
+
+        self::assertTrue($result->valid);
+        self::assertCount(1, $result->claims);
+    }
+
+    public function testFenceWithoutLanguageTagIsUnwrapped(): void
+    {
+        $json = VerifyTestFactory::claimsJson([
+            VerifyTestFactory::claim('A1c was 7.2.', 'lab_value', ['f1'], [7.2]),
+        ]);
+
+        $result = (new ClaimSchema())->parse("```\n{$json}\n```");
+
+        self::assertTrue($result->valid);
+        self::assertCount(1, $result->claims);
+    }
+
+    public function testProseWrappedArrayIsExtracted(): void
+    {
+        $json = VerifyTestFactory::claimsJson([
+            VerifyTestFactory::claim('A1c was 7.2.', 'lab_value', ['f1'], [7.2]),
+        ]);
+
+        $result = (new ClaimSchema())->parse("Here are the claims: {$json} Hope that helps.");
+
+        self::assertTrue($result->valid);
+        self::assertCount(1, $result->claims);
+    }
+
+    public function testSurroundingWhitespaceIsTolerated(): void
+    {
+        $json = VerifyTestFactory::claimsJson([
+            VerifyTestFactory::claim('A1c was 7.2.', 'lab_value', ['f1'], [7.2]),
+        ]);
+
+        $result = (new ClaimSchema())->parse("\n\n  {$json}  \n");
+
+        self::assertTrue($result->valid);
+        self::assertCount(1, $result->claims);
+    }
+
+    /**
+     * Extraction is a backstop for wrapping, never a schema relaxation: a
+     * fenced JSON object is still not a claim-list array and must be rejected.
+     */
+    public function testFencedNonArrayJsonIsStillRejected(): void
+    {
+        $result = (new ClaimSchema())->parse("```json\n{\"text\": \"not a list\"}\n```");
+
+        self::assertFalse($result->valid);
+    }
+
+    public function testProseWithoutAnyArrayIsStillRejected(): void
+    {
+        $result = (new ClaimSchema())->parse('I could not find that information for this patient.');
+
+        self::assertFalse($result->valid);
+    }
 }
