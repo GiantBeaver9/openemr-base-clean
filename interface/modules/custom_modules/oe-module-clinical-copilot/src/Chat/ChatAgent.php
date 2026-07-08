@@ -101,19 +101,28 @@ final class ChatAgent
             return ChatAnswer::frozen($loopResult, $verification->verdicts, self::sev1Signal($correlationId, $pid, $verification->find(CheckId::PatientIdentity)), self::usage($loopResult), 1);
         }
 
-        if ($verification->allPassed()) {
+        if ($verification->allPassed() && ($verification->claims ?? []) !== []) {
             return ChatAnswer::passed($loopResult, $verification->claims ?? [], $verification->verdicts, self::usage($loopResult), 1);
         }
 
         // ONE regeneration, findings appended, no new tool calls (ARCHITECTURE.md §2.3).
+        // An empty claim list trivially "passes" every check (nothing to fail),
+        // but an answer with no claims conveys nothing and must never render as a
+        // verified turn -- treat it like any other ordinary failure and hand the
+        // retry an explicit no-claims finding (formatFindings yields nothing when
+        // no verdict actually failed).
         $this->emitStatus('resolving verification findings…');
+        $findings = self::formatFindings($verification->verdicts);
+        if (trim($findings) === '') {
+            $findings = '[empty_answer] The previous response contained no claims. Answer the question with grounded, cited claims, or return an explicit uncertainty or refusal claim if you cannot.';
+        }
         try {
             $retryResult = $this->agentLoop->answerWithFindings(
                 $loopResult->accumulatedFacts,
                 $narrativeClaims,
                 $conversationTranscript,
                 $userQuestion,
-                self::formatFindings($verification->verdicts),
+                $findings,
             );
         } catch (LlmUnavailableException $e) {
             return ChatAnswer::degradedLlmUnavailable($loopResult->accumulatedFacts, $e->reason(), $loopResult->toolCallLog, $e->degradedMessage());
@@ -137,10 +146,12 @@ final class ChatAgent
             return ChatAnswer::frozen($retryResult, $retryVerification->verdicts, self::sev1Signal($correlationId, $pid, $retryVerification->find(CheckId::PatientIdentity)), self::usage($retryResult), 2);
         }
 
-        if ($retryVerification->allPassed()) {
+        if ($retryVerification->allPassed() && ($retryVerification->claims ?? []) !== []) {
             return ChatAnswer::passed($retryResult, $retryVerification->claims ?? [], $retryVerification->verdicts, self::usage($retryResult), 2);
         }
 
+        // Still empty (or still failing) after the one retry -- degrade rather
+        // than render an empty answer as verified.
         return ChatAnswer::degradedVerificationFailed($retryResult, $retryVerification->verdicts, self::usage($retryResult), 2);
     }
 

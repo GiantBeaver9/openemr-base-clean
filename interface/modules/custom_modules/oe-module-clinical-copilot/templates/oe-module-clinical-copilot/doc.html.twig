@@ -139,26 +139,33 @@
         .ccp-facts-column {
             position: sticky;
             top: 0.75rem;
-            max-height: calc(100vh - 1.5rem);
-            overflow-y: auto;
         }
         .ccp-facts-column .card-body {
             padding-top: 0.75rem;
         }
-        .ccp-facts-group-title {
-            font-size: 0.95rem;
-            font-weight: 600;
-            margin: 0.75rem 0 0.5rem;
+        /* Tabs stay pinned; only the rows of the active tab scroll, and only
+           past the last ~20 the group is capped to. */
+        .ccp-facts-tabs {
+            flex-wrap: nowrap;
+            overflow-x: auto;
         }
-        .ccp-facts-group-title:first-child {
-            margin-top: 0;
+        .ccp-facts-tabs .nav-link {
+            white-space: nowrap;
+            padding: 0.4rem 0.6rem;
+            font-size: 0.9rem;
+        }
+        .ccp-facts-tab-content {
+            max-height: calc(100vh - 10rem);
+            overflow-y: auto;
         }
         @media (max-width: 991.98px) {
             .ccp-facts-column {
                 position: static;
+                margin-top: 1rem;
+            }
+            .ccp-facts-tab-content {
                 max-height: none;
                 overflow: visible;
-                margin-top: 1rem;
             }
         }
     </style>
@@ -419,44 +426,43 @@
                         <small class="text-muted d-block">{{ "always shown beside the narrative"|xlt }}</small>
                     </div>
                     <div class="card-body">
-                        {% if view_model.in_flight is not empty %}
-                            <div class="ccp-facts-group-title">{{ "In flight"|xlt }}</div>
-                            <div class="table-responsive mb-3">
-                                <table class="table table-sm table-borderless mb-0">
-                                    {{ _self.facts_table(visit_label) }}
-                                    <tbody>
-                                    {% for fact in view_model.in_flight %}{{ _self.fact_row(fact, visit_label) }}{% endfor %}
-                                    </tbody>
-                                </table>
-                            </div>
-                        {% endif %}
-
-                        {% for capability, facts in view_model.facts_by_capability %}
-                            <div class="ccp-facts-group-title">{{ facts|first.capability_label|default(capability)|text }}</div>
-                            <div class="table-responsive mb-3">
-                                <table class="table table-sm table-borderless mb-0">
-                                    {{ _self.facts_table(visit_label) }}
-                                    <tbody>
-                                    {% for fact in facts %}{{ _self.fact_row(fact, visit_label) }}{% endfor %}
-                                    </tbody>
-                                </table>
-                            </div>
-                        {% endfor %}
-
-                        {% if view_model.exclusions is not empty %}
-                            <div class="ccp-facts-group-title">{{ "Excluded"|xlt }}</div>
-                            <div class="table-responsive mb-0">
-                                <table class="table table-sm table-borderless mb-0">
-                                    {{ _self.facts_table(visit_label) }}
-                                    <tbody>
-                                    {% for fact in view_model.exclusions %}{{ _self.fact_row(fact, visit_label) }}{% endfor %}
-                                    </tbody>
-                                </table>
-                            </div>
-                        {% endif %}
-
-                        {% if view_model.in_flight is empty and view_model.facts_by_capability is empty and view_model.exclusions is empty %}
+                        {% if view_model.fact_groups is empty %}
                             <p class="text-muted mb-0">{{ "No facts extracted."|xlt }}</p>
+                        {% else %}
+                            <ul class="nav nav-tabs ccp-facts-tabs" role="tablist">
+                                {% for g in view_model.fact_groups %}
+                                    <li class="nav-item">
+                                        <a class="nav-link{% if loop.first %} active{% endif %}"
+                                           id="ccpFactsTab-{{ g.key|attr }}"
+                                           data-toggle="tab" href="#ccpFactsPane-{{ g.key|attr }}"
+                                           role="tab" aria-controls="ccpFactsPane-{{ g.key|attr }}"
+                                           aria-selected="{{ loop.first ? 'true' : 'false' }}">
+                                            {{ g.label|text }} <span class="badge badge-light ml-1">{{ g.total|text }}</span>
+                                        </a>
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                            <div class="tab-content ccp-facts-tab-content">
+                                {% for g in view_model.fact_groups %}
+                                    <div class="tab-pane fade{% if loop.first %} show active{% endif %}"
+                                         id="ccpFactsPane-{{ g.key|attr }}" role="tabpanel"
+                                         aria-labelledby="ccpFactsTab-{{ g.key|attr }}">
+                                        {% if g.total > g.shown %}
+                                            <div class="text-muted small mt-2">
+                                                {{ "Showing"|xlt }} {{ g.shown|text }} {{ "of"|xlt }} {{ g.total|text }} — {{ "most recent first"|xlt }}
+                                            </div>
+                                        {% endif %}
+                                        <div class="table-responsive mt-2">
+                                            <table class="table table-sm table-borderless mb-0">
+                                                {{ _self.facts_table(visit_label) }}
+                                                <tbody>
+                                                {% for fact in g.facts %}{{ _self.fact_row(fact, visit_label) }}{% endfor %}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                {% endfor %}
+                            </div>
                         {% endif %}
                     </div>
                 </div>

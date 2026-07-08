@@ -53,13 +53,13 @@ final class DocViewModelTest extends TestCase
         $result = self::servedResult([$trend, $preliminary, $pendingOrder], null);
         $viewModel = DocViewModel::build($result, 'https://example.test');
 
-        $inFlightKinds = array_column($viewModel['in_flight'], 'kind');
+        $inFlightKinds = array_column(self::group($viewModel, 'in_flight')['facts'], 'kind');
         self::assertEqualsCanonicalizing(['preliminary_result', 'pending_order'], $inFlightKinds);
 
-        $controlProxyKinds = array_column($viewModel['facts_by_capability']['control_proxy'] ?? [], 'kind');
+        $controlProxyKinds = array_column(self::group($viewModel, 'control_proxy')['facts'], 'kind');
         self::assertSame(['trend_point'], $controlProxyKinds, 'the trend bucket must contain ONLY the trend_point fact -- never the preliminary result');
 
-        self::assertArrayNotHasKey('pending_results', $viewModel['facts_by_capability'], 'a capability whose only facts are in-flight must not also appear in the plain facts table');
+        self::assertNull(self::group($viewModel, 'pending_results'), 'a capability whose only facts are in-flight must not also appear as its own facts tab');
     }
 
     public function testExclusionRoutesToExclusionsBucketOnly(): void
@@ -69,9 +69,9 @@ final class DocViewModelTest extends TestCase
         $result = self::servedResult([$exclusion], null);
         $viewModel = DocViewModel::build($result, 'https://example.test');
 
-        self::assertCount(1, $viewModel['exclusions']);
-        self::assertSame([], $viewModel['in_flight']);
-        self::assertArrayNotHasKey('control_proxy', $viewModel['facts_by_capability'], 'an excluded fact must never also appear in the plain facts table');
+        self::assertCount(1, self::group($viewModel, 'exclusions')['facts']);
+        self::assertNull(self::group($viewModel, 'in_flight'));
+        self::assertNull(self::group($viewModel, 'control_proxy'), 'an excluded fact must never also appear as a capability facts tab');
     }
 
     public function testNarrativeIsOrderedByClaimOrderRegardlessOfInputOrder(): void
@@ -112,7 +112,66 @@ final class DocViewModelTest extends TestCase
         $viewModel = DocViewModel::build($result, 'https://example.test');
 
         self::assertSame([], $viewModel['narrative'], 'a capability-crash result never carries claims (no digest/reduce ever ran)');
-        self::assertSame(['trend_point'], array_column($viewModel['facts_by_capability']['control_proxy'], 'kind'));
+        self::assertSame(['trend_point'], array_column(self::group($viewModel, 'control_proxy')['facts'], 'kind'));
+    }
+
+    public function testCapabilityGroupIsSortedMostRecentFirstAndClampedToTwentyWithTotal(): void
+    {
+        // 25 trend points across 25 distinct months, fed oldest-first.
+        $facts = [];
+        for ($i = 1; $i <= 25; $i++) {
+            $date = sprintf('%04d-%02d-01', 2023 + intdiv($i, 12), ($i % 12) + 1);
+            $facts[] = self::trendPointOn($date, $i, (float) $i);
+        }
+
+        $viewModel = DocViewModel::build(self::servedResult($facts, null), 'https://example.test');
+        $group = self::group($viewModel, 'control_proxy');
+
+        self::assertNotNull($group);
+        self::assertSame(25, $group['total'], 'the pre-clamp total must be carried through for the "N of TOTAL" caption');
+        self::assertSame(20, $group['shown']);
+        self::assertCount(20, $group['facts']);
+
+        $dates = array_column($group['facts'], 'clinical_date');
+        $sortedDesc = $dates;
+        rsort($sortedDesc);
+        self::assertSame($sortedDesc, $dates, 'facts must be ordered most-recent-first');
+    }
+
+    /**
+     * @param array{narrative: mixed, fact_groups: list<array{key: string, label: string, total: int, shown: int, facts: list<array<string, mixed>>}>} $viewModel
+     * @return array{key: string, label: string, total: int, shown: int, facts: list<array<string, mixed>>}|null
+     */
+    private static function group(array $viewModel, string $key): ?array
+    {
+        foreach ($viewModel['fact_groups'] as $group) {
+            if ($group['key'] === $key) {
+                return $group;
+            }
+        }
+
+        return null;
+    }
+
+    private static function trendPointOn(string $date, int $pk, float $value): Fact
+    {
+        $citations = [new Citation('procedure_result', $pk, 'result', DateSource::Collected)];
+        $factValue = new FactValue((string) $value, $value, Comparator::None, '%', '%', null);
+        $factId = FactId::compute(Capability::ControlProxy, FactKind::TrendPoint, $citations, $factValue);
+
+        return new Fact(
+            $factId,
+            Capability::ControlProxy,
+            '1',
+            FactKind::TrendPoint,
+            42,
+            new \DateTimeImmutable($date),
+            DateSource::Collected,
+            $factValue,
+            FactStatus::Final,
+            [],
+            $citations,
+        );
     }
 
     /**

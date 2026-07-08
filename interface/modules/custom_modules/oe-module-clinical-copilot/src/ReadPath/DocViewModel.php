@@ -43,6 +43,26 @@ use OpenEMR\Modules\ClinicalCopilot\Verify\Verdict;
  */
 final class DocViewModel
 {
+    /**
+     * Most-recent facts shown per group in the tabbed Chart Facts panel. A
+     * multi-year chart yields hundreds of trend points per capability; beyond
+     * the last ~20 the panel is noise the physician scrolls past, so each
+     * group is capped to its most recent {@see self::MAX_FACTS_PER_GROUP} (the
+     * group's true total is carried alongside so the UI can say "showing the
+     * 20 most recent of 175").
+     */
+    private const MAX_FACTS_PER_GROUP = 20;
+
+    /**
+     * Clinical reading order for the capability tabs (what a physician sweeps
+     * first). Capabilities not listed here keep their first-seen order after
+     * these; in-flight always leads and exclusions always trail, set in
+     * {@see self::buildFactGroups()}.
+     *
+     * @var list<string>
+     */
+    private const CAPABILITY_ORDER = ['control_proxy', 'overdue_tests', 'med_response', 'vitals_trend'];
+
     private function __construct()
     {
         // static-only
@@ -51,9 +71,7 @@ final class DocViewModel
     /**
      * @return array{
      *     narrative: list<array{text: string, claim_type: string, flags: list<string>, emphasis: ?string, citations: list<array{label: string, url: ?string}>}>,
-     *     facts_by_capability: array<string, list<array<string, mixed>>>,
-     *     in_flight: list<array<string, mixed>>,
-     *     exclusions: list<array<string, mixed>>
+     *     fact_groups: list<array{key: string, label: string, total: int, shown: int, facts: list<array<string, mixed>>}>
      * }
      */
     public static function build(SynthesisReadResult $result, string $webRoot): array
@@ -66,9 +84,7 @@ final class DocViewModel
 
         return [
             'narrative' => self::buildNarrative($result->claims, $factById, $webRoot),
-            'facts_by_capability' => self::buildFactsByCapability($result->facts, $webRoot),
-            'in_flight' => self::buildBucket($result->facts, self::inFlightKinds(), $webRoot),
-            'exclusions' => self::buildBucket($result->facts, [FactKind::Exclusion], $webRoot),
+            'fact_groups' => self::buildFactGroups($result->facts, $webRoot),
         ];
     }
 
@@ -189,22 +205,84 @@ final class DocViewModel
     }
 
     /**
+     * The ordered, clamped groups the tabbed Chart Facts panel renders: one
+     * tab per non-empty group -- In flight first, then each capability in
+     * clinical reading order, then Excluded -- each sorted most-recent-first
+     * and capped to {@see self::MAX_FACTS_PER_GROUP} with its true `total`
+     * carried through so the UI can show "N most recent of TOTAL".
+     *
      * @param list<Fact> $facts
-     * @return array<string, list<array<string, mixed>>>
+     * @return list<array{key: string, label: string, total: int, shown: int, facts: list<array<string, mixed>>}>
      */
-    private static function buildFactsByCapability(array $facts, string $webRoot): array
+    private static function buildFactGroups(array $facts, string $webRoot): array
     {
-        $excludedKinds = [...self::inFlightKinds(), FactKind::Exclusion];
+        $inFlight = self::buildBucket($facts, self::inFlightKinds(), $webRoot);
+        $exclusions = self::buildBucket($facts, [FactKind::Exclusion], $webRoot);
 
+        $capabilityKinds = [...self::inFlightKinds(), FactKind::Exclusion];
+        /** @var array<string, list<array<string, mixed>>> $byCapability */
         $byCapability = [];
         foreach ($facts as $fact) {
-            if (in_array($fact->kind, $excludedKinds, true)) {
+            if (in_array($fact->kind, $capabilityKinds, true)) {
                 continue;
             }
             $byCapability[$fact->capability->value][] = self::factRow($fact, $webRoot);
         }
 
-        return $byCapability;
+        // In-flight leads; capabilities in clinical reading order (unlisted
+        // ones keep their first-seen order after); exclusions trail.
+        uksort($byCapability, static function (string $a, string $b): int {
+            $ai = array_search($a, self::CAPABILITY_ORDER, true);
+            $bi = array_search($b, self::CAPABILITY_ORDER, true);
+            $ai = $ai === false ? PHP_INT_MAX : $ai;
+            $bi = $bi === false ? PHP_INT_MAX : $bi;
+
+            return $ai <=> $bi;
+        });
+
+        $groups = [];
+        if ($inFlight !== []) {
+            $groups[] = self::group('in_flight', 'In flight', $inFlight);
+        }
+        foreach ($byCapability as $capability => $rows) {
+            $label = $rows[0]['capability_label'] ?? $capability;
+            $groups[] = self::group($capability, is_string($label) ? $label : $capability, $rows);
+        }
+        if ($exclusions !== []) {
+            $groups[] = self::group('exclusions', 'Excluded', $exclusions);
+        }
+
+        return $groups;
+    }
+
+    /**
+     * Sorts one group most-recent-first (by clinical_date; undated facts trail)
+     * and caps it to the most recent {@see self::MAX_FACTS_PER_GROUP}, carrying
+     * the pre-cap total so the panel can disclose what was trimmed.
+     *
+     * @param list<array<string, mixed>> $rows
+     * @return array{key: string, label: string, total: int, shown: int, facts: list<array<string, mixed>>}
+     */
+    private static function group(string $key, string $label, array $rows): array
+    {
+        usort($rows, static function (array $a, array $b): int {
+            $ad = is_string($a['clinical_date'] ?? null) ? $a['clinical_date'] : '';
+            $bd = is_string($b['clinical_date'] ?? null) ? $b['clinical_date'] : '';
+
+            // ISO Y-m-d sorts correctly as a string; empty (undated) trails.
+            return $bd <=> $ad;
+        });
+
+        $total = count($rows);
+        $shown = array_slice($rows, 0, self::MAX_FACTS_PER_GROUP);
+
+        return [
+            'key' => $key,
+            'label' => $label,
+            'total' => $total,
+            'shown' => count($shown),
+            'facts' => $shown,
+        ];
     }
 
     /**
