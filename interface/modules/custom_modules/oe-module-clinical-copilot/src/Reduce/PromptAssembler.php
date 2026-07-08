@@ -99,17 +99,17 @@ final class PromptAssembler
         PatientIdentifiers $identifiers,
         ?string $priorFindings = null,
     ): PromptRequest {
-        // Show the model a recent, prompt-sized window of the chart -- a
-        // 20-year fact set is ~60K tokens re-sent every round and stalls the
-        // call. The digest and the verifier still see the full $facts; this
-        // only bounds what is serialized into the prompt (a subset, so every
-        // cited fact still resolves).
+        // Narrative window: the synthesis sees the last ~20 visits of the
+        // chart, not the full multi-year fact set (~60K tokens for a 20-year
+        // patient), which would stall the one-shot reduce call. The digest and
+        // the verifier still see the full $facts; this only bounds what is
+        // serialized into the prompt (a subset, so every cited fact resolves).
         $sections = [
             self::PATIENT_HEADER,
             self::patientBlock($identifiers),
             '',
             self::FACTS_HEADER,
-            CanonicalSerializer::serializeFacts(PromptFactWindow::forPrompt($facts)),
+            CanonicalSerializer::serializeFacts(PromptFactWindow::forNarrative($facts)),
         ];
 
         if ($priorFindings !== null && trim($priorFindings) !== '') {

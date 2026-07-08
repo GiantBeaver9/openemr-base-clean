@@ -36,7 +36,7 @@ final class PromptFactWindowTest extends TestCase
         $facts[] = self::nonValue('med-2', 'med_response', 'med_event', '2026-01-01', 2002);
         $facts[] = self::nonValue('od-1', 'overdue_tests', 'overdue_item', '2026-01-01', 3001);
 
-        $windowed = PromptFactWindow::forPrompt($facts);
+        $windowed = PromptFactWindow::forChat($facts);
 
         $byKind = [];
         $byUnit = [];
@@ -65,7 +65,7 @@ final class PromptFactWindowTest extends TestCase
             self::nonValue('med-active', 'med_response', 'med_event', '2021-03-01', 9),
         ];
 
-        $ids = array_map(static fn (Fact $f): string => $f->factId, PromptFactWindow::forPrompt($facts));
+        $ids = array_map(static fn (Fact $f): string => $f->factId, PromptFactWindow::forChat($facts));
 
         self::assertContains('recent-1', $ids);
         self::assertContains('recent-2', $ids);
@@ -82,7 +82,28 @@ final class PromptFactWindowTest extends TestCase
             self::nonValue('m', 'med_response', 'med_event', '2026-01-01', 9),
         ];
 
-        self::assertCount(3, PromptFactWindow::forPrompt($facts));
+        self::assertCount(3, PromptFactWindow::forChat($facts));
+    }
+
+    public function testNarrativeKeepsTheLastTwentyVisitsAndDropsOlder(): void
+    {
+        // 30 monthly A1c draws (30 distinct visit dates) + a 2020 medication.
+        $facts = [];
+        $base = new \DateTimeImmutable('2026-06-01');
+        for ($i = 0; $i < 30; $i++) {
+            $date = $base->modify('-' . $i . ' months')->format('Y-m-d');
+            $facts[] = self::trend('a1c-' . $i, '%', $date, 7.0, $i + 1);
+        }
+        $facts[] = self::nonValue('med', 'med_response', 'med_event', '2020-01-01', 999);
+
+        $windowed = PromptFactWindow::forNarrative($facts, 20);
+        $trendCount = count(array_filter($windowed, static fn (Fact $f): bool => $f->kind->value === 'trend_point'));
+        $ids = array_map(static fn (Fact $f): string => $f->factId, $windowed);
+
+        self::assertSame(20, $trendCount, 'the narrative keeps the last 20 visits of trend history');
+        self::assertContains('a1c-0', $ids, 'the most recent visit is kept');
+        self::assertNotContains('a1c-29', $ids, 'the 30th-most-recent visit is dropped');
+        self::assertContains('med', $ids, 'a 2020 medication is still kept for the narrative');
     }
 
     private static function trend(string $id, string $unit, string $date, float $parsed, int $pk): Fact

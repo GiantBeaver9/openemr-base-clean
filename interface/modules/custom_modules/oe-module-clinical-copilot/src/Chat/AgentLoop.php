@@ -110,7 +110,7 @@ final class AgentLoop
             // accumulation and for the verifier's fact set (a windowed cited
             // fact still resolves against the superset).
             $request = $this->promptAssembler->assemble(
-                PromptFactWindow::forPrompt($facts),
+                PromptFactWindow::forChat($facts),
                 $narrativeClaims,
                 $transcript,
                 $userQuestion,
@@ -190,7 +190,7 @@ final class AgentLoop
         string $priorFindings,
     ): AgentLoopResult {
         $request = $this->promptAssembler->assemble(
-            PromptFactWindow::forPrompt($sessionFacts),
+            PromptFactWindow::forChat($sessionFacts),
             $narrativeClaims,
             $conversationTranscript,
             $userQuestion,

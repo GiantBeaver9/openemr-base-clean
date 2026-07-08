@@ -27,26 +27,34 @@ use OpenEMR\Modules\ClinicalCopilot\Fact\Enum\FactKind;
  *
  * This trims ONLY what the model is shown, not the fact set the digest and the
  * verifier operate on (those stay full, so a claim citing a windowed fact
- * still resolves -- the window is a subset). The dense, per-visit kinds (trend
- * points, vitals, and the between-visit deltas) are bounded two ways: a hard
- * {@see self::MAX_AGE_MONTHS}-month recency window (nothing older than ~2 years
- * of trend history travels to the model) and, within that, a
- * {@see self::DEFAULT_PER_SERIES} cap per (capability, unit) series -- so the
- * A1c (%) trend keeps its recent history independent of the mg/dL labs. Every
- * sparse, decision-bearing fact (results, medications, overdue and pending
- * items, preliminary results, exclusions, conflicts, and the derived_count /
- * derived_span summaries that describe the WHOLE series in one fact) is always
- * kept, regardless of age -- a five-year-old medication may still be active.
+ * still resolves -- the window is a subset). Two entry points, because the two
+ * surfaces have different budgets:
+ *
+ * - {@see self::forChat()} -- LEANER. The whole block is re-sent on every round
+ *   of a multi-round chat turn, so dense trend history is bounded to the last
+ *   {@see self::MAX_AGE_MONTHS} months, with a {@see self::DEFAULT_PER_SERIES}
+ *   per-(capability, unit)-series cap within it.
+ * - {@see self::forNarrative()} -- RICHER. The synthesis is a one-shot call, so
+ *   it gets the last {@see self::MAX_NARRATIVE_VISITS} visits' worth of trend
+ *   history instead of the tighter 2-year window.
+ *
+ * Both keep every sparse, decision-bearing fact (results, medications, overdue
+ * and pending items, preliminary results, exclusions, conflicts, and the
+ * derived_count / derived_span summaries that describe the WHOLE series in one
+ * fact) regardless of age -- a five-year-old medication may still be active.
  *
  * Pure and deterministic: same facts in, same subset out.
  */
 final class PromptFactWindow
 {
-    /** Hard recency window: dense trend history older than this never travels to the model. */
+    /** Chat window: dense trend history older than this never travels to a chat round. */
     public const MAX_AGE_MONTHS = 24;
 
-    /** Secondary cap: most recent facts kept per dense (capability, unit) series within the window. */
+    /** Chat secondary cap: most recent facts kept per dense (capability, unit) series within the window. */
     public const DEFAULT_PER_SERIES = 15;
+
+    /** Narrative window: the synthesis is a one-shot call, so it gets a richer slice -- the last N visits. */
+    public const MAX_NARRATIVE_VISITS = 20;
 
     private function __construct()
     {
@@ -54,10 +62,14 @@ final class PromptFactWindow
     }
 
     /**
+     * The CHAT window: leaner, because the whole fact block is re-sent on every
+     * round of a multi-round turn. Dense trend history is bounded to the last
+     * {@see self::MAX_AGE_MONTHS} months, with a per-series count cap within it.
+     *
      * @param list<Fact> $facts
      * @return list<Fact>
      */
-    public static function forPrompt(array $facts, int $perSeries = self::DEFAULT_PER_SERIES, int $maxAgeMonths = self::MAX_AGE_MONTHS): array
+    public static function forChat(array $facts, int $perSeries = self::DEFAULT_PER_SERIES, int $maxAgeMonths = self::MAX_AGE_MONTHS): array
     {
         // The recency floor is anchored to the patient's most recent datum
         // (~the visit), not the wall clock, so this stays a pure function --
@@ -100,6 +112,67 @@ final class PromptFactWindow
         }
 
         return array_values($kept);
+    }
+
+    /**
+     * The NARRATIVE window: the synthesis is generated once (not re-sent per
+     * round), so it gets the last {@see self::MAX_NARRATIVE_VISITS} visits'
+     * worth of dense trend history -- a "visit" being a distinct clinical date
+     * on which a trend/reading/vital was recorded -- rather than the tighter
+     * 2-year chat window. Sparse decision-bearing facts are kept regardless,
+     * exactly as {@see self::forChat()} keeps them.
+     *
+     * @param list<Fact> $facts
+     * @return list<Fact>
+     */
+    public static function forNarrative(array $facts, int $maxVisits = self::MAX_NARRATIVE_VISITS): array
+    {
+        $cutoff = self::nthMostRecentVisitDate($facts, $maxVisits);
+
+        $kept = [];
+        foreach ($facts as $fact) {
+            if (!self::isDense($fact->kind)) {
+                $kept[] = $fact;
+                continue;
+            }
+            $date = $fact->clinicalDate?->format('Y-m-d');
+            if ($cutoff !== null && $date !== null && $date < $cutoff) {
+                continue;
+            }
+            $kept[] = $fact;
+        }
+
+        return array_values($kept);
+    }
+
+    /**
+     * The `Y-m-d` floor for the last `$maxVisits` visit dates (distinct dense
+     * clinical dates), or null when there are no more than that many -- then
+     * nothing is dropped.
+     *
+     * @param list<Fact> $facts
+     */
+    private static function nthMostRecentVisitDate(array $facts, int $maxVisits): ?string
+    {
+        $visitDates = [];
+        foreach ($facts as $fact) {
+            if (!self::isDense($fact->kind)) {
+                continue;
+            }
+            $date = $fact->clinicalDate?->format('Y-m-d');
+            if ($date !== null) {
+                $visitDates[$date] = true;
+            }
+        }
+
+        if (count($visitDates) <= $maxVisits) {
+            return null;
+        }
+
+        $dates = array_keys($visitDates);
+        rsort($dates); // most recent first
+
+        return $dates[$maxVisits - 1];
     }
 
     /**
