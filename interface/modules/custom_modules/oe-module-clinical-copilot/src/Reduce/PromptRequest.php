@@ -37,6 +37,13 @@ final readonly class PromptRequest
         public string $promptVersion,
         public float $temperature = 0.0,
         public int $maxOutputTokens = 24576,
+        // Gemini 2.5 "thinking" budget (tokens the model may spend reasoning
+        // before it emits the answer). generateContent is non-streaming, so the
+        // caller gets ZERO bytes until thinking finishes -- left dynamic, the
+        // model can burn 20-30s, which reads as a stall/timeout. null = leave
+        // the provider default (dynamic); a positive int caps it. See
+        // {@see PromptContext::$thinkingBudget}.
+        public ?int $thinkingBudget = null,
     ) {
         if ($this->systemInstructions === '') {
             throw new \DomainException('PromptRequest.systemInstructions must not be empty');

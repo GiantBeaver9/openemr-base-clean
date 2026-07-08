@@ -319,7 +319,11 @@ final class SynthesisReadPath
             $correlationId,
             $extraction->survivingFacts,
             $identifiers,
-            new PromptContext(self::DOC_TYPE, self::digestPromptVersion(), self::model()),
+            // The narrative is a one-shot, quality-critical synthesis that is
+            // meant to be pre-generated ahead of the visit (the warm path), not
+            // waited on interactively -- so it gets a generous thinking budget
+            // where chat gets a tight one.
+            new PromptContext(self::DOC_TYPE, self::digestPromptVersion(), self::model(), thinkingBudget: 8192),
         );
         $verificationContext = new VerificationContext(
             new SessionFactSet($pid, $extraction->survivingFacts),

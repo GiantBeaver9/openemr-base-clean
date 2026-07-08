@@ -33,17 +33,26 @@ trait GeminiGenerateContentContract
      */
     private static function buildGenerateContentBody(PromptRequest $req): array
     {
+        $generationConfig = [
+            'temperature' => $req->temperature,
+            'maxOutputTokens' => $req->maxOutputTokens,
+            'responseMimeType' => 'application/json',
+            'responseSchema' => $req->responseSchema,
+        ];
+
+        // Cap Gemini 2.5 "thinking" so a non-streaming generateContent does not
+        // stall 20-30s before returning anything. Omitted entirely when null so
+        // the provider default (dynamic) still applies.
+        if ($req->thinkingBudget !== null) {
+            $generationConfig['thinkingConfig'] = ['thinkingBudget' => $req->thinkingBudget];
+        }
+
         return [
             'systemInstruction' => ['parts' => [['text' => $req->systemInstructions]]],
             'contents' => [
                 ['role' => 'user', 'parts' => [['text' => $req->userContent]]],
             ],
-            'generationConfig' => [
-                'temperature' => $req->temperature,
-                'maxOutputTokens' => $req->maxOutputTokens,
-                'responseMimeType' => 'application/json',
-                'responseSchema' => $req->responseSchema,
-            ],
+            'generationConfig' => $generationConfig,
         ];
     }
 

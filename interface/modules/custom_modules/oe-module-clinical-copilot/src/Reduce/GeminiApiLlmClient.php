@@ -53,7 +53,11 @@ final class GeminiApiLlmClient implements LlmClientInterface
     use GeminiGenerateContentContract;
 
     private const API_VERSION = 'v1beta';
-    private const TIMEOUT_SECONDS = 20.0;
+    // Matches VertexLlmClient's 90s. A grounded generateContent over a real
+    // fact set, or a slow/flaky egress hop to generativelanguage.googleapis.com,
+    // routinely takes longer than 20s; a 20s cut surfaced to the physician as a
+    // spurious "temporarily unreachable" on calls that would otherwise land.
+    private const TIMEOUT_SECONDS = 90.0;
 
     private readonly ClientInterface $httpClient;
 
@@ -84,6 +88,10 @@ final class GeminiApiLlmClient implements LlmClientInterface
             $httpResponse = $this->httpClient->request('POST', $url, [
                 'headers' => [
                     'Content-Type' => 'application/json',
+                    // Key travels in a header, NOT the URL query string, so it
+                    // can never leak into a cURL error message, an exception
+                    // chain, a proxy/access log, or the surfaced degrade detail.
+                    'x-goog-api-key' => $this->apiKey,
                 ],
                 'json' => $body,
                 'timeout' => self::TIMEOUT_SECONDS,
@@ -127,11 +135,12 @@ final class GeminiApiLlmClient implements LlmClientInterface
 
     private function endpointUrl(string $model): string
     {
+        // No `?key=` here on purpose -- the key is sent via the x-goog-api-key
+        // request header (see generateStructured) so it never appears in a URL.
         return sprintf(
-            'https://generativelanguage.googleapis.com/%s/models/%s:generateContent?key=%s',
+            'https://generativelanguage.googleapis.com/%s/models/%s:generateContent',
             self::API_VERSION,
             $model,
-            rawurlencode($this->apiKey),
         );
     }
 }

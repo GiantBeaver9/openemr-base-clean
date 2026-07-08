@@ -41,6 +41,17 @@ trait GeminiChatContentContract
             'maxOutputTokens' => $req->prompt->maxOutputTokens,
         ];
 
+        // Cap Gemini 2.5 "thinking" so a non-streaming generateContent does not
+        // stall 20-30s before returning anything. Set here so BOTH the
+        // tool-offering round and the final-answer round inherit it; omitted
+        // when null so the provider default (dynamic) still applies. Chat runs
+        // a deliberately small budget (interactive, over already-extracted
+        // facts) -- the richer budget is reserved for the pre-generated
+        // narrative.
+        if ($req->prompt->thinkingBudget !== null) {
+            $generationConfig['thinkingConfig'] = ['thinkingBudget' => $req->prompt->thinkingBudget];
+        }
+
         $body = [
             'systemInstruction' => ['parts' => [['text' => $req->prompt->systemInstructions]]],
             'contents' => [

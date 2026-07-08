@@ -489,7 +489,10 @@ final class ChatController
             new Redactor(),
             "chat:{$session->id}",
             $identifiers,
-            new PromptContext(self::DOC_TYPE, self::PROMPT_VERSION, self::model()),
+            // Chat is interactive and answers over already-extracted facts, so
+            // it runs a deliberately small thinking budget -- speed over deep
+            // reasoning. The richer budget is reserved for the narrative.
+            new PromptContext(self::DOC_TYPE, self::PROMPT_VERSION, self::model(), thinkingBudget: 256),
             $onStatus,
         );
 

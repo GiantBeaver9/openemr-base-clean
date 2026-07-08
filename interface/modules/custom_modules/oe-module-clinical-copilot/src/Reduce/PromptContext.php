@@ -38,6 +38,15 @@ final readonly class PromptContext
         public string $model = 'gemini-2.5-pro',
         public float $temperature = 0.0,
         public int $maxOutputTokens = 24576,
+        // Cap on Gemini 2.5 "thinking" tokens. Because generateContent is
+        // non-streaming, unbounded (dynamic) thinking makes the model sit for
+        // 20-30s returning nothing, which surfaces as a stall/timeout. These
+        // are deterministic (temperature 0), schema-constrained, explicitly
+        // grounded extractions -- they need a little reasoning, not a lot -- so
+        // a modest cap keeps turns fast. 512 is valid for both -pro (min 128)
+        // and -flash (0-24576); raise it if the verification-degrade rate
+        // climbs. A future per-office control-panel knob (see PromptFactWindow).
+        public ?int $thinkingBudget = 512,
     ) {
         if ($this->docType === '') {
             throw new \DomainException('PromptContext.docType must not be empty');

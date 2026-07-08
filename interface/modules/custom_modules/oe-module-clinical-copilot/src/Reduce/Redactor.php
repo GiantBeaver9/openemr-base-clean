@@ -66,6 +66,7 @@ final class Redactor
             $request->promptVersion,
             $request->temperature,
             $request->maxOutputTokens,
+            $request->thinkingBudget,
         );
 
         return new RedactedPrompt($redactedRequest, new RedactionMap($sessionId, $tokenByField, $valueByToken));

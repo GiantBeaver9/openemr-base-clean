@@ -53,7 +53,11 @@ final class GeminiApiChatLlmClient implements ChatLlmClientInterface
     use GeminiChatContentContract;
 
     private const API_VERSION = 'v1beta';
-    private const TIMEOUT_SECONDS = 20.0;
+    // Matches VertexChatLlmClient's 90s: a chart-grounded chat turn, or a
+    // slow/flaky egress hop to generativelanguage.googleapis.com, routinely
+    // runs longer than 20s; a 20s cut surfaced as a spurious mid-turn network
+    // error on calls that would otherwise complete.
+    private const TIMEOUT_SECONDS = 90.0;
 
     private readonly ClientInterface $httpClient;
 
@@ -97,6 +101,10 @@ final class GeminiApiChatLlmClient implements ChatLlmClientInterface
             $httpResponse = $this->httpClient->request('POST', $url, [
                 'headers' => [
                     'Content-Type' => 'application/json',
+                    // Key travels in a header, NOT the URL query string, so it
+                    // can never leak into a cURL error message, an exception
+                    // chain, a proxy/access log, or the surfaced degrade detail.
+                    'x-goog-api-key' => $this->apiKey,
                 ],
                 'json' => $body,
                 'timeout' => self::TIMEOUT_SECONDS,
@@ -145,11 +153,12 @@ final class GeminiApiChatLlmClient implements ChatLlmClientInterface
 
     private function endpointUrl(string $model): string
     {
+        // No `?key=` here on purpose -- the key is sent via the x-goog-api-key
+        // request header (see converse) so it never appears in a URL.
         return sprintf(
-            'https://generativelanguage.googleapis.com/%s/models/%s:generateContent?key=%s',
+            'https://generativelanguage.googleapis.com/%s/models/%s:generateContent',
             self::API_VERSION,
             $model,
-            rawurlencode($this->apiKey),
         );
     }
 }

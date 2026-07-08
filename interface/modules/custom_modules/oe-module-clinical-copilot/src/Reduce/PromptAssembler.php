@@ -126,6 +126,7 @@ final class PromptAssembler
             $context->promptVersion,
             $context->temperature,
             $context->maxOutputTokens,
+            $context->thinkingBudget,
         );
     }
 

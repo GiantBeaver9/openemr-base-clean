@@ -150,6 +150,7 @@ final class ChatPromptAssembler
             $context->promptVersion,
             $context->temperature,
             $context->maxOutputTokens,
+            $context->thinkingBudget,
         );
 
         return new ChatLlmRequest($prompt, $toolsOffered);
