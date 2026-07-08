@@ -1,6 +1,6 @@
-# Railway upload filter — keep the deploy context tiny (flex image clones from GitHub).
+# Tiny upload for flex image (full OpenEMR clones from GitHub at runtime).
 *
 
 !railway.toml
-!docker/railway/Dockerfile
-!docker/railway/railway-entrypoint.sh
+!Dockerfile.railway
+!railway-entrypoint.sh

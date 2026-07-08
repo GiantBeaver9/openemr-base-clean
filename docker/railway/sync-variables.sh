@@ -1,14 +1,6 @@
 #!/usr/bin/env sh
-# Sync Railway service variables before deploy (run from GitLab CI with RAILWAY_TOKEN).
-#
-# Required GitLab CI variables:
-#   RAILWAY_TOKEN, RAILWAY_SERVICE_ID
-#
-# Optional GitLab CI variables:
-#   RAILWAY_MYSQL_SERVICE_NAME — MySQL service name in Railway (default: MySQL)
-#   RAILWAY_ENVIRONMENT        — Railway environment name when not default
-#   RAILWAY_OE_PASS            — OpenEMR admin password (OE_PASS)
-#   CLINICAL_COPILOT_GEMINI_API_KEY — Gemini API key (synthetic demo only)
+# Re-apply MySQL reference variables before deploy (GitLab CI + RAILWAY_TOKEN).
+# Does not overwrite OE_* or Gemini vars already set on the Railway service.
 set -eu
 
 SVC_ID="${SVC_ID:-${RAILWAY_SERVICE_ID:-}}"
@@ -29,11 +21,8 @@ if [ -n "${RAILWAY_ENVIRONMENT:-}" ]; then
     ENV_FLAG="--environment ${RAILWAY_ENVIRONMENT}"
 fi
 
-echo "Syncing Railway variables for service ${SVC_ID} (MySQL service: ${MYSQL_SERVICE})..."
+echo "Syncing MySQL reference variables for service ${SVC_ID} (db service: ${MYSQL_SERVICE})..."
 
-OE_PASS_VALUE="${RAILWAY_OE_PASS:-pass}"
-
-# Reference variables wire OpenEMR to the managed MySQL plugin.
 # shellcheck disable=SC2086
 railway variable set \
     "MYSQLHOST=\${{${MYSQL_SERVICE}.MYSQLHOST}}" \
@@ -41,12 +30,14 @@ railway variable set \
     "MYSQLUSER=\${{${MYSQL_SERVICE}.MYSQLUSER}}" \
     "MYSQLPASSWORD=\${{${MYSQL_SERVICE}.MYSQLPASSWORD}}" \
     "MYSQLDATABASE=\${{${MYSQL_SERVICE}.MYSQLDATABASE}}" \
-    "OE_USER=admin" \
-    "OE_PASS=${OE_PASS_VALUE}" \
-    "CLINICAL_COPILOT_GEMINI_API_MODEL=gemini-2.5-flash" \
     --service "${SVC_ID}" \
     ${ENV_FLAG} \
     --skip-deploys
+
+if [ -n "${RAILWAY_OE_PASS:-}" ]; then
+    # shellcheck disable=SC2086
+    railway variable set "OE_PASS=${RAILWAY_OE_PASS}" --service "${SVC_ID}" ${ENV_FLAG} --skip-deploys
+fi
 
 if [ -n "${CLINICAL_COPILOT_GEMINI_API_KEY:-}" ]; then
     # shellcheck disable=SC2086
@@ -55,8 +46,6 @@ if [ -n "${CLINICAL_COPILOT_GEMINI_API_KEY:-}" ]; then
         --service "${SVC_ID}" \
         ${ENV_FLAG} \
         --skip-deploys
-else
-    echo "CLINICAL_COPILOT_GEMINI_API_KEY not set in GitLab — leaving Gemini key unchanged on Railway."
 fi
 
 echo "Railway variables synced."

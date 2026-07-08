@@ -1,8 +1,5 @@
 #!/bin/sh
 # Map Railway MySQL plugin variables to OpenEMR flex expectations.
-#
-# Railway exposes MYSQLHOST, MYSQLPORT, MYSQLUSER, MYSQLPASSWORD, MYSQLDATABASE.
-# OpenEMR flex expects MYSQL_HOST, MYSQL_PORT, MYSQL_ROOT_PASS, etc.
 set -eu
 
 if [ -z "${MYSQL_HOST:-}" ] && [ -n "${MYSQLHOST:-}" ]; then
@@ -29,7 +26,6 @@ if [ -z "${MYSQL_ROOT_PASS:-}" ]; then
     fi
 fi
 
-# Optional app-level credentials (OpenEMR creates this user during install).
 if [ -z "${MYSQL_USER:-}" ] && [ -n "${OPENEMR_MYSQL_USER:-}" ]; then
     export MYSQL_USER="${OPENEMR_MYSQL_USER}"
 fi
@@ -46,7 +42,6 @@ if [ -z "${MYSQL_HOST:-}" ] || [ -z "${MYSQL_ROOT_PASS:-}" ]; then
     echo "  MYSQLUSER=\${{MySQL.MYSQLUSER}}" >&2
     echo "  MYSQLPASSWORD=\${{MySQL.MYSQLPASSWORD}}" >&2
     echo "  MYSQLDATABASE=\${{MySQL.MYSQLDATABASE}}" >&2
-    echo "Or set OpenEMR-native names: MYSQL_HOST, MYSQL_ROOT_PASS, MYSQL_PORT." >&2
     exit 1
 fi
 
