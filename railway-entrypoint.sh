@@ -34,6 +34,11 @@ if [ -z "${MYSQL_PASS:-}" ] && [ -n "${OPENEMR_MYSQL_PASS:-}" ]; then
     export MYSQL_PASS="${OPENEMR_MYSQL_PASS}"
 fi
 
+# OpenEMR installer defaults; Railway MySQL plugin does not create this user.
+export MYSQL_USER="${MYSQL_USER:-openemr}"
+export MYSQL_PASS="${MYSQL_PASS:-pass}"
+export MYSQL_DATABASE="${MYSQL_DATABASE:-railway}"
+
 if [ -z "${MYSQL_HOST:-}" ] || [ -z "${MYSQL_ROOT_PASS:-}" ]; then
     echo "Railway OpenEMR: missing database connection variables." >&2
     echo "Add references on this service (replace MySQL with your DB service name):" >&2
@@ -48,6 +53,7 @@ fi
 rm -rf /openemr /openemr-base-clean
 
 /usr/local/bin/railway-flex-bootstrap.sh
+/usr/local/bin/railway-preinstall-db.sh
 
 cd /var/www/localhost/htdocs
 exec ./openemr.sh

@@ -4,11 +4,13 @@
 FROM openemr/openemr:flex
 
 ENV FLEX_REPOSITORY=https://github.com/GiantBeaver9/openemr-base-clean.git \
-    FLEX_REPOSITORY_BRANCH=main
+    FLEX_REPOSITORY_BRANCH=main \
+    NODE_OPTIONS=--max-old-space-size=4096
 
-COPY patch-flex-openemr.sh railway-flex-bootstrap.sh railway-entrypoint.sh /tmp/railway/
-RUN chmod 755 /tmp/railway/patch-flex-openemr.sh /tmp/railway/railway-flex-bootstrap.sh /tmp/railway/railway-entrypoint.sh \
+COPY patch-flex-openemr.sh railway-flex-bootstrap.sh railway-preinstall-db.sh railway-entrypoint.sh /tmp/railway/
+RUN chmod 755 /tmp/railway/patch-flex-openemr.sh /tmp/railway/railway-flex-bootstrap.sh /tmp/railway/railway-preinstall-db.sh /tmp/railway/railway-entrypoint.sh \
     && cp /tmp/railway/railway-flex-bootstrap.sh /usr/local/bin/railway-flex-bootstrap.sh \
+    && cp /tmp/railway/railway-preinstall-db.sh /usr/local/bin/railway-preinstall-db.sh \
     && /tmp/railway/patch-flex-openemr.sh \
     && chmod 755 /var/www/localhost/htdocs/openemr.sh \
     && cp /tmp/railway/railway-entrypoint.sh /usr/local/bin/railway-entrypoint.sh \
