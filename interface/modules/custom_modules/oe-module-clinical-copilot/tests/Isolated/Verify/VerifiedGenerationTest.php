@@ -106,6 +106,12 @@ final class VerifiedGenerationTest extends TestCase
         self::assertSame(1, $result->attempts);
         self::assertSame([], $result->verdicts);
         self::assertFalse($result->frozen);
+        // The return value must carry the rich cause (temporary debug aid): the
+        // low-level reason category and the underlying provider/ADC message are
+        // both surfaced, not just a generic "unavailable" banner.
+        self::assertStringContainsString('no_credentials', (string)$result->llmUnavailableDetail);
+        self::assertStringContainsString('no ADC in this test environment', (string)$result->llmUnavailableDetail);
+        self::assertStringContainsString('no_credentials', (string)$result->degradedMessage);
     }
 
     public function testAWrongPatientCitationFreezesOnTheFirstAttemptWithNoRetry(): void

@@ -34,12 +34,16 @@ final readonly class AttemptOutcome
         public ?Sev1Signal $sev1Signal,
         public ?RedactionMap $redactionMap,
         public ReduceUsage $usage,
+        // Rich developer-facing cause when kind is LlmUnavailable (see
+        // LlmUnavailableException::detail()), carried through so the read path
+        // can record it on the trace span and the degradation return value.
+        public ?string $llmUnavailableDetail = null,
     ) {
     }
 
-    public static function llmUnavailable(): self
+    public static function llmUnavailable(?string $detail = null): self
     {
-        return new self(AttemptOutcomeKind::LlmUnavailable, [], null, null, null, ReduceUsage::none());
+        return new self(AttemptOutcomeKind::LlmUnavailable, [], null, null, null, ReduceUsage::none(), $detail);
     }
 
     /**

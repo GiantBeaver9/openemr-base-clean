@@ -33,6 +33,10 @@ final readonly class ReduceResult
         public ?int $latencyMs,
         public ?RedactionMap $redactionMap,
         public ?string $unavailableReason,
+        // Rich, developer-facing description of an unavailable failure
+        // (reason category + provider/transport detail) -- see
+        // {@see LlmUnavailableException::detail()}. Null on the available path.
+        public ?string $unavailableDetail = null,
     ) {
     }
 
@@ -49,10 +53,11 @@ final readonly class ReduceResult
 
     /**
      * @param string $reason one of {@see LlmUnavailableException}'s REASON_* constants
+     * @param string|null $detail rich developer-facing cause, for logs/traces/debug return value
      */
-    public static function unavailable(string $reason): self
+    public static function unavailable(string $reason, ?string $detail = null): self
     {
-        return new self(false, null, null, null, null, null, null, $reason);
+        return new self(false, null, null, null, null, null, null, $reason, $detail);
     }
 
     public function isAvailable(): bool

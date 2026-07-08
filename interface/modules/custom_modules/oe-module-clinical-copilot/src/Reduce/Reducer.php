@@ -14,6 +14,8 @@ declare(strict_types=1);
 
 namespace OpenEMR\Modules\ClinicalCopilot\Reduce;
 
+use OpenEMR\Common\Logging\SystemLogger;
+
 /**
  * Deliberately thin and deliberately NOT a gate (ARCHITECTURE_COMPLETE.md,
  * U7 row: "Output-schema validation, the fail-closed retry, and conflict
@@ -37,6 +39,7 @@ final class Reducer
         private readonly LlmClientInterface $llmClient,
         private readonly PromptAssembler $promptAssembler,
         private readonly Redactor $redactor,
+        private readonly SystemLogger $logger = new SystemLogger(),
     ) {
     }
 
@@ -56,8 +59,32 @@ final class Reducer
         } catch (LlmUnavailableException $e) {
             // I6: surfaced as an explicit, checkable degradation signal --
             // never caught-log-continue, never a fabricated empty success.
-            return ReduceResult::unavailable($e->reason());
+            // Log the REAL cause (category + provider/transport detail) so an
+            // operator can tell a missing key from a dead network without
+            // guessing; the caller still gets the honest unavailable signal.
+            $this->logger->error('Clinical Co-Pilot reduce: LLM call failed', [
+                'reason' => $e->reason(),
+                'detail' => $e->detail(),
+                'session' => $request->sessionId,
+                'correlation_id' => $request->correlationId,
+                'exception' => $e,
+            ]);
+
+            return ReduceResult::unavailable($e->reason(), $e->detail());
         }
+
+        // Log the raw model response even though it has NOT been verified yet:
+        // "at least get a response we log, even if it does not pass QA." The
+        // verifier gate runs downstream in VerifiedGeneration; this is the one
+        // record of exactly what the model returned for this attempt.
+        $this->logger->info('Clinical Co-Pilot reduce: model response received (pre-verification)', [
+            'session' => $request->sessionId,
+            'correlation_id' => $request->correlationId,
+            'model' => $response->modelVersion,
+            'tokens_in' => $response->tokensIn,
+            'tokens_out' => $response->tokensOut,
+            'raw_claims_json' => $response->rawJson,
+        ]);
 
         return ReduceResult::generated(
             $response->rawJson,

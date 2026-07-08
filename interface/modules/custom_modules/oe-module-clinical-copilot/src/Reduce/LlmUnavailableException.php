@@ -75,6 +75,31 @@ final class LlmUnavailableException extends \RuntimeException
     }
 
     /**
+     * A rich, developer-facing description of what actually went wrong: the
+     * machine reason category, this exception's own message, and the
+     * underlying provider/transport message (Guzzle/cURL/HTTP-body or ADC
+     * error). This is NOT physician-safe copy -- it is threaded into the
+     * degradation return value ONLY as a temporary debugging aid while the
+     * serving path is being brought up, so an operator can see "no key" vs
+     * "DNS failure" vs "HTTP 403 API_KEY_INVALID" straight from the response.
+     *
+     * TODO(pre-prod): stop surfacing this in the user-facing return value --
+     * keep it to logs/traces only (it can contain internal hostnames and
+     * provider error bodies). See ARCHITECTURE.md §4 / the "never expose
+     * getMessage() to users" rule.
+     */
+    public function detail(): string
+    {
+        $detail = $this->reason . ': ' . $this->getMessage();
+        $previous = $this->getPrevious();
+        if ($previous !== null && trim($previous->getMessage()) !== '') {
+            $detail .= ' -- ' . $previous->getMessage();
+        }
+
+        return $detail;
+    }
+
+    /**
      * Short, physician-safe copy for chat/synthesis degrade banners.
      */
     public function degradedMessage(): string

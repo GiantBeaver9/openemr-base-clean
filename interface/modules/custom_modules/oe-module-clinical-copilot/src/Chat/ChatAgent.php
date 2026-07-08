@@ -88,7 +88,11 @@ final class ChatAgent
         try {
             $loopResult = $this->agentLoop->run($sessionFacts, $narrativeClaims, $conversationTranscript, $userQuestion);
         } catch (LlmUnavailableException $e) {
-            return ChatAnswer::degradedLlmUnavailable($sessionFacts, $e->reason(), [], $e->degradedMessage());
+            // TEMPORARY debug aid: surface the rich cause in the return value
+            // (not just the physician-safe banner) so "why isn't it answering"
+            // is visible straight from the turn response. Revert to
+            // $e->degradedMessage() before any real-PHI deployment.
+            return ChatAnswer::degradedLlmUnavailable($sessionFacts, $e->reason(), [], $e->detail());
         }
 
         $this->emitStatus('verifying…');
@@ -125,7 +129,9 @@ final class ChatAgent
                 $findings,
             );
         } catch (LlmUnavailableException $e) {
-            return ChatAnswer::degradedLlmUnavailable($loopResult->accumulatedFacts, $e->reason(), $loopResult->toolCallLog, $e->degradedMessage());
+            // TEMPORARY debug aid (see the first catch above): rich cause in the
+            // return value; revert to $e->degradedMessage() before real-PHI.
+            return ChatAnswer::degradedLlmUnavailable($loopResult->accumulatedFacts, $e->reason(), $loopResult->toolCallLog, $e->detail());
         }
 
         // The retry makes no new tool calls, so carry the first attempt's tool

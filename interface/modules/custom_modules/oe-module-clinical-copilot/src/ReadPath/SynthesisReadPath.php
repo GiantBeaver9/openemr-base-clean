@@ -341,6 +341,13 @@ final class SynthesisReadPath
             },
             $pid,
             $userId,
+            // Surface WHY a degrade happened, not just that it did: the
+            // LLM-unavailable cause (missing key vs dead network vs provider
+            // rejection, with the provider/transport detail) lands in
+            // mod_copilot_trace.error_detail so it is queryable without
+            // trawling logs. Null on the happy path.
+            errorClass: $result->llmUnavailableDetail !== null ? 'LlmUnavailable' : null,
+            errorDetail: $result->llmUnavailableDetail,
             model: $result->usage->modelVersion,
             tokensIn: $result->usage->tokensIn,
             tokensOut: $result->usage->tokensOut,

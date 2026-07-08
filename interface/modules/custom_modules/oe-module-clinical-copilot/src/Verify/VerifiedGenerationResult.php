@@ -65,6 +65,14 @@ final readonly class VerifiedGenerationResult
         public ?string $degradedMessage,
         public ?RedactionMap $redactionMap,
         public ReduceUsage $usage,
+        // Rich developer-facing cause behind an `llm_unavailable` degrade
+        // (reason category + provider/transport detail -- see
+        // {@see \OpenEMR\Modules\ClinicalCopilot\Reduce\LlmUnavailableException::detail()}).
+        // `degradedReason` above stays the high-level 'llm_unavailable' bucket;
+        // this carries the "why" onto the llm_reduce trace span (and, as a
+        // temporary debugging aid, into `degradedMessage`) so an operator can
+        // tell a missing key from a dead network without reading logs.
+        public ?string $llmUnavailableDetail = null,
     ) {
     }
 
@@ -89,7 +97,7 @@ final readonly class VerifiedGenerationResult
         );
     }
 
-    public static function degradedLlmUnavailable(int $attempts): self
+    public static function degradedLlmUnavailable(int $attempts, ?string $llmUnavailableDetail = null): self
     {
         return new self(
             VerifyStatus::Degraded,
@@ -100,9 +108,16 @@ final readonly class VerifiedGenerationResult
             false,
             null,
             self::REASON_LLM_UNAVAILABLE,
-            'narrative unavailable',
+            // TEMPORARY debugging aid (see the constructor field docblock): the
+            // rich cause is appended to the physician-facing message so the
+            // return value itself explains what happened. Revert to the plain
+            // 'narrative unavailable' before any real-PHI deployment.
+            $llmUnavailableDetail !== null
+                ? 'narrative unavailable -- ' . $llmUnavailableDetail
+                : 'narrative unavailable',
             null,
             ReduceUsage::none(),
+            $llmUnavailableDetail,
         );
     }
 

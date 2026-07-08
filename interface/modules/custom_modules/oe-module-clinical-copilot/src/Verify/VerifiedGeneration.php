@@ -93,7 +93,7 @@ final class VerifiedGeneration
         $reduceResult = $this->reducer->reduce($reduceRequest);
 
         if (!$reduceResult->isAvailable()) {
-            return AttemptOutcome::llmUnavailable();
+            return AttemptOutcome::llmUnavailable($reduceResult->unavailableDetail);
         }
 
         $usage = new ReduceUsage(
@@ -138,7 +138,7 @@ final class VerifiedGeneration
     private static function resolveTerminal(AttemptOutcome $outcome, int $attemptNumber): ?VerifiedGenerationResult
     {
         return match ($outcome->kind) {
-            AttemptOutcomeKind::LlmUnavailable => VerifiedGenerationResult::degradedLlmUnavailable($attemptNumber),
+            AttemptOutcomeKind::LlmUnavailable => VerifiedGenerationResult::degradedLlmUnavailable($attemptNumber, $outcome->llmUnavailableDetail),
             AttemptOutcomeKind::Sev1 => VerifiedGenerationResult::frozen(
                 $outcome->verdicts,
                 $attemptNumber,
