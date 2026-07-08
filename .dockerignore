@@ -3,3 +3,5 @@
 
 !Dockerfile.railway
 !railway-entrypoint.sh
+!railway-flex-bootstrap.sh
+!patch-flex-openemr.sh
