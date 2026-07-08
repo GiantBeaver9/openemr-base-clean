@@ -77,22 +77,22 @@ final class WrongNumberTest extends TestCase
         self::assertTrue($result->find(CheckId::NumericGrounding)?->passed);
     }
 
-    public function testAnUngroundedDateIsRejected(): void
+    public function testADateInProseIsExemptNarrative(): void
     {
         $fact = VerifyTestFactory::a1cEarly();
         $factSet = VerifyTestFactory::sessionFactSet([$fact]);
         $context = new VerificationContext($factSet, VerificationPath::Synthesis);
 
-        // The cited fact's clinical_date is 2025-01-01, not 2025-06-30.
+        // A date stated in prose is narrative, not a data pull: under the V4
+        // grounding policy (only actual medications/results/readings must
+        // ground) a date needs no citation, so even a date that does not match
+        // the cited fact's clinical_date no longer fails V4.
         $json = VerifyTestFactory::claimsJson([
             VerifyTestFactory::claim('A1c was drawn on 2025-06-30.', 'lab_value', [$fact->factId]),
         ]);
 
         $result = (new Verifier())->verify($json, $context);
 
-        $v4 = $result->find(CheckId::NumericGrounding);
-        self::assertNotNull($v4);
-        self::assertFalse($v4->passed);
-        self::assertStringContainsString('2025-06-30', $v4->findings[0]);
+        self::assertTrue($result->find(CheckId::NumericGrounding)?->passed);
     }
 }

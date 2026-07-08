@@ -56,6 +56,13 @@ final class PromptAssembler
           number belongs in your narrative, it already exists as a
           `derived_*` fact below; cite that fact. If it does not exist, do
           not state the number at all.
+        - Every actual clinical VALUE you state -- a lab result, a reading, a
+          count -- must appear in that claim's `numeric_values` and cite the
+          fact it came from. Narrative expressions are not data values and
+          need no citation: dates, how often or how long ago something
+          happened ("every 3 months", "over the past year"), a disease type
+          or stage ("type 2"), and a medication dose ("1000 mg", carried by
+          the cited prescription).
         - Every clinical claim (a lab value, a trend, a medication event, a
           vital, an overdue or pending item, an exclusion, a conflict) MUST
           cite the fact_id(s) it is grounded in. Only a greeting, a refusal,

@@ -123,11 +123,46 @@ trait GeminiChatContentContract
         foreach ($parts as $part) {
             $text = $part['text'] ?? null;
             if (is_string($text) && $text !== '') {
-                return $text;
+                return self::stripJsonCodeFence($text);
             }
         }
 
         throw LlmUnavailableException::providerError(new \RuntimeException('Gemini candidate contained neither a functionCall nor a text part'));
+    }
+
+    /**
+     * Provider-response normalization, NOT a verifier change: on a
+     * tool-offering round Gemini cannot be given a `responseSchema` (the API
+     * forbids `responseSchema` alongside `tools`), so when the model answers
+     * directly in such a round it is only prompt-instructed to emit "ONLY a
+     * JSON array ... no markdown fencing" -- an instruction it commonly
+     * violates by wrapping the array in a ```json ... ``` fence. That wrapper
+     * is a rendering artifact, not claim content, so it is stripped here
+     * before the text ever becomes {@see ChatLlmResponse::$finalClaimsJson};
+     * V1 ({@see \OpenEMR\Modules\ClinicalCopilot\Verify\ClaimSchema}) stays
+     * unchanged and still rejects genuine free prose. Only a fence enclosing
+     * the ENTIRE trimmed payload is removed; text without a wrapping fence is
+     * returned verbatim.
+     */
+    private static function stripJsonCodeFence(string $text): string
+    {
+        $trimmed = trim($text);
+        if (!str_starts_with($trimmed, '```') || !str_ends_with($trimmed, '```')) {
+            return $text;
+        }
+
+        // Drop the opening fence line (``` optionally followed by a language
+        // tag such as `json`) and the closing fence line.
+        $inner = preg_replace('/^```[A-Za-z0-9_-]*[ \t]*\r?\n?/', '', $trimmed);
+        if ($inner === null) {
+            return $text;
+        }
+        $inner = preg_replace('/\r?\n?```$/', '', $inner);
+        if ($inner === null) {
+            return $text;
+        }
+
+        return trim($inner);
     }
 
     /**

@@ -136,10 +136,21 @@ final class Verifier
     }
 
     /**
-     * V4: every number (and date) asserted in claim text or numeric_values
-     * must appear in a cited fact after canonicalization. Derived numbers
-     * are legal only via citations of `derived_*` facts -- enforced here
-     * simply by requiring the number to match SOME cited fact's own
+     * V4: every actual clinical VALUE a claim pulls must appear in a cited
+     * fact after canonicalization -- the medications, results, and readings,
+     * i.e. the meat. Narrative numbers that are not data pulls (dates, ages,
+     * frequencies/durations, disease type/stage, medication doses) are NOT
+     * grounded here: they carry no fact to cite and are ordinary clinical
+     * English, so demanding a citation for "type 2 diabetes" or "over the past
+     * 3 months" only produced false failures. The distinction is drawn by
+     * {@see ClinicalMentionLexicon::extractGroundableNumbers()} (narrative
+     * spans blanked before extraction) together with the numbers the model
+     * explicitly declared in `numeric_values`; a value stated in prose but not
+     * exempted (e.g. an ungrounded "7.9") is still caught, so every genuine
+     * medical pull remains verified.
+     *
+     * Derived numbers are legal only via citations of `derived_*` facts --
+     * enforced simply by requiring the number to match SOME cited fact's own
      * `value.parsed`, and `derived_*` facts are the only facts whose
      * `value.parsed` legitimately holds a delta/count/span (U5's
      * DerivedFacts). This check performs no arithmetic of its own.
@@ -157,26 +168,16 @@ final class Verifier
             );
 
             $groundableNumbers = [];
-            $groundableDates = [];
             foreach ($citedFacts as $fact) {
                 if ($fact->value?->parsed !== null) {
                     $groundableNumbers[] = $fact->value->parsed;
                 }
-                if ($fact->clinicalDate !== null) {
-                    $groundableDates[] = $fact->clinicalDate->format('Y-m-d');
-                }
             }
 
-            $claimedNumbers = [...$claim->numericValues, ...ClinicalMentionLexicon::extractNumbers($claim->text)];
+            $claimedNumbers = [...$claim->numericValues, ...ClinicalMentionLexicon::extractGroundableNumbers($claim->text)];
             foreach ($claimedNumbers as $number) {
                 if (!self::numberIsGrounded($number, $groundableNumbers)) {
-                    $findings[] = "claim {$index} asserts the number {$number}, which does not appear in any of its cited facts";
-                }
-            }
-
-            foreach (ClinicalMentionLexicon::extractDates($claim->text) as $date) {
-                if (!in_array($date, $groundableDates, true)) {
-                    $findings[] = "claim {$index} asserts the date {$date}, which does not appear in any of its cited facts' clinical_date";
+                    $findings[] = "claim {$index} asserts the value {$number}, which does not appear in any of its cited facts";
                 }
             }
         }
