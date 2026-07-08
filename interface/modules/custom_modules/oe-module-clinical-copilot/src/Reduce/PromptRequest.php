@@ -36,7 +36,7 @@ final readonly class PromptRequest
         public string $model,
         public string $promptVersion,
         public float $temperature = 0.0,
-        public int $maxOutputTokens = 8192,
+        public int $maxOutputTokens = 24576,
     ) {
         if ($this->systemInstructions === '') {
             throw new \DomainException('PromptRequest.systemInstructions must not be empty');

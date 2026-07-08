@@ -20,6 +20,15 @@ namespace OpenEMR\Modules\ClinicalCopilot\Reduce;
  * {@see Claim::jsonSchema()} so every affected doc regenerates (E5).
  * `model` is the pinned Gemini version string (T18) -- also folded into
  * `promptVersion` by the caller building it, not by this class.
+ *
+ * `maxOutputTokens` caps *total* generation, and on Gemini 2.5 (`-pro` and
+ * `-flash` alike) that budget includes the model's internal reasoning
+ * ("thinking") tokens, which are emitted before the visible claim JSON. At the
+ * former 8192 ceiling a long reasoning pass could exhaust the budget and
+ * truncate the JSON mid-array, failing the V1 schema gate on every affected
+ * turn. The ceiling is a cap, not a target (only tokens actually produced are
+ * billed), so it is set generously to guarantee headroom for reasoning + a
+ * multi-claim array; well within Gemini 2.5's 65536 output limit.
  */
 final readonly class PromptContext
 {
@@ -28,7 +37,7 @@ final readonly class PromptContext
         public string $promptVersion,
         public string $model = 'gemini-2.5-pro',
         public float $temperature = 0.0,
-        public int $maxOutputTokens = 8192,
+        public int $maxOutputTokens = 24576,
     ) {
         if ($this->docType === '') {
             throw new \DomainException('PromptContext.docType must not be empty');

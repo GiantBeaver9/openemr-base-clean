@@ -35,13 +35,16 @@ final class LlmRuntimeConfigTest extends TestCase
         self::assertSame('gemini-2.5-pro', LlmRuntimeConfig::reduceAndChatModel());
     }
 
-    public function testApiKeyDefaultsToFlash(): void
+    public function testApiKeyDefaultsToPro(): void
     {
         putenv('CLINICAL_COPILOT_GCP_PROJECT_ID');
         putenv('CLINICAL_COPILOT_GEMINI_API_KEY=test-key');
         putenv('CLINICAL_COPILOT_GEMINI_API_MODEL');
 
-        self::assertSame('gemini-2.5-flash', LlmRuntimeConfig::reduceAndChatModel());
+        // Reduce/chat output must satisfy the V1-V6 verifier; only the Pro
+        // tier reliably does, so the API-key dev path defaults to Pro too
+        // (Flash remains opt-in via CLINICAL_COPILOT_GEMINI_API_MODEL).
+        self::assertSame('gemini-2.5-pro', LlmRuntimeConfig::reduceAndChatModel());
     }
 
     public function testApiKeyModelOverride(): void

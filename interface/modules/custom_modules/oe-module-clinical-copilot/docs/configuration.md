@@ -44,7 +44,7 @@ anywhere else, and none are ever logged.
 | `CLINICAL_COPILOT_GCP_LOCATION` | Vertex (production, optional) | Vertex AI region. Defaults to `us-central1` if unset. Only consulted when a project id is set. | `CLINICAL_COPILOT_GCP_LOCATION=us-east4` |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Vertex (production) | Standard ADC variable (`google/auth`, not module-specific) — path to a service-account JSON key file. Required by Vertex's ADC resolution; the module never reads this itself. | `GOOGLE_APPLICATION_CREDENTIALS=/etc/openemr/gcp-copilot-sa.json` |
 | `CLINICAL_COPILOT_GEMINI_API_KEY` | Gemini API key (dev/test) | Google AI Studio API key. Setting this (with no Vertex project id set) turns the dev/test fast-path on. **Synthetic-data-only — see warning above.** | `CLINICAL_COPILOT_GEMINI_API_KEY=AIza...` |
-| `CLINICAL_COPILOT_GEMINI_API_MODEL` | Gemini API key (dev/test, optional) | Model id for synthesis + chat when using the API-key path. Defaults to `gemini-2.5-flash` (free-tier friendly). Vertex keeps `gemini-2.5-pro` regardless. Folded into `prompt_version` via {@see \OpenEMR\Modules\ClinicalCopilot\Config\LlmRuntimeConfig}. | `CLINICAL_COPILOT_GEMINI_API_MODEL=gemini-2.5-flash` |
+| `CLINICAL_COPILOT_GEMINI_API_MODEL` | Gemini API key (dev/test, optional) | Model id for synthesis + chat when using the API-key path. Defaults to `gemini-2.5-pro` (the tier that reliably passes the V1-V6 verifier; Flash degraded nearly every turn). Vertex keeps `gemini-2.5-pro` regardless. Set this to `gemini-2.5-flash` only to trade verification pass-rate for free-tier cost. Folded into `prompt_version` via {@see \OpenEMR\Modules\ClinicalCopilot\Config\LlmRuntimeConfig}. | `CLINICAL_COPILOT_GEMINI_API_MODEL=gemini-2.5-flash` |
 | `CLINICAL_COPILOT_WORKER_LLM_ENABLED` | Background worker (optional) | When `true`, the `clinical_copilot_worker` cron may call Gemini for pre-visit warm, QA sweep, and QA-driven reruns. **Defaults to off** — narration runs on user-facing doc/chat/regenerate only. Set `true` only when you want headless pre-warm in production. | `CLINICAL_COPILOT_WORKER_LLM_ENABLED=true` |
 
 None of these are set in this environment by default — the module ships
@@ -56,8 +56,9 @@ configured to degrade cleanly (see below).
 and chat pass to the LLM:
 
 - **Vertex** (`CLINICAL_COPILOT_GCP_PROJECT_ID` set) → `gemini-2.5-pro`
-- **API key** → `gemini-2.5-flash` by default, overridable via
-  `CLINICAL_COPILOT_GEMINI_API_MODEL`
+- **API key** → `gemini-2.5-pro` by default (only the Pro tier reliably
+  produces verifier-passing claims; Flash degraded nearly every turn),
+  overridable to Flash for cost via `CLINICAL_COPILOT_GEMINI_API_MODEL`
 
 The chosen model is folded into `prompt_version` (a digest input), so changing
 `CLINICAL_COPILOT_GEMINI_API_MODEL` invalidates cached docs the same way a
@@ -112,7 +113,9 @@ export GOOGLE_APPLICATION_CREDENTIALS="/etc/openemr/gcp-copilot-sa.json"
 
 ```bash
 export CLINICAL_COPILOT_GEMINI_API_KEY="AIza...your-ai-studio-key..."
-export CLINICAL_COPILOT_GEMINI_API_MODEL="gemini-2.5-flash"
+# Model defaults to gemini-2.5-pro (the tier that passes the V1-V6 verifier).
+# Uncomment only to trade verification pass-rate for free-tier cost:
+# export CLINICAL_COPILOT_GEMINI_API_MODEL="gemini-2.5-flash"
 ```
 
 **Default (nothing set — the default in this environment):**
