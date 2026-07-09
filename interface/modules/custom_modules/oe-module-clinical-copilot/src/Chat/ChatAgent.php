@@ -103,7 +103,10 @@ final class ChatAgent
                 'exception' => $e,
             ]);
 
-            return ChatAnswer::degradedLlmUnavailable($sessionFacts, $e->reason(), [], $e->degradedMessage());
+            // TEMP (QA): append the machine reason (a safe category -- no PHI /
+            // no provider body) so the cause is visible in the chat without
+            // log-diving. Remove once the failure mode is understood.
+            return ChatAnswer::degradedLlmUnavailable($sessionFacts, $e->reason(), [], $e->degradedMessage() . ' [cause: ' . $e->reason() . ']');
         }
 
         $this->emitStatus('verifying…');
@@ -160,7 +163,7 @@ final class ChatAgent
                 'exception' => $e,
             ]);
 
-            return ChatAnswer::degradedLlmUnavailable($loopResult->accumulatedFacts, $e->reason(), $loopResult->toolCallLog, $e->degradedMessage());
+            return ChatAnswer::degradedLlmUnavailable($loopResult->accumulatedFacts, $e->reason(), $loopResult->toolCallLog, $e->degradedMessage() . ' [cause: ' . $e->reason() . ']');
         }
 
         // The retry makes no new tool calls, so carry the first attempt's tool
