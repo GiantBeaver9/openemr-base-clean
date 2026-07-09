@@ -194,13 +194,12 @@ final class DocController
 
         $result = $regenerate
             ? $this->readPath->regenerate($pid, $userId, correlationId: $correlationId, onStatus: $onStatus)
-            // View (page load) is on-demand only: never block the page on a
-            // synchronous LLM synthesis. On a cache miss this returns a
-            // "not generated yet" result, so the template shows the Generate
-            // narrative button (needs_narrative_generation); generation runs
-            // only when the physician clicks it (the regenerate action). The
-            // warm worker (Worker.php) still pre-generates ahead of visits.
-            : $this->readPath->read($pid, $userId, allowLlmOnMiss: false);
+            // View (page load) generates the brief on a cache miss. Now that the
+            // narrative is a short 3-5 claim brief on a reduced thinking budget,
+            // this is fast and cheap enough to run on load (it was briefly
+            // deferred only because the old long narrative blocked the page for
+            // ~90s). The Generate/Regenerate button still forces a fresh attempt.
+            : $this->readPath->read($pid, $userId);
 
         $this->auditView($pid, $result->correlationId, $regenerate);
 

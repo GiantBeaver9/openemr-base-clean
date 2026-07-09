@@ -323,11 +323,11 @@ final class SynthesisReadPath
             $correlationId,
             $extraction->survivingFacts,
             $identifiers,
-            // The narrative is a one-shot, quality-critical synthesis that is
-            // meant to be pre-generated ahead of the visit (the warm path), not
-            // waited on interactively -- so it gets a generous thinking budget
-            // where chat gets a tight one.
-            new PromptContext(self::DOC_TYPE, self::digestPromptVersion(), self::model(), thinkingBudget: 8192),
+            // The narrative is now a short 3-5 claim brief generated on page
+            // load, so the thinking budget is cut 8192 -> 2048: enough to reason
+            // over the facts, small enough to keep the on-load synthesis fast
+            // and cheap (it no longer needs the deep budget a long summary did).
+            new PromptContext(self::DOC_TYPE, self::digestPromptVersion(), self::model(), thinkingBudget: 2048),
         );
         $verificationContext = new VerificationContext(
             new SessionFactSet($pid, $extraction->survivingFacts),
