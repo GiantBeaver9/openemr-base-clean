@@ -396,101 +396,125 @@
 
         {{ _self.section_divider() }}
         <section class="ccp-section">
-        <div class="row ccp-main-layout">
-            <div class="col-lg-8 ccp-primary-column">
-                {% if not doc.capability_crash %}
-                <div class="card mb-3">
-                    <div class="card-header d-flex justify-content-between align-items-center flex-wrap">
-                        <strong>{{ "Priority Narrative"|xlt }}</strong>
-                        {{ _self.narrative_action_form(doc_url, needs_narrative_generation) }}
-                    </div>
-                    <div class="card-body" id="ccpNarrativeBody">
-                        <div id="ccpNarrativeStatus" class="text-muted small mb-2" style="display:none;"></div>
-                        <div id="ccpNarrativeContent">
-                        {% if view_model.narrative is not empty %}
-                            {% for claim in view_model.narrative %}
-                                <div class="ccp-narrative-claim">
-                                    {% if 'conflict' in claim.flags %}<span class="badge badge-warning">{{ "Conflict"|xlt }}</span>{% endif %}
-                                    {{ claim.text|text }}
-                                    {{ _self.citation_refs(claim.citations) }}
-                                    {% if visit_label %}
-                                        <span class="ccp-pipe" aria-hidden="true">|</span>
-                                        <span class="text-muted small">{{ visit_label|text }}</span>
-                                    {% endif %}
-                                </div>
-                            {% endfor %}
-                        {% else %}
-                            <p class="text-muted mb-0">{{ "No narrative yet. Use Generate narrative to run the model over the chart facts."|xlt }}</p>
-                        {% endif %}
+        <div class="ccp-main-layout">
+            {% set ccpNarrativeAvailable = not doc.capability_crash %}
+            {# Narrative (default) vs Chart Facts as top-level tabs. On a
+               capability crash there is no narrative, so only the Chart Facts
+               tab is shown and it is the active one. #}
+            <ul class="nav nav-tabs mb-3" id="ccpDocTabs" role="tablist">
+                {% if ccpNarrativeAvailable %}
+                <li class="nav-item">
+                    <a class="nav-link active" id="ccpDocTab-narrative" data-toggle="tab"
+                       href="#ccpDocPane-narrative" role="tab" aria-controls="ccpDocPane-narrative"
+                       aria-selected="true">{{ "Narrative"|xlt }}</a>
+                </li>
+                {% endif %}
+                <li class="nav-item">
+                    <a class="nav-link{% if not ccpNarrativeAvailable %} active{% endif %}"
+                       id="ccpDocTab-facts" data-toggle="tab" href="#ccpDocPane-facts" role="tab"
+                       aria-controls="ccpDocPane-facts" aria-selected="{{ ccpNarrativeAvailable ? 'false' : 'true' }}">
+                        {{ "Chart Facts"|xlt }}{% if view_model.fact_groups is not empty %} <span class="badge badge-light ml-1">{{ view_model.fact_groups|length }}</span>{% endif %}
+                    </a>
+                </li>
+            </ul>
+
+            <div class="tab-content ccp-doc-tab-content">
+                {% if ccpNarrativeAvailable %}
+                <div class="tab-pane fade show active" id="ccpDocPane-narrative" role="tabpanel" aria-labelledby="ccpDocTab-narrative">
+                    <div class="card mb-0">
+                        <div class="card-header d-flex justify-content-between align-items-center flex-wrap">
+                            <strong>{{ "Priority Narrative"|xlt }}</strong>
+                            {{ _self.narrative_action_form(doc_url, needs_narrative_generation) }}
+                        </div>
+                        <div class="card-body" id="ccpNarrativeBody">
+                            <div id="ccpNarrativeStatus" class="text-muted small mb-2" style="display:none;"></div>
+                            <div id="ccpNarrativeContent">
+                            {% if view_model.narrative is not empty %}
+                                {% for claim in view_model.narrative %}
+                                    <div class="ccp-narrative-claim">
+                                        {% if 'conflict' in claim.flags %}<span class="badge badge-warning">{{ "Conflict"|xlt }}</span>{% endif %}
+                                        {{ claim.text|text }}
+                                        {{ _self.citation_refs(claim.citations) }}
+                                        {% if visit_label %}
+                                            <span class="ccp-pipe" aria-hidden="true">|</span>
+                                            <span class="text-muted small">{{ visit_label|text }}</span>
+                                        {% endif %}
+                                    </div>
+                                {% endfor %}
+                            {% else %}
+                                <p class="text-muted mb-0">{{ "No narrative yet. Use Generate narrative to run the model over the chart facts."|xlt }}</p>
+                            {% endif %}
+                            </div>
                         </div>
                     </div>
                 </div>
-
-                <div class="ccp-section-chat">
-                {% include 'oe-module-clinical-copilot/chat_panel.html.twig' with {
-                    'pid': pid,
-                    'chat_url': chat_url,
-                    'status_url': status_url,
-                } %}
-                </div>
                 {% endif %}
-            </div>
 
-            <div class="col-lg-4 ccp-facts-column">
-                <div class="card mb-0">
-                    <div class="card-header">
-                        <strong>{{ "Chart Facts"|xlt }}</strong>
-                        <small class="text-muted d-block">{{ "always shown beside the narrative"|xlt }}</small>
-                    </div>
-                    <div class="card-body">
-                        {% if view_model.fact_groups is empty %}
-                            <p class="text-muted mb-0">{{ "No facts extracted."|xlt }}</p>
-                        {% else %}
-                            <ul class="nav nav-tabs ccp-facts-tabs" role="tablist">
-                                {% for g in view_model.fact_groups %}
-                                    {# g.key can contain a colon (e.g. "lab:glucose"), which is a valid
-                                       HTML id but breaks the CSS/jQuery selector Bootstrap builds from
-                                       the tab href (":glucose" parses as a pseudo-class) -- so every
-                                       non-active tab silently showed a blank pane. Emit a selector-safe
-                                       id here while leaving g.key itself (used for ordering/tests) alone. #}
-                                    {% set paneKey = g.key|replace({':': '-'}) %}
-                                    <li class="nav-item">
-                                        <a class="nav-link{% if loop.first %} active{% endif %}"
-                                           id="ccpFactsTab-{{ paneKey|attr }}"
-                                           data-toggle="tab" href="#ccpFactsPane-{{ paneKey|attr }}"
-                                           role="tab" aria-controls="ccpFactsPane-{{ paneKey|attr }}"
-                                           aria-selected="{{ loop.first ? 'true' : 'false' }}">
-                                            {{ g.label|text }} <span class="badge badge-light ml-1">{{ g.total|text }}</span>
-                                        </a>
-                                    </li>
-                                {% endfor %}
-                            </ul>
-                            <div class="tab-content ccp-facts-tab-content">
-                                {% for g in view_model.fact_groups %}
-                                    {% set paneKey = g.key|replace({':': '-'}) %}
-                                    <div class="tab-pane fade{% if loop.first %} show active{% endif %}"
-                                         id="ccpFactsPane-{{ paneKey|attr }}" role="tabpanel"
-                                         aria-labelledby="ccpFactsTab-{{ paneKey|attr }}">
-                                        {% if g.total > g.shown %}
-                                            <div class="text-muted small mt-2">
-                                                {{ "Showing"|xlt }} {{ g.shown|text }} {{ "of"|xlt }} {{ g.total|text }} — {{ "most recent first"|xlt }}
+                <div class="tab-pane fade{% if not ccpNarrativeAvailable %} show active{% endif %}" id="ccpDocPane-facts" role="tabpanel" aria-labelledby="ccpDocTab-facts">
+                    <div class="card mb-0">
+                        <div class="card-header">
+                            <strong>{{ "Chart Facts"|xlt }}</strong>
+                        </div>
+                        <div class="card-body">
+                            {% if view_model.fact_groups is empty %}
+                                <p class="text-muted mb-0">{{ "No facts extracted."|xlt }}</p>
+                            {% else %}
+                                <ul class="nav nav-tabs ccp-facts-tabs" role="tablist">
+                                    {% for g in view_model.fact_groups %}
+                                        {# g.key can contain a colon (e.g. "lab:glucose"), which is a valid
+                                           HTML id but breaks the CSS/jQuery selector Bootstrap builds from
+                                           the tab href (":glucose" parses as a pseudo-class) -- so every
+                                           non-active tab silently showed a blank pane. Emit a selector-safe
+                                           id here while leaving g.key itself (used for ordering/tests) alone. #}
+                                        {% set paneKey = g.key|replace({':': '-'}) %}
+                                        <li class="nav-item">
+                                            <a class="nav-link{% if loop.first %} active{% endif %}"
+                                               id="ccpFactsTab-{{ paneKey|attr }}"
+                                               data-toggle="tab" href="#ccpFactsPane-{{ paneKey|attr }}"
+                                               role="tab" aria-controls="ccpFactsPane-{{ paneKey|attr }}"
+                                               aria-selected="{{ loop.first ? 'true' : 'false' }}">
+                                                {{ g.label|text }} <span class="badge badge-light ml-1">{{ g.total|text }}</span>
+                                            </a>
+                                        </li>
+                                    {% endfor %}
+                                </ul>
+                                <div class="tab-content ccp-facts-tab-content">
+                                    {% for g in view_model.fact_groups %}
+                                        {% set paneKey = g.key|replace({':': '-'}) %}
+                                        <div class="tab-pane fade{% if loop.first %} show active{% endif %}"
+                                             id="ccpFactsPane-{{ paneKey|attr }}" role="tabpanel"
+                                             aria-labelledby="ccpFactsTab-{{ paneKey|attr }}">
+                                            {% if g.total > g.shown %}
+                                                <div class="text-muted small mt-2">
+                                                    {{ "Showing"|xlt }} {{ g.shown|text }} {{ "of"|xlt }} {{ g.total|text }} — {{ "most recent first"|xlt }}
+                                                </div>
+                                            {% endif %}
+                                            <div class="table-responsive mt-2">
+                                                <table class="table table-sm table-borderless mb-0">
+                                                    {{ _self.facts_table(visit_label) }}
+                                                    <tbody>
+                                                    {% for fact in g.facts %}{{ _self.fact_row(fact, visit_label) }}{% endfor %}
+                                                    </tbody>
+                                                </table>
                                             </div>
-                                        {% endif %}
-                                        <div class="table-responsive mt-2">
-                                            <table class="table table-sm table-borderless mb-0">
-                                                {{ _self.facts_table(visit_label) }}
-                                                <tbody>
-                                                {% for fact in g.facts %}{{ _self.fact_row(fact, visit_label) }}{% endfor %}
-                                                </tbody>
-                                            </table>
                                         </div>
-                                    </div>
-                                {% endfor %}
-                            </div>
-                        {% endif %}
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        </div>
                     </div>
                 </div>
             </div>
+
+            {% if ccpNarrativeAvailable %}
+            <div class="ccp-section-chat mt-3">
+            {% include 'oe-module-clinical-copilot/chat_panel.html.twig' with {
+                'pid': pid,
+                'chat_url': chat_url,
+                'status_url': status_url,
+            } %}
+            </div>
+            {% endif %}
         </div>
         </section>
 
