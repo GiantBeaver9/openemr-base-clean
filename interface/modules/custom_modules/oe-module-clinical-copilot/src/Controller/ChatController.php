@@ -493,7 +493,12 @@ final class ChatController
             // Chat is interactive and answers over already-extracted facts, so
             // it runs a deliberately small thinking budget -- speed over deep
             // reasoning. The richer budget is reserved for the narrative.
-            new PromptContext(self::DOC_TYPE, self::PROMPT_VERSION, self::model(), thinkingBudget: 256),
+            // Reasoning budget raised (was 256): with the QA/verifier gate off,
+            // spend the headroom on accuracy. Flash reasons fast, so this keeps
+            // turns quick while giving it enough room to answer correctly and
+            // decide it already has the data (avoiding tool re-calls). Valid
+            // for Flash (0-24576); 10k is an acceptable ceiling if needed.
+            new PromptContext(self::DOC_TYPE, self::PROMPT_VERSION, self::model(), thinkingBudget: 5000),
             $onStatus,
         );
 

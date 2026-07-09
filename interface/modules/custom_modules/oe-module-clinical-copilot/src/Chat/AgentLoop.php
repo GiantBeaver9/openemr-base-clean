@@ -17,6 +17,7 @@ namespace OpenEMR\Modules\ClinicalCopilot\Chat;
 use OpenEMR\Modules\ClinicalCopilot\Chat\Llm\ChatLlmClientInterface;
 use OpenEMR\Modules\ClinicalCopilot\Chat\Llm\ChatLlmResponse;
 use OpenEMR\Modules\ClinicalCopilot\Chat\Tool\ChainBudget;
+use OpenEMR\Modules\ClinicalCopilot\Chat\Tool\ToolCallRequest;
 use OpenEMR\Modules\ClinicalCopilot\Chat\Tool\ToolCatalog;
 use OpenEMR\Modules\ClinicalCopilot\Chat\Tool\ToolExecutorInterface;
 use OpenEMR\Modules\ClinicalCopilot\Fact\Fact;
@@ -101,10 +102,17 @@ final class AgentLoop
         $latencyMs = 0;
         $modelVersion = $this->context->model;
         $redactionMap = null;
+        // Signatures of tool calls already run THIS turn, so a repeat request
+        // is recognized and skipped rather than re-executed (see runToolCalls).
+        $executed = [];
+        // Set once a round gathers no NEW data (the model only re-requested
+        // tools it already ran): the next round offers no tools so the model
+        // MUST produce a final answer instead of looping to budget-exhaustion.
+        $forceFinalAnswer = false;
 
         while ($budget->startRound()) {
             $this->emitStatus($budget->roundsUsed() === 1 ? 'thinking…' : 'checking whether more data is needed…');
-            $toolsOffered = $budget->remainingCalls() > 0 ? ToolCatalog::all() : [];
+            $toolsOffered = (!$forceFinalAnswer && $budget->remainingCalls() > 0) ? ToolCatalog::all() : [];
 
             // Bound only what the model is shown; $facts stays full for
             // accumulation and for the verifier's fact set (a windowed cited
@@ -143,10 +151,17 @@ final class AgentLoop
                 );
             }
 
-            [$facts, $roundLog, $observation] = $this->runToolCalls($response, $budget, $facts);
+            [$facts, $roundLog, $observation] = $this->runToolCalls($response, $budget, $facts, $executed);
             $toolLog = [...$toolLog, ...$roundLog];
             if ($observation !== '') {
                 $transcript[] = $observation;
+            }
+
+            // No tool actually executed this round (all requests were repeats
+            // of already-run tools, or the call budget was spent): there is no
+            // new data to gather, so force the next round to answer.
+            if ($roundLog === []) {
+                $forceFinalAnswer = true;
             }
         }
 
@@ -218,14 +233,29 @@ final class AgentLoop
 
     /**
      * @param list<Fact> $facts
+     * @param array<string, int> $executed signature => fact-count of tool calls already run this turn
      * @return array{0: list<Fact>, 1: list<ToolCallLogEntry>, 2: string}
      */
-    private function runToolCalls(ChatLlmResponse $response, ChainBudget $budget, array $facts): array
+    private function runToolCalls(ChatLlmResponse $response, ChainBudget $budget, array $facts, array &$executed): array
     {
         $roundLog = [];
         $observationLines = [];
 
         foreach ($response->toolCalls ?? [] as $callRequest) {
+            $signature = self::callSignature($callRequest);
+
+            // Dedup: the model is not handed a native functionResponse, so
+            // (especially on the faster chat model) it commonly re-requests a
+            // tool it already ran this turn -- burning the ChainBudget on
+            // identical lookups until the turn degrades ("I retrieved the
+            // lab-trend lookup, the lab-trend lookup, the lab-trend lookup ...").
+            // A repeat is answered from what we already have: no re-execution,
+            // no budget spent, with an explicit instruction to stop calling it.
+            if (isset($executed[$signature])) {
+                $observationLines[] = "Tool '{$callRequest->name}' was ALREADY retrieved this turn ({$executed[$signature]} fact(s), already in the fact list above). Do NOT call it again -- answer from the facts you already have.";
+                continue;
+            }
+
             if ($budget->remainingCalls() <= 0) {
                 $observationLines[] = "(tool-call budget exhausted -- '{$callRequest->name}' was not executed)";
                 continue;
@@ -245,13 +275,28 @@ final class AgentLoop
                     $byId[$fact->factId] = $fact;
                 }
                 $facts = array_values($byId);
-                $observationLines[] = "Tool '{$callRequest->name}' returned " . count($outcome->facts) . ' fact(s).';
+                $factCount = count($outcome->facts);
+                $executed[$signature] = $factCount;
+                $observationLines[] = "Tool '{$callRequest->name}' returned {$factCount} fact(s), now in the fact list above. Use them to answer; do not call '{$callRequest->name}' again.";
             } else {
                 $observationLines[] = "Tool '{$callRequest->name}' FAILED: {$outcome->errorMessage}";
             }
         }
 
         return [$facts, $roundLog, implode("\n", $observationLines)];
+    }
+
+    /**
+     * A stable identity for one tool call (name + normalized arguments) so a
+     * repeat request within the same turn is recognized and skipped.
+     */
+    private static function callSignature(ToolCallRequest $callRequest): string
+    {
+        $arguments = $callRequest->arguments;
+        ksort($arguments);
+        $json = json_encode($arguments);
+
+        return $callRequest->name . '#' . ($json !== false ? $json : '');
     }
 
     /**
