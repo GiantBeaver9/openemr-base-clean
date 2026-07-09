@@ -83,6 +83,17 @@ if ($sessionId <= 0) {
     exit;
 }
 
+// A turn runs the LLM synchronously and the client waits on this one request.
+// The LLM HTTP client allows up to 90s per call; without a matching PHP limit,
+// php.ini's max_execution_time (often 30s) would kill the process mid-call,
+// returning a non-JSON fatal ("network error" in the client) INSTEAD of the
+// clean JSON degrade the timeout path produces. Give PHP enough headroom to
+// let a slow call finish or time out gracefully. A closed tab never aborts the
+// turn (ignore_user_abort below / ARCHITECTURE.md §1.3).
+if (function_exists('set_time_limit')) {
+    @set_time_limit(150);
+}
+
 // Execution model (ARCHITECTURE.md §1.3): the turn executes synchronously
 // inside this request either way -- SSE only changes how progress is
 // OBSERVED, never when the turn actually finishes. `$onStatus` is a no-op

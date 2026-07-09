@@ -91,6 +91,15 @@ if ($pid <= 0) {
         'visit_label' => null,
     ];
 } elseif ($isPost && ($_POST['action'] ?? '') === 'regenerate') {
+    // Regenerate runs the LLM synthesis synchronously (the client waits on this
+    // request). The LLM client allows up to 90s; give PHP matching headroom so
+    // php.ini's max_execution_time can't kill the process mid-call and return a
+    // non-JSON fatal ("server returned a non-JSON response") instead of a clean
+    // JSON degrade.
+    if (function_exists('set_time_limit')) {
+        @set_time_limit(150);
+    }
+
     $wantsStream = ($_POST['stream'] ?? '') === '1';
 
     if ($wantsStream) {
