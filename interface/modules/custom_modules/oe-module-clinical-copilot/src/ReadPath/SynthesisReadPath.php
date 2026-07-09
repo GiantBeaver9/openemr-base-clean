@@ -97,7 +97,7 @@ final class SynthesisReadPath
 
     private static function model(): string
     {
-        return LlmRuntimeConfig::reduceAndChatModel();
+        return LlmRuntimeConfig::synthesisModel();
     }
 
     /**

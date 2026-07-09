@@ -58,7 +58,11 @@ final class ChatFreshnessChecker
 
     private static function model(): string
     {
-        return LlmRuntimeConfig::reduceAndChatModel();
+        // synthesisModel(), NOT chatModel(): this digest MUST match the one
+        // SynthesisReadPath computed for the cached doc (which folds in the
+        // SYNTHESIS model). Using the chat model here would make every turn
+        // report false drift once the two models diverged.
+        return LlmRuntimeConfig::synthesisModel();
     }
 
     /**

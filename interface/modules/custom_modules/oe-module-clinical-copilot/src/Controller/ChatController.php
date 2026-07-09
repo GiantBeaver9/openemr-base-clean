@@ -89,7 +89,7 @@ final class ChatController
 
     private static function model(): string
     {
-        return LlmRuntimeConfig::reduceAndChatModel();
+        return LlmRuntimeConfig::chatModel();
     }
 
     public function __construct(
