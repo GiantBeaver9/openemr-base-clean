@@ -99,6 +99,11 @@ final class SynthesisReadPath
     // stay in lockstep with ChatFreshnessChecker::PROMPT_VERSION.
     private const PROMPT_VERSION = 'reduce-v4';
 
+    // Time-based narrative cache: a patient's brief is generated at most once
+    // per this many hours; within the window every copilot-link view serves the
+    // most recent one (see run()) instead of regenerating.
+    private const NARRATIVE_CACHE_MAX_AGE_HOURS = 24;
+
     private static function model(): string
     {
         return LlmRuntimeConfig::synthesisModel();
@@ -279,10 +284,19 @@ final class SynthesisReadPath
 
         if (!$forceRegenerate) {
             $cacheT0 = microtime(true);
-            $existing = $this->docStore->findBest($pid, $digest);
+            // Time-based cache (I4 relaxed by product decision): serve the most
+            // recent narrative for this patient when it was generated within
+            // NARRATIVE_CACHE_MAX_AGE_HOURS, regardless of fact_digest -- so the
+            // brief is generated at most once per day and every copilot-link
+            // click in that window reuses it (it previously regenerated whenever
+            // a time-relative fact shifted the digest). The digest is still
+            // computed and stored; a genuine data change is reflected on the
+            // next daily regeneration or immediately when the physician clicks
+            // Regenerate (which force-bypasses this cache).
+            $existing = $this->docStore->findMostRecentForPid($pid);
             $this->recordSpan($correlationId, 'cache_lookup', $cacheT0, 'ok', $pid, $userId);
 
-            if ($existing !== null) {
+            if ($existing !== null && self::isWithinCacheTtl($existing->computedAt)) {
                 $this->recordSpan($correlationId, 'render', microtime(true), $existing->verifyStatus === VerifyStatus::Passed ? 'ok' : 'degraded', $pid, $userId);
 
                 return $this->toServedResult($correlationId, $pid, $extraction->survivingFacts, $existing, servedFromCache: true);
@@ -605,5 +619,16 @@ final class SynthesisReadPath
     private static function digestPromptVersion(): string
     {
         return self::PROMPT_VERSION . '+' . self::model();
+    }
+
+    /**
+     * True when a cached narrative is still fresh enough to serve (generated
+     * within NARRATIVE_CACHE_MAX_AGE_HOURS) -- the "at most once per day" gate.
+     */
+    private static function isWithinCacheTtl(\DateTimeImmutable $computedAt): bool
+    {
+        $threshold = (new \DateTimeImmutable())->modify('-' . self::NARRATIVE_CACHE_MAX_AGE_HOURS . ' hours');
+
+        return $computedAt >= $threshold;
     }
 }

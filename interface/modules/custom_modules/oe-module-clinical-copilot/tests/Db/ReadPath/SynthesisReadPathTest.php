@@ -112,10 +112,12 @@ final class SynthesisReadPathTest extends TestCase
 
         self::insertA1cResult($this->pid, '6.9', '2025-06-01'); // backdated, earlier than the first draw
 
-        $after = $this->readPath->read($this->pid, 1);
+        // read() now serves the time-based cache within the TTL, so a same-day
+        // data change is reflected via regenerate() (force), not the next view.
+        $after = $this->readPath->regenerate($this->pid, 1);
 
         self::assertNotSame($before->factDigest, $after->factDigest);
-        self::assertSame(2, self::countDocRows($this->pid), 'a genuine fact-set change is a real miss -- a second row');
+        self::assertSame(2, self::countDocRows($this->pid), 'a genuine fact-set change is a real miss on regenerate -- a second row');
     }
 
     /**
@@ -132,7 +134,9 @@ final class SynthesisReadPathTest extends TestCase
             [$resultId],
         );
 
-        $after = $this->readPath->read($this->pid, 1);
+        // read() serves the time-based cache within the TTL; a same-day change
+        // is reflected via regenerate() (force), not the next view.
+        $after = $this->readPath->regenerate($this->pid, 1);
 
         self::assertNotSame($before->factDigest, $after->factDigest);
     }
@@ -151,7 +155,9 @@ final class SynthesisReadPathTest extends TestCase
             [$this->pid],
         );
 
-        $after = $this->readPath->read($this->pid, 1);
+        // read() serves the time-based cache within the TTL; regenerate() forces
+        // a fresh digest that reflects the change.
+        $after = $this->readPath->regenerate($this->pid, 1);
 
         self::assertNotSame($before->factDigest, $after->factDigest);
     }
@@ -193,7 +199,9 @@ final class SynthesisReadPathTest extends TestCase
             "UPDATE `mod_copilot_cadence` SET `version` = 'v2-test' WHERE `code_set` = 'threshold:a1c'",
         );
 
-        $after = $this->readPath->read($this->pid, 1);
+        // read() serves the time-based cache within the TTL; regenerate() forces
+        // a fresh digest that reflects the config bump.
+        $after = $this->readPath->regenerate($this->pid, 1);
 
         self::assertNotSame($before->factDigest, $after->factDigest);
     }

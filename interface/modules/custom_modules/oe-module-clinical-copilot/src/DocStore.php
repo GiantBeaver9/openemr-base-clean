@@ -121,6 +121,40 @@ final class DocStore
         return null;
     }
 
+    /**
+     * The most recent narrative for a patient IGNORING fact_digest -- the
+     * time-based ("generate at most once per day, pull the most recent") cache
+     * serve-selection. Prefers the latest `verify_status='passed'` row (a real
+     * narrative), falling back to the latest `degraded` row, so a transient
+     * degraded attempt is still served rather than forcing a regenerate on
+     * every view. Recency (`id DESC`) alone decides among passed rows here --
+     * `qa_score` is a per-(pid,digest) tie-break that does not apply across
+     * different fact sets.
+     */
+    public function findMostRecentForPid(int $pid): ?DocRow
+    {
+        $passed = QueryUtils::querySingleRow(
+            'SELECT * FROM `mod_copilot_doc`
+             WHERE `pid` = ? AND `verify_status` = ?
+             ORDER BY `id` DESC
+             LIMIT 1',
+            [$pid, VerifyStatus::Passed->value],
+        );
+        if (is_array($passed)) {
+            return self::hydrate($passed);
+        }
+
+        $degraded = QueryUtils::querySingleRow(
+            'SELECT * FROM `mod_copilot_doc`
+             WHERE `pid` = ? AND `verify_status` = ?
+             ORDER BY `id` DESC
+             LIMIT 1',
+            [$pid, VerifyStatus::Degraded->value],
+        );
+
+        return is_array($degraded) ? self::hydrate($degraded) : null;
+    }
+
     public function findByCorrelationId(string $correlationId): ?DocRow
     {
         $row = QueryUtils::querySingleRow(
