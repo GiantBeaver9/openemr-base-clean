@@ -14,6 +14,8 @@ declare(strict_types=1);
 
 namespace OpenEMR\Modules\ClinicalCopilot\Chat\Llm;
 
+use GuzzleHttp\Exception\GuzzleException;
+use GuzzleHttp\Exception\RequestException;
 use OpenEMR\Modules\ClinicalCopilot\Chat\Tool\ToolCallRequest;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\LlmUnavailableException;
 
@@ -82,6 +84,34 @@ trait GeminiChatContentContract
     }
 
     /**
+     * Maps a Guzzle transport failure onto the right degradation category --
+     * the chat-surface twin of
+     * {@see \OpenEMR\Modules\ClinicalCopilot\Reduce\GeminiGenerateContentContract::classifyTransportError()}.
+     * An HTTP 4xx/5xx from the provider (rejected tool schema, missing IAM
+     * role, quota) arrives with a response and is a `provider_error` with the
+     * body preserved; only a connect/DNS/timeout failure is `unreachable`.
+     * Shared so the Vertex and AI-Studio chat clients classify identically.
+     */
+    private static function classifyTransportError(GuzzleException $e): LlmUnavailableException
+    {
+        if ($e instanceof RequestException && $e->hasResponse()) {
+            $response = $e->getResponse();
+            $statusCode = $response->getStatusCode();
+            $bodySnippet = substr((string)$response->getBody(), 0, 500);
+
+            return LlmUnavailableException::providerError(
+                new \RuntimeException(
+                    'Gemini generateContent HTTP ' . $statusCode . ($bodySnippet !== '' ? ': ' . $bodySnippet : ''),
+                    0,
+                    $e,
+                ),
+            );
+        }
+
+        return LlmUnavailableException::unreachable($e);
+    }
+
+    /**
      * @param array<string, mixed> $decoded
      * @return list<array<string, mixed>>
      */
@@ -89,10 +119,11 @@ trait GeminiChatContentContract
     {
         $candidates = $decoded['candidates'] ?? null;
         if (!is_array($candidates) || $candidates === []) {
-            throw LlmUnavailableException::providerError(new \RuntimeException('Gemini response contained no candidates'));
+            throw self::noCandidatesError($decoded);
         }
 
         $firstCandidate = $candidates[0];
+        self::assertCleanFinish($firstCandidate);
         $parts = is_array($firstCandidate) ? ($firstCandidate['content']['parts'] ?? null) : null;
         if (!is_array($parts) || $parts === []) {
             throw LlmUnavailableException::providerError(new \RuntimeException('Gemini candidate contained no content parts'));
@@ -100,6 +131,53 @@ trait GeminiChatContentContract
 
         /** @var list<array<string, mixed>> $parts */
         return $parts;
+    }
+
+    /**
+     * A chat round's candidate is only safe to read on a `STOP` finish. On a
+     * tool-offering round the model finishes with `STOP` even when it emits a
+     * `functionCall`, so this does not interfere with tool calls. `MAX_TOKENS`
+     * here truncates either the final claims JSON or a `functionCall`'s args
+     * (`MALFORMED_FUNCTION_CALL`); `SAFETY`/`RECITATION`/`BLOCKLIST`/etc.
+     * withhold content. Any of those is a degradation, not a usable turn --
+     * mirrors {@see \OpenEMR\Modules\ClinicalCopilot\Reduce\GeminiGenerateContentContract::assertCleanFinish()}.
+     *
+     * @param mixed $candidate the first `candidates[]` entry as decoded
+     */
+    private static function assertCleanFinish(mixed $candidate): void
+    {
+        $finishReason = is_array($candidate) ? ($candidate['finishReason'] ?? null) : null;
+        if (!is_string($finishReason) || $finishReason === '') {
+            return;
+        }
+
+        if ($finishReason === 'STOP' || $finishReason === 'FINISH_REASON_UNSPECIFIED') {
+            return;
+        }
+
+        throw LlmUnavailableException::providerError(new \RuntimeException(
+            'Gemini chat turn stopped early (finishReason=' . $finishReason
+            . '); the response is truncated or content-blocked, not a usable answer',
+        ));
+    }
+
+    /**
+     * Surfaces `promptFeedback.blockReason` when the prompt itself was blocked
+     * before any candidate was generated.
+     *
+     * @param array<string, mixed> $decoded
+     */
+    private static function noCandidatesError(array $decoded): LlmUnavailableException
+    {
+        $feedback = $decoded['promptFeedback'] ?? null;
+        $blockReason = is_array($feedback) ? ($feedback['blockReason'] ?? null) : null;
+        if (is_string($blockReason) && $blockReason !== '') {
+            return LlmUnavailableException::providerError(new \RuntimeException(
+                'Gemini blocked the prompt before generating (blockReason=' . $blockReason . ')',
+            ));
+        }
+
+        return LlmUnavailableException::providerError(new \RuntimeException('Gemini response contained no candidates'));
     }
 
     /**

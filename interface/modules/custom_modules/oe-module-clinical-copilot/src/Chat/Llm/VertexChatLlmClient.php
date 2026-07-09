@@ -97,7 +97,11 @@ final class VertexChatLlmClient implements ChatLlmClientInterface
                 'timeout' => self::TIMEOUT_SECONDS,
             ]);
         } catch (GuzzleException $e) {
-            throw LlmUnavailableException::unreachable($e);
+            // A 4xx/5xx from Vertex (rejected tool schema, missing IAM role,
+            // quota exhaustion) arrives WITH a response and is a provider
+            // error, not an "unreachable" transport failure -- see
+            // GeminiChatContentContract::classifyTransportError().
+            throw self::classifyTransportError($e);
         }
 
         $latencyMs = (int)round((microtime(true) - $startedAt) * 1000);

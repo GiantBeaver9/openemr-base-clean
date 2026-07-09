@@ -14,6 +14,7 @@ declare(strict_types=1);
 
 namespace OpenEMR\Modules\ClinicalCopilot\Chat;
 
+use OpenEMR\Common\Logging\SystemLogger;
 use OpenEMR\Modules\ClinicalCopilot\Fact\Fact;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\Claim;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\LlmUnavailableException;
@@ -62,6 +63,7 @@ final class ChatAgent
         private readonly AgentLoop $agentLoop,
         private readonly Verifier $verifier,
         private readonly ?\Closure $onStatus = null,
+        private readonly SystemLogger $logger = new SystemLogger(),
     ) {
     }
 
@@ -88,11 +90,19 @@ final class ChatAgent
         try {
             $loopResult = $this->agentLoop->run($sessionFacts, $narrativeClaims, $conversationTranscript, $userQuestion);
         } catch (LlmUnavailableException $e) {
-            // TEMPORARY debug aid: surface the rich cause in the return value
-            // (not just the physician-safe banner) so "why isn't it answering"
-            // is visible straight from the turn response. Revert to
-            // $e->degradedMessage() before any real-PHI deployment.
-            return ChatAnswer::degradedLlmUnavailable($sessionFacts, $e->reason(), [], $e->detail());
+            // Log the rich cause (category + provider/transport detail, which
+            // can carry internal hostnames and provider error bodies) for
+            // operators; hand the user ONLY the physician-safe banner
+            // (CLAUDE.md: never expose provider internals to users).
+            $this->logger->error('Clinical Co-Pilot chat: LLM call failed', [
+                'reason' => $e->reason(),
+                'detail' => $e->detail(),
+                'correlation_id' => $correlationId,
+                'pid' => $pid,
+                'exception' => $e,
+            ]);
+
+            return ChatAnswer::degradedLlmUnavailable($sessionFacts, $e->reason(), [], $e->degradedMessage());
         }
 
         $this->emitStatus('verifying…');
@@ -129,9 +139,17 @@ final class ChatAgent
                 $findings,
             );
         } catch (LlmUnavailableException $e) {
-            // TEMPORARY debug aid (see the first catch above): rich cause in the
-            // return value; revert to $e->degradedMessage() before real-PHI.
-            return ChatAnswer::degradedLlmUnavailable($loopResult->accumulatedFacts, $e->reason(), $loopResult->toolCallLog, $e->detail());
+            // See the first catch above: log the rich cause for operators,
+            // return only the physician-safe banner to the user.
+            $this->logger->error('Clinical Co-Pilot chat: LLM call failed on verification retry', [
+                'reason' => $e->reason(),
+                'detail' => $e->detail(),
+                'correlation_id' => $correlationId,
+                'pid' => $pid,
+                'exception' => $e,
+            ]);
+
+            return ChatAnswer::degradedLlmUnavailable($loopResult->accumulatedFacts, $e->reason(), $loopResult->toolCallLog, $e->degradedMessage());
         }
 
         // The retry makes no new tool calls, so carry the first attempt's tool

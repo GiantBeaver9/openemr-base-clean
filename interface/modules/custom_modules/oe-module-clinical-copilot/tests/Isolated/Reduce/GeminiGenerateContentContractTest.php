@@ -15,6 +15,10 @@ declare(strict_types=1);
 
 namespace OpenEMR\Modules\ClinicalCopilot\Tests\Isolated\Reduce;
 
+use GuzzleHttp\Exception\ConnectException;
+use GuzzleHttp\Exception\RequestException;
+use GuzzleHttp\Psr7\Request;
+use GuzzleHttp\Psr7\Response;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\GeminiApiLlmClient;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\LlmUnavailableException;
 use PHPUnit\Framework\TestCase;
@@ -36,6 +40,14 @@ final class GeminiGenerateContentContractTest extends TestCase
         $method->setAccessible(true);
 
         return $method->invoke(null, $decoded);
+    }
+
+    private function classifyTransportError(\GuzzleHttp\Exception\GuzzleException $e): LlmUnavailableException
+    {
+        $method = new ReflectionMethod(GeminiApiLlmClient::class, 'classifyTransportError');
+        $method->setAccessible(true);
+
+        return $method->invoke(null, $e);
     }
 
     public function testReturnsTextFromFirstPartWhenPresent(): void
@@ -95,5 +107,92 @@ final class GeminiGenerateContentContractTest extends TestCase
     {
         $this->expectException(LlmUnavailableException::class);
         $this->extractText(['candidates' => [['content' => ['parts' => []]]]]);
+    }
+
+    public function testReturnsTextWhenFinishReasonIsStop(): void
+    {
+        $decoded = [
+            'candidates' => [[
+                'finishReason' => 'STOP',
+                'content' => ['parts' => [['text' => '{"claims":[]}']]],
+            ]],
+        ];
+
+        self::assertSame('{"claims":[]}', $this->extractText($decoded));
+    }
+
+    /**
+     * The core of #2: a MAX_TOKENS finish leaves the JSON truncated, but the
+     * text part is still present. Reading it verbatim ships invalid JSON
+     * downstream where the verifier misreads it as "nothing citable". The
+     * parser must reject it as a provider error instead.
+     */
+    public function testThrowsWhenFinishReasonIsMaxTokensEvenWithText(): void
+    {
+        $decoded = [
+            'candidates' => [[
+                'finishReason' => 'MAX_TOKENS',
+                'content' => ['parts' => [['text' => '[{"text":"truncated mid-']]],
+            ]],
+        ];
+
+        $this->expectException(LlmUnavailableException::class);
+        $this->expectExceptionMessageMatches('/rejected the request/');
+        $this->extractText($decoded);
+    }
+
+    public function testThrowsWhenFinishReasonIsSafety(): void
+    {
+        $decoded = [
+            'candidates' => [[
+                'finishReason' => 'SAFETY',
+                'content' => ['parts' => [['text' => 'partial']]],
+            ]],
+        ];
+
+        $this->expectException(LlmUnavailableException::class);
+        $this->extractText($decoded);
+    }
+
+    public function testSurfacesPromptBlockReasonWhenNoCandidates(): void
+    {
+        try {
+            $this->extractText(['promptFeedback' => ['blockReason' => 'SAFETY']]);
+            self::fail('Expected LlmUnavailableException');
+        } catch (LlmUnavailableException $e) {
+            self::assertSame(LlmUnavailableException::REASON_PROVIDER_ERROR, $e->reason());
+            self::assertStringContainsString('SAFETY', (string)$e->getPrevious()?->getMessage());
+        }
+    }
+
+    /**
+     * The core of #1: an HTTP 4xx/5xx from the provider (here a 429 quota
+     * error) must classify as provider_error with the body preserved -- NOT
+     * as "unreachable" -- so LlmUnavailableException::degradedMessage()'s
+     * rate-limit branch can fire and operators see the real cause.
+     */
+    public function testClassifiesHttpErrorResponseAsProviderErrorWithBody(): void
+    {
+        $request = new Request('POST', 'https://example.invalid/generateContent');
+        $response = new Response(429, [], '{"error":{"status":"RESOURCE_EXHAUSTED"}}');
+        $guzzleError = new RequestException('429 Too Many Requests', $request, $response);
+
+        $classified = $this->classifyTransportError($guzzleError);
+
+        self::assertSame(LlmUnavailableException::REASON_PROVIDER_ERROR, $classified->reason());
+        self::assertStringContainsString('429', (string)$classified->getPrevious()?->getMessage());
+        self::assertStringContainsString('RESOURCE_EXHAUSTED', (string)$classified->getPrevious()?->getMessage());
+        // The rate-limit-aware physician banner now fires on this (production) path.
+        self::assertStringContainsString('rate limit', $classified->degradedMessage());
+    }
+
+    public function testClassifiesConnectFailureAsUnreachable(): void
+    {
+        $request = new Request('POST', 'https://example.invalid/generateContent');
+        $guzzleError = new ConnectException('Could not resolve host', $request);
+
+        $classified = $this->classifyTransportError($guzzleError);
+
+        self::assertSame(LlmUnavailableException::REASON_UNREACHABLE, $classified->reason());
     }
 }
