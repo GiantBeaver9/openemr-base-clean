@@ -26,6 +26,8 @@ use OpenEMR\Modules\ClinicalCopilot\Capability\MedResponse;
 use OpenEMR\Modules\ClinicalCopilot\Capability\OverdueTests;
 use OpenEMR\Modules\ClinicalCopilot\Capability\PendingResults;
 use OpenEMR\Modules\ClinicalCopilot\Capability\VitalsTrend;
+use OpenEMR\Modules\ClinicalCopilot\Doc\NewDoc;
+use OpenEMR\Modules\ClinicalCopilot\Doc\RegenReason;
 use OpenEMR\Modules\ClinicalCopilot\Doc\VerifyStatus;
 use OpenEMR\Modules\ClinicalCopilot\DocStore;
 use OpenEMR\Modules\ClinicalCopilot\Fact\Enum\Capability;
@@ -48,10 +50,16 @@ use PHPUnit\Framework\TestCase;
  * throughout, exactly the class {@see \OpenEMR\Modules\ClinicalCopilot\ReadPath\LlmClientFactory}
  * hands back when no Vertex project is configured -- the honest dev/test
  * default. Every miss therefore degrades to a facts-only doc
- * (`verify_status='degraded'`), which is still a legal cache entry
- * (T22/DocStore::findBest()'s degraded fallback) -- exactly what lets these
- * evals exercise the real hit/miss digest-addressing behavior without a
- * live model.
+ * (`verify_status='degraded'`).
+ *
+ * A degraded doc is a legal *stored* row (T22/DocStore::findBest()'s degraded
+ * fallback still returns it), but the read path's 24h time-cache deliberately
+ * does NOT pin a degraded row -- only a `passed` narrative freezes the daily
+ * window, so a failed/empty attempt self-heals on the next view instead of
+ * showing a blank narrative for a day. With the unavailable LLM every
+ * generation degrades, so these evals exercise digest determinism via repeated
+ * generation; the passed-row cache-hit path is exercised by seeding a `passed`
+ * doc directly ({@see self::testPassedNarrativeWithinTtlIsServedFromCache}).
  */
 final class SynthesisReadPathTest extends TestCase
 {
@@ -80,12 +88,14 @@ final class SynthesisReadPathTest extends TestCase
     }
 
     /**
-     * E6 determinism, and the hit/miss mechanics every other eval below
-     * relies on: two reads over an unchanged DB state produce the identical
-     * digest, and the second read is served from the first's (degraded)
-     * row -- no second row is ever inserted for an unchanged fact set.
+     * E6 determinism, plus the negative case of the 24h time-cache gate: two
+     * reads over an unchanged DB state produce the identical digest, but a
+     * DEGRADED doc (the unavailable-LLM default here) is never pinned by the
+     * cache -- the second read regenerates rather than serving the first's
+     * empty row, so a failed narrative self-heals instead of freezing a blank
+     * pane for a day.
      */
-    public function testDeterminismAndCacheHitOnUnchangedState(): void
+    public function testDeterminismAndDegradedDocIsNotPinned(): void
     {
         self::insertA1cResult($this->pid, '7.2', '2026-01-10');
 
@@ -97,7 +107,38 @@ final class SynthesisReadPathTest extends TestCase
 
         $second = $this->readPath->read($this->pid, 1);
         self::assertSame($first->factDigest, $second->factDigest, 'E6: unchanged DB state must yield an identical digest');
-        self::assertTrue($second->servedFromCache, 'the second read must be served from the row the first read inserted');
+        self::assertFalse($second->servedFromCache, 'a degraded doc must NOT be served from the time-cache -- the read regenerates');
+        self::assertSame(2, self::countDocRows($this->pid), 'the degraded doc was not pinned, so the second read wrote a fresh attempt');
+    }
+
+    /**
+     * The 24h time-cache POSITIVE case: a `passed` narrative generated within
+     * NARRATIVE_CACHE_MAX_AGE_HOURS is served from cache on the next view
+     * (ignoring fact_digest -- the "generate at most once per day" behaviour),
+     * and no second row is inserted. Seeded directly because the unavailable
+     * test LLM cannot itself produce a passing narrative.
+     */
+    public function testPassedNarrativeWithinTtlIsServedFromCache(): void
+    {
+        self::insertA1cResult($this->pid, '7.2', '2026-01-10');
+
+        $this->docStore->insert(new NewDoc(
+            pid: $this->pid,
+            factDigest: 'seeded-passed-digest',
+            docType: 'previsit_synthesis',
+            apptId: null,
+            doc: ['facts' => [], 'claims' => [], 'verify_status' => 'passed'],
+            capabilityVersions: [],
+            promptVersion: 'test-seed',
+            correlationId: 'seed-corr-passed',
+            verifyStatus: VerifyStatus::Passed,
+            regenReason: RegenReason::Manual,
+        ));
+        self::assertSame(1, self::countDocRows($this->pid));
+
+        $served = $this->readPath->read($this->pid, 1);
+        self::assertTrue($served->servedFromCache, 'a passed doc within the TTL must be served from the time-cache');
+        self::assertSame(VerifyStatus::Passed, $served->verifyStatus);
         self::assertSame(1, self::countDocRows($this->pid), 'a cache hit must never insert a second row');
     }
 
@@ -176,8 +217,13 @@ final class SynthesisReadPathTest extends TestCase
 
         $after = $this->readPath->read($this->pid, 1);
 
+        // The invariant under test is digest STABILITY: another patient's churn
+        // must not shift this patient's digest. (The second read regenerates
+        // rather than cache-hitting only because the unavailable-LLM doc is
+        // degraded and degraded docs are not pinned -- see
+        // testDeterminismAndDegradedDocIsNotPinned.)
         self::assertSame($before->factDigest, $after->factDigest);
-        self::assertSame(1, self::countDocRows($this->pid), 'still just the one row -- the second read was a cache hit');
+        self::assertSame(2, self::countDocRows($this->pid), 'the degraded first doc is not pinned, so the second read regenerated');
     }
 
     /**

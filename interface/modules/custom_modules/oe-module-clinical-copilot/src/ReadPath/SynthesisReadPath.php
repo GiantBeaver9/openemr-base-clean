@@ -293,11 +293,24 @@ final class SynthesisReadPath
             // computed and stored; a genuine data change is reflected on the
             // next daily regeneration or immediately when the physician clicks
             // Regenerate (which force-bypasses this cache).
+            //
+            // Only a `passed` narrative is allowed to pin the 24h window. A
+            // degraded/empty attempt (verifier failure, LLM unavailable, empty
+            // brief) must NOT freeze an empty narrative for a day -- if the most
+            // recent doc is degraded we fall through and regenerate on this view,
+            // so the narrative self-heals on the next load once generation
+            // succeeds, instead of the physician seeing a blank pane until the
+            // TTL expires.
             $existing = $this->docStore->findMostRecentForPid($pid);
             $this->recordSpan($correlationId, 'cache_lookup', $cacheT0, 'ok', $pid, $userId);
 
-            if ($existing !== null && self::isWithinCacheTtl($existing->computedAt)) {
-                $this->recordSpan($correlationId, 'render', microtime(true), $existing->verifyStatus === VerifyStatus::Passed ? 'ok' : 'degraded', $pid, $userId);
+            if (
+                $existing !== null
+                && $existing->verifyStatus === VerifyStatus::Passed
+                && self::isWithinCacheTtl($existing->computedAt)
+            ) {
+                // Guaranteed `passed` by the guard above -- render span is always ok.
+                $this->recordSpan($correlationId, 'render', microtime(true), 'ok', $pid, $userId);
 
                 return $this->toServedResult($correlationId, $pid, $extraction->survivingFacts, $existing, servedFromCache: true);
             }

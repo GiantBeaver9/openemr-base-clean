@@ -125,11 +125,12 @@ final class DocStore
      * The most recent narrative for a patient IGNORING fact_digest -- the
      * time-based ("generate at most once per day, pull the most recent") cache
      * serve-selection. Prefers the latest `verify_status='passed'` row (a real
-     * narrative), falling back to the latest `degraded` row, so a transient
-     * degraded attempt is still served rather than forcing a regenerate on
-     * every view. Recency (`id DESC`) alone decides among passed rows here --
-     * `qa_score` is a per-(pid,digest) tie-break that does not apply across
-     * different fact sets.
+     * narrative), falling back to the latest `degraded` row so callers can
+     * inspect the last attempt. The 24h cache serve in SynthesisReadPath only
+     * pins a `passed` row: a degraded result is returned here but the caller
+     * regenerates rather than freezing an empty narrative for a day. Recency
+     * (`id DESC`) alone decides among passed rows here -- `qa_score` is a
+     * per-(pid,digest) tie-break that does not apply across different fact sets.
      */
     public function findMostRecentForPid(int $pid): ?DocRow
     {
