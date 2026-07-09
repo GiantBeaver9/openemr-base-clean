@@ -33,6 +33,7 @@ use OpenEMR\Modules\ClinicalCopilot\Fact\Digest;
 use OpenEMR\Modules\ClinicalCopilot\Lab\Config\DbLabContractConfigProvider;
 use OpenEMR\Modules\ClinicalCopilot\Lab\Config\LabContractConfigProviderInterface;
 use OpenEMR\Modules\ClinicalCopilot\Lab\LabSliceReader;
+use OpenEMR\Modules\ClinicalCopilot\Observability\LlmCostEstimate;
 use OpenEMR\Modules\ClinicalCopilot\Observability\TraceRecorder;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\Claim;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\PatientIdentifiers;
@@ -96,7 +97,7 @@ final class SynthesisReadPath
 
     private static function model(): string
     {
-        return LlmRuntimeConfig::reduceAndChatModel();
+        return LlmRuntimeConfig::synthesisModel();
     }
 
     /**
@@ -355,6 +356,13 @@ final class SynthesisReadPath
             model: $result->usage->modelVersion,
             tokensIn: $result->usage->tokensIn,
             tokensOut: $result->usage->tokensOut,
+            // Rough anomaly-detection estimate (NOT a bill) so SUM(cost_usd)
+            // over mod_copilot_trace flags a runaway -- see LlmCostEstimate.
+            costUsd: LlmCostEstimate::estimateUsd(
+                $result->usage->modelVersion,
+                $result->usage->tokensIn,
+                $result->usage->tokensOut,
+            ),
         );
         $this->recordSpan(
             $correlationId,
@@ -395,7 +403,11 @@ final class SynthesisReadPath
             $result->usage->latencyMs,
             $result->usage->tokensIn,
             $result->usage->tokensOut,
-            null,
+            LlmCostEstimate::estimateUsd(
+                $result->usage->modelVersion,
+                $result->usage->tokensIn,
+                $result->usage->tokensOut,
+            ),
             $extraction->excludedCounts,
         );
 
@@ -549,6 +561,7 @@ final class SynthesisReadPath
         ?string $model = null,
         ?int $tokensIn = null,
         ?int $tokensOut = null,
+        ?float $costUsd = null,
     ): void {
         $durationMs = (int)round((microtime(true) - $t0) * 1000);
         $startedAt = \DateTimeImmutable::createFromFormat('U.u', number_format($t0, 6, '.', ''));
@@ -571,6 +584,7 @@ final class SynthesisReadPath
             $model,
             $tokensIn,
             $tokensOut,
+            $costUsd,
         ));
     }
 

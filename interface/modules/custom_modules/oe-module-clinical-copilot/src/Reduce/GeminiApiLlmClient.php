@@ -17,7 +17,6 @@ namespace OpenEMR\Modules\ClinicalCopilot\Reduce;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
-use GuzzleHttp\Exception\RequestException;
 
 /**
  * T23 (docs/build-notes.md "dev/test Gemini API-key fast-path"): Gemini via
@@ -97,19 +96,10 @@ final class GeminiApiLlmClient implements LlmClientInterface
                 'timeout' => self::TIMEOUT_SECONDS,
             ]);
         } catch (GuzzleException $e) {
-            if ($e instanceof RequestException && $e->hasResponse()) {
-                $response = $e->getResponse();
-                $statusCode = $response->getStatusCode();
-                $bodySnippet = substr((string)$response->getBody(), 0, 500);
-                throw LlmUnavailableException::providerError(
-                    new \RuntimeException(
-                        'Gemini API HTTP ' . $statusCode . ($bodySnippet !== '' ? ': ' . $bodySnippet : ''),
-                        0,
-                        $e,
-                    ),
-                );
-            }
-            throw LlmUnavailableException::unreachable($e);
+            // Shared with VertexLlmClient so both providers classify HTTP
+            // errors (provider_error, body preserved) vs. transport failures
+            // (unreachable) identically -- see the trait.
+            throw self::classifyTransportError($e);
         }
 
         $latencyMs = (int)round((microtime(true) - $startedAt) * 1000);
@@ -128,7 +118,7 @@ final class GeminiApiLlmClient implements LlmClientInterface
             self::extractText($decoded),
             $req->model,
             self::extractTokenCount($decoded, 'promptTokenCount'),
-            self::extractTokenCount($decoded, 'candidatesTokenCount'),
+            self::extractOutputTokenCount($decoded),
             $latencyMs,
         );
     }

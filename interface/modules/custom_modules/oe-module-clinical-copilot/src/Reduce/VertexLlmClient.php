@@ -109,7 +109,11 @@ final class VertexLlmClient implements LlmClientInterface
                 'timeout' => self::TIMEOUT_SECONDS,
             ]);
         } catch (GuzzleException $e) {
-            throw LlmUnavailableException::unreachable($e);
+            // A 4xx/5xx from Vertex (rejected schema, missing IAM role, quota
+            // exhaustion) arrives here WITH a response and must be classified
+            // as a provider error, not an "unreachable" transport failure --
+            // see GeminiGenerateContentContract::classifyTransportError().
+            throw self::classifyTransportError($e);
         }
 
         $latencyMs = (int)round((microtime(true) - $startedAt) * 1000);
@@ -128,7 +132,7 @@ final class VertexLlmClient implements LlmClientInterface
             self::extractText($decoded),
             $req->model,
             self::extractTokenCount($decoded, 'promptTokenCount'),
-            self::extractTokenCount($decoded, 'candidatesTokenCount'),
+            self::extractOutputTokenCount($decoded),
             $latencyMs,
         );
     }

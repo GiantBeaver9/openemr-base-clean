@@ -106,12 +106,15 @@ final class VerifiedGenerationTest extends TestCase
         self::assertSame(1, $result->attempts);
         self::assertSame([], $result->verdicts);
         self::assertFalse($result->frozen);
-        // The return value must carry the rich cause (temporary debug aid): the
-        // low-level reason category and the underlying provider/ADC message are
-        // both surfaced, not just a generic "unavailable" banner.
+        // The rich cause is preserved for operators on the developer-facing
+        // detail field (-> llm_reduce trace span, Reducer logs): the low-level
+        // reason category and the underlying provider/ADC message are both here.
         self::assertStringContainsString('no_credentials', (string)$result->llmUnavailableDetail);
         self::assertStringContainsString('no ADC in this test environment', (string)$result->llmUnavailableDetail);
-        self::assertStringContainsString('no_credentials', (string)$result->degradedMessage);
+        // But the physician-facing banner must NOT leak any of that (CLAUDE.md:
+        // never expose provider/transport internals to users).
+        self::assertSame('narrative unavailable', $result->degradedMessage);
+        self::assertStringNotContainsString('no_credentials', (string)$result->degradedMessage);
     }
 
     public function testAWrongPatientCitationFreezesOnTheFirstAttemptWithNoRetry(): void

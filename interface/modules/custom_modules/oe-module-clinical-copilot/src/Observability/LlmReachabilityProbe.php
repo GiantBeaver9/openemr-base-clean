@@ -18,6 +18,7 @@ use Google\Auth\ApplicationDefaultCredentials;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
+use OpenEMR\Modules\ClinicalCopilot\Config\LlmEnv;
 
 /**
  * "LLM provider reachable via a Vertex countTokens call (exercises
@@ -28,10 +29,19 @@ use GuzzleHttp\Exception\GuzzleException;
  * `generateStructured()`, the reduce/chat/QA-review call shape) -- rather
  * than widen that interface for a probe only `/ready` needs, this class talks
  * to the SAME Vertex REST surface {@see \OpenEMR\Modules\ClinicalCopilot\Reduce\VertexLlmClient}
- * does, independently, using the identical env-var configuration
- * ({@see \OpenEMR\Modules\ClinicalCopilot\ReadPath\LlmClientFactory}'s
- * `CLINICAL_COPILOT_GCP_PROJECT_ID`/`CLINICAL_COPILOT_GCP_LOCATION`) so "is
- * Vertex configured" is decided identically everywhere in the module.
+ * does, independently, resolving project/location through the SAME
+ * {@see \OpenEMR\Modules\ClinicalCopilot\Config\LlmEnv} resolver the
+ * {@see \OpenEMR\Modules\ClinicalCopilot\ReadPath\LlmClientFactory} uses -- so
+ * "is Vertex configured" really is decided identically everywhere. (This
+ * previously read raw `getenv()`, which under mod_php can miss a value that
+ * only landed in `$_SERVER`/`$_ENV` or the local env file, making `/ready`
+ * report `unreachable` while chat/synthesis were actually serving.)
+ *
+ * Scope note: this probe is deliberately Vertex-only -- it reports the health
+ * of the production path. On the dev API-key fast-path
+ * ({@see \OpenEMR\Modules\ClinicalCopilot\Reduce\GeminiApiLlmClient}) it
+ * reports `unreachable` even though generation works; `/ready` answers "is the
+ * real (Vertex) provider reachable", not "can any client generate".
  *
  * No credentials configured (the honest dev/test default, per build-notes.md)
  * reports `unreachable` -- never an exception, never a 5xx on `/ready` itself
@@ -40,9 +50,6 @@ use GuzzleHttp\Exception\GuzzleException;
  */
 final class LlmReachabilityProbe
 {
-    private const ENV_PROJECT_ID = 'CLINICAL_COPILOT_GCP_PROJECT_ID';
-    private const ENV_LOCATION = 'CLINICAL_COPILOT_GCP_LOCATION';
-    private const DEFAULT_LOCATION = 'us-central1';
     private const OAUTH_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
     private const TIMEOUT_SECONDS = 5.0;
     private const PROBE_MODEL = 'gemini-2.5-flash';
@@ -57,15 +64,16 @@ final class LlmReachabilityProbe
      */
     public function probe(): string
     {
-        $projectId = trim((string)getenv(self::ENV_PROJECT_ID));
+        // Resolve through LlmEnv (getenv -> $_SERVER -> $_ENV -> local env
+        // file), identically to LlmClientFactory, so /ready's verdict matches
+        // what the real client would actually see. gcpLocation() already
+        // defaults to us-central1 when unset.
+        $projectId = LlmEnv::gcpProjectId();
         if ($projectId === '') {
             return 'unreachable';
         }
 
-        $location = trim((string)getenv(self::ENV_LOCATION));
-        if ($location === '') {
-            $location = self::DEFAULT_LOCATION;
-        }
+        $location = LlmEnv::gcpLocation();
 
         try {
             /** @var \Google\Auth\FetchAuthTokenInterface $credentials */

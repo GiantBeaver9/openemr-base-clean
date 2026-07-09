@@ -108,13 +108,13 @@ final readonly class VerifiedGenerationResult
             false,
             null,
             self::REASON_LLM_UNAVAILABLE,
-            // TEMPORARY debugging aid (see the constructor field docblock): the
-            // rich cause is appended to the physician-facing message so the
-            // return value itself explains what happened. Revert to the plain
-            // 'narrative unavailable' before any real-PHI deployment.
-            $llmUnavailableDetail !== null
-                ? 'narrative unavailable -- ' . $llmUnavailableDetail
-                : 'narrative unavailable',
+            // Physician-safe copy ONLY (CLAUDE.md: never expose provider/
+            // transport internals to users). The rich cause -- which can carry
+            // internal hostnames and provider error bodies -- is preserved
+            // separately in `$llmUnavailableDetail` below, where
+            // SynthesisReadPath routes it onto the llm_reduce trace span
+            // (errorDetail) and Reducer logs it; it is never surfaced here.
+            'narrative unavailable',
             null,
             ReduceUsage::none(),
             $llmUnavailableDetail,

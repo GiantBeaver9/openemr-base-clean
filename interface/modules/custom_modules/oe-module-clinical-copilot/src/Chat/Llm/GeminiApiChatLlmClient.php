@@ -17,7 +17,6 @@ namespace OpenEMR\Modules\ClinicalCopilot\Chat\Llm;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
-use GuzzleHttp\Exception\RequestException;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\LlmUnavailableException;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\GeminiApiSchemaTranslator;
 
@@ -110,19 +109,10 @@ final class GeminiApiChatLlmClient implements ChatLlmClientInterface
                 'timeout' => self::TIMEOUT_SECONDS,
             ]);
         } catch (GuzzleException $e) {
-            if ($e instanceof RequestException && $e->hasResponse()) {
-                $response = $e->getResponse();
-                $statusCode = $response->getStatusCode();
-                $bodySnippet = substr((string)$response->getBody(), 0, 500);
-                throw LlmUnavailableException::providerError(
-                    new \RuntimeException(
-                        'Gemini API HTTP ' . $statusCode . ($bodySnippet !== '' ? ': ' . $bodySnippet : ''),
-                        0,
-                        $e,
-                    ),
-                );
-            }
-            throw LlmUnavailableException::unreachable($e);
+            // Shared with VertexChatLlmClient so both providers classify HTTP
+            // errors (provider_error, body preserved) vs. transport failures
+            // (unreachable) identically -- see the trait.
+            throw self::classifyTransportError($e);
         }
 
         $latencyMs = (int)round((microtime(true) - $startedAt) * 1000);
@@ -138,7 +128,7 @@ final class GeminiApiChatLlmClient implements ChatLlmClientInterface
         }
 
         $tokensIn = self::extractTokenCount($decoded, 'promptTokenCount');
-        $tokensOut = self::extractTokenCount($decoded, 'candidatesTokenCount');
+        $tokensOut = self::extractOutputTokenCount($decoded);
         $parts = self::extractParts($decoded);
 
         $toolCalls = self::extractToolCalls($parts);

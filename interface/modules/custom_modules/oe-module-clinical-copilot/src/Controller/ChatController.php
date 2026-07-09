@@ -50,6 +50,7 @@ use OpenEMR\Modules\ClinicalCopilot\DocStore;
 use OpenEMR\Modules\ClinicalCopilot\Fact\Fact;
 use OpenEMR\Modules\ClinicalCopilot\Lab\Config\DbLabContractConfigProvider;
 use OpenEMR\Modules\ClinicalCopilot\Lab\LabSliceReader;
+use OpenEMR\Modules\ClinicalCopilot\Observability\LlmCostEstimate;
 use OpenEMR\Modules\ClinicalCopilot\Observability\RateLimit\CadenceCircuitBreaker;
 use OpenEMR\Modules\ClinicalCopilot\Observability\RateLimit\CadenceRateLimiter;
 use OpenEMR\Modules\ClinicalCopilot\Observability\TraceRecorder;
@@ -88,7 +89,7 @@ final class ChatController
 
     private static function model(): string
     {
-        return LlmRuntimeConfig::reduceAndChatModel();
+        return LlmRuntimeConfig::chatModel();
     }
 
     public function __construct(
@@ -433,7 +434,7 @@ final class ChatController
         $this->persistAssistantTurn($session, $answer, $confidence, $correlationId);
 
         $this->recordSpan($correlationId, 'verify', $turnT0, $answer->verifyStatus->value === 'passed' ? 'ok' : 'degraded', $session->pid, $session->userId, model: $answer->usage->modelVersion, tokensIn: $answer->usage->tokensIn, tokensOut: $answer->usage->tokensOut);
-        $this->recordSpan($correlationId, 'chat_turn', $turnT0, $answer->frozen ? 'error' : ($answer->verifyStatus->value === 'passed' ? 'ok' : 'degraded'), $session->pid, $session->userId, model: $answer->usage->modelVersion, tokensIn: $answer->usage->tokensIn, tokensOut: $answer->usage->tokensOut);
+        $this->recordSpan($correlationId, 'chat_turn', $turnT0, $answer->frozen ? 'error' : ($answer->verifyStatus->value === 'passed' ? 'ok' : 'degraded'), $session->pid, $session->userId, model: $answer->usage->modelVersion, tokensIn: $answer->usage->tokensIn, tokensOut: $answer->usage->tokensOut, costUsd: LlmCostEstimate::estimateUsd($answer->usage->modelVersion, $answer->usage->tokensIn, $answer->usage->tokensOut));
 
         if ($answer->frozen) {
             $this->sessionStore->freeze($session->id);
@@ -560,6 +561,7 @@ final class ChatController
         ?string $model = null,
         ?int $tokensIn = null,
         ?int $tokensOut = null,
+        ?float $costUsd = null,
     ): void {
         $durationMs = (int)round((microtime(true) - $t0) * 1000);
         $startedAt = \DateTimeImmutable::createFromFormat('U.u', number_format($t0, 6, '.', ''));
@@ -582,6 +584,7 @@ final class ChatController
             $model,
             $tokensIn,
             $tokensOut,
+            $costUsd,
         ));
     }
 

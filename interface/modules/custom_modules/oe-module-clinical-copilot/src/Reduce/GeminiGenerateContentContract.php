@@ -14,6 +14,9 @@ declare(strict_types=1);
 
 namespace OpenEMR\Modules\ClinicalCopilot\Reduce;
 
+use GuzzleHttp\Exception\GuzzleException;
+use GuzzleHttp\Exception\RequestException;
+
 /**
  * T18/T23: Vertex AI's `generateContent` REST endpoint and Google AI
  * Studio's `generateContent` REST endpoint (used by {@see GeminiApiLlmClient})
@@ -57,16 +60,52 @@ trait GeminiGenerateContentContract
     }
 
     /**
+     * Maps a Guzzle transport failure onto the right degradation category.
+     *
+     * Guzzle runs with `http_errors => true`, so a 4xx/5xx provider response
+     * (Vertex `400 INVALID_ARGUMENT` for a rejected schema, `403
+     * PERMISSION_DENIED`, `429 RESOURCE_EXHAUSTED` quota, `5xx`) arrives here
+     * as a {@see RequestException} that DOES carry a response -- that is a
+     * `provider_error` (with the provider's own error body preserved for the
+     * degrade detail / `degradedMessage()`'s rate-limit branch), NOT an
+     * `unreachable` transport failure. Only a genuine connect/DNS/timeout
+     * error (a {@see GuzzleException} with no response) is `unreachable`.
+     * Shared so BOTH the Vertex and AI-Studio clients classify identically --
+     * previously only the AI-Studio client did this and every Vertex HTTP
+     * error collapsed to `unreachable`, hiding quota/permission/schema faults
+     * on the one production path and never triggering the rate-limit banner.
+     */
+    private static function classifyTransportError(GuzzleException $e): LlmUnavailableException
+    {
+        if ($e instanceof RequestException && $e->hasResponse()) {
+            $response = $e->getResponse();
+            $statusCode = $response->getStatusCode();
+            $bodySnippet = substr((string)$response->getBody(), 0, 500);
+
+            return LlmUnavailableException::providerError(
+                new \RuntimeException(
+                    'Gemini generateContent HTTP ' . $statusCode . ($bodySnippet !== '' ? ': ' . $bodySnippet : ''),
+                    0,
+                    $e,
+                ),
+            );
+        }
+
+        return LlmUnavailableException::unreachable($e);
+    }
+
+    /**
      * @param array<string, mixed> $decoded
      */
     private static function extractText(array $decoded): string
     {
         $candidates = $decoded['candidates'] ?? null;
         if (!is_array($candidates) || $candidates === []) {
-            throw LlmUnavailableException::providerError(new \RuntimeException('Gemini response contained no candidates'));
+            throw self::noCandidatesError($decoded);
         }
 
         $firstCandidate = $candidates[0];
+        self::assertCleanFinish($firstCandidate);
         $parts = is_array($firstCandidate) ? ($firstCandidate['content']['parts'] ?? null) : null;
         if (!is_array($parts) || $parts === []) {
             throw LlmUnavailableException::providerError(new \RuntimeException('Gemini candidate contained no content parts'));
@@ -80,6 +119,78 @@ trait GeminiGenerateContentContract
         }
 
         throw LlmUnavailableException::providerError(new \RuntimeException('Gemini candidate contained no non-empty text part'));
+    }
+
+    /**
+     * A non-streaming `generateContent` candidate is only safe to read when
+     * it finished with `STOP` (the model emitted a complete answer). Any other
+     * terminal reason means the visible text is either TRUNCATED
+     * (`MAX_TOKENS` -- Gemini 2.5 "thinking" can consume the output budget and
+     * cut the JSON mid-structure) or WITHHELD (`SAFETY`/`RECITATION`/
+     * `BLOCKLIST`/`PROHIBITED_CONTENT`/`SPII`/`OTHER`). Returning that text
+     * verbatim ships invalid JSON downstream, where the verifier misreads it
+     * as "the model produced nothing citable" (a normal, gated generation)
+     * instead of the degradation it actually is -- two outcomes {@see LlmClientInterface}
+     * requires be kept distinct. Reject early with the real reason instead.
+     *
+     * @param mixed $candidate the first `candidates[]` entry as decoded
+     */
+    private static function assertCleanFinish(mixed $candidate): void
+    {
+        $finishReason = is_array($candidate) ? ($candidate['finishReason'] ?? null) : null;
+        if (!is_string($finishReason) || $finishReason === '') {
+            // Absent finishReason: nothing to assert (older/other surfaces).
+            return;
+        }
+
+        // STOP is the only clean completion; the unspecified sentinel is
+        // treated as clean rather than over-rejecting a benign response.
+        if ($finishReason === 'STOP' || $finishReason === 'FINISH_REASON_UNSPECIFIED') {
+            return;
+        }
+
+        throw LlmUnavailableException::providerError(new \RuntimeException(
+            'Gemini generateContent stopped early (finishReason=' . $finishReason
+            . '); the response is truncated or content-blocked, not a usable answer',
+        ));
+    }
+
+    /**
+     * No `candidates[]` at all usually means the PROMPT was blocked before any
+     * generation ran; Gemini reports that in `promptFeedback.blockReason`.
+     * Surface it so an operator sees "prompt blocked (SAFETY)" rather than a
+     * bare "no candidates".
+     *
+     * @param array<string, mixed> $decoded
+     */
+    private static function noCandidatesError(array $decoded): LlmUnavailableException
+    {
+        $feedback = $decoded['promptFeedback'] ?? null;
+        $blockReason = is_array($feedback) ? ($feedback['blockReason'] ?? null) : null;
+        if (is_string($blockReason) && $blockReason !== '') {
+            return LlmUnavailableException::providerError(new \RuntimeException(
+                'Gemini blocked the prompt before generating (blockReason=' . $blockReason . ')',
+            ));
+        }
+
+        return LlmUnavailableException::providerError(new \RuntimeException('Gemini response contained no candidates'));
+    }
+
+    /**
+     * The true output-side token burn for one call. Gemini 2.5 bills "thinking"
+     * at the output rate but reports it in a SEPARATE `usageMetadata` field
+     * (`thoughtsTokenCount`) that `candidatesTokenCount` EXCLUDES. Summing both
+     * is what lets `tokens_out` (persisted to mod_copilot_doc/trace) reflect
+     * what actually happened -- otherwise a thinking-heavy runaway hides behind
+     * a normal-looking candidate count and never shows up in the trace, which
+     * is exactly the anomaly the metering exists to catch.
+     *
+     * @param array<string, mixed> $decoded
+     */
+    private static function extractOutputTokenCount(array $decoded): int
+    {
+        return self::extractTokenCount($decoded, 'candidatesTokenCount')
+            + self::extractTokenCount($decoded, 'thoughtsTokenCount');
     }
 
     /**

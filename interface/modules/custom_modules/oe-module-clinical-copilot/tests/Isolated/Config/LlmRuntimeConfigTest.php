@@ -26,33 +26,37 @@ final class LlmRuntimeConfigTest extends TestCase
         putenv('CLINICAL_COPILOT_GEMINI_API_MODEL');
     }
 
-    public function testVertexUsesPro(): void
+    public function testVertexSplitsProSynthesisFromFlashChat(): void
     {
         putenv('CLINICAL_COPILOT_GCP_PROJECT_ID=test-project');
         putenv('CLINICAL_COPILOT_GEMINI_API_KEY');
         putenv('CLINICAL_COPILOT_GEMINI_API_MODEL');
 
-        self::assertSame('gemini-2.5-pro', LlmRuntimeConfig::reduceAndChatModel());
+        // Synthesis (higher-stakes, verifier-gated) stays on Pro; real-time
+        // chat runs Flash for cost/latency.
+        self::assertSame('gemini-2.5-pro', LlmRuntimeConfig::synthesisModel());
+        self::assertSame('gemini-2.5-flash', LlmRuntimeConfig::chatModel());
     }
 
-    public function testApiKeyDefaultsToPro(): void
+    public function testApiKeyDefaultsToProSynthesisAndFlashChat(): void
     {
         putenv('CLINICAL_COPILOT_GCP_PROJECT_ID');
         putenv('CLINICAL_COPILOT_GEMINI_API_KEY=test-key');
         putenv('CLINICAL_COPILOT_GEMINI_API_MODEL');
 
-        // Reduce/chat output must satisfy the V1-V6 verifier; only the Pro
-        // tier reliably does, so the API-key dev path defaults to Pro too
-        // (Flash remains opt-in via CLINICAL_COPILOT_GEMINI_API_MODEL).
-        self::assertSame('gemini-2.5-pro', LlmRuntimeConfig::reduceAndChatModel());
+        self::assertSame('gemini-2.5-pro', LlmRuntimeConfig::synthesisModel());
+        self::assertSame('gemini-2.5-flash', LlmRuntimeConfig::chatModel());
     }
 
-    public function testApiKeyModelOverride(): void
+    public function testApiKeyModelOverrideForcesBothSurfaces(): void
     {
         putenv('CLINICAL_COPILOT_GCP_PROJECT_ID');
         putenv('CLINICAL_COPILOT_GEMINI_API_KEY=test-key');
         putenv('CLINICAL_COPILOT_GEMINI_API_MODEL=gemini-2.0-flash');
 
-        self::assertSame('gemini-2.0-flash', LlmRuntimeConfig::reduceAndChatModel());
+        // The dev/API-key override is a single knob and pins both surfaces
+        // (e.g. a free-tier key that lacks Pro quota).
+        self::assertSame('gemini-2.0-flash', LlmRuntimeConfig::synthesisModel());
+        self::assertSame('gemini-2.0-flash', LlmRuntimeConfig::chatModel());
     }
 }
