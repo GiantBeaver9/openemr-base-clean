@@ -132,7 +132,7 @@ final class VertexLlmClient implements LlmClientInterface
             self::extractText($decoded),
             $req->model,
             self::extractTokenCount($decoded, 'promptTokenCount'),
-            self::extractTokenCount($decoded, 'candidatesTokenCount'),
+            self::extractOutputTokenCount($decoded),
             $latencyMs,
         );
     }

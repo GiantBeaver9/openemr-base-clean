@@ -147,4 +147,22 @@ final class GeminiChatContentContractTest extends TestCase
 
         self::assertSame(LlmUnavailableException::REASON_UNREACHABLE, $classified->reason());
     }
+
+    /**
+     * @param array<string, mixed> $decoded
+     */
+    private function extractOutputTokenCount(array $decoded): int
+    {
+        $method = new ReflectionMethod(GeminiApiChatLlmClient::class, 'extractOutputTokenCount');
+        $method->setAccessible(true);
+
+        return $method->invoke(null, $decoded);
+    }
+
+    public function testOutputTokenCountFoldsInThinkingTokens(): void
+    {
+        $decoded = ['usageMetadata' => ['candidatesTokenCount' => 50, 'thoughtsTokenCount' => 1200]];
+
+        self::assertSame(1250, $this->extractOutputTokenCount($decoded));
+    }
 }

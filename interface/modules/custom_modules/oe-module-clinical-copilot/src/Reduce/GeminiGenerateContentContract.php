@@ -177,6 +177,23 @@ trait GeminiGenerateContentContract
     }
 
     /**
+     * The true output-side token burn for one call. Gemini 2.5 bills "thinking"
+     * at the output rate but reports it in a SEPARATE `usageMetadata` field
+     * (`thoughtsTokenCount`) that `candidatesTokenCount` EXCLUDES. Summing both
+     * is what lets `tokens_out` (persisted to mod_copilot_doc/trace) reflect
+     * what actually happened -- otherwise a thinking-heavy runaway hides behind
+     * a normal-looking candidate count and never shows up in the trace, which
+     * is exactly the anomaly the metering exists to catch.
+     *
+     * @param array<string, mixed> $decoded
+     */
+    private static function extractOutputTokenCount(array $decoded): int
+    {
+        return self::extractTokenCount($decoded, 'candidatesTokenCount')
+            + self::extractTokenCount($decoded, 'thoughtsTokenCount');
+    }
+
+    /**
      * @param array<string, mixed> $decoded
      */
     private static function extractTokenCount(array $decoded, string $field): int

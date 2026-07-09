@@ -128,7 +128,7 @@ final class GeminiApiChatLlmClient implements ChatLlmClientInterface
         }
 
         $tokensIn = self::extractTokenCount($decoded, 'promptTokenCount');
-        $tokensOut = self::extractTokenCount($decoded, 'candidatesTokenCount');
+        $tokensOut = self::extractOutputTokenCount($decoded);
         $parts = self::extractParts($decoded);
 
         $toolCalls = self::extractToolCalls($parts);

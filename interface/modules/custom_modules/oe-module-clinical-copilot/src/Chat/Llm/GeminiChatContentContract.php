@@ -255,6 +255,21 @@ trait GeminiChatContentContract
     }
 
     /**
+     * The true output-side token burn for one chat round -- sums
+     * `candidatesTokenCount` with Gemini 2.5's separately-reported
+     * `thoughtsTokenCount` (which the former excludes) so a thinking-heavy
+     * turn is visible in the trace rather than hidden. Mirrors
+     * {@see \OpenEMR\Modules\ClinicalCopilot\Reduce\GeminiGenerateContentContract::extractOutputTokenCount()}.
+     *
+     * @param array<string, mixed> $decoded
+     */
+    private static function extractOutputTokenCount(array $decoded): int
+    {
+        return self::extractTokenCount($decoded, 'candidatesTokenCount')
+            + self::extractTokenCount($decoded, 'thoughtsTokenCount');
+    }
+
+    /**
      * @param array<string, mixed> $decoded
      */
     private static function extractTokenCount(array $decoded, string $field): int

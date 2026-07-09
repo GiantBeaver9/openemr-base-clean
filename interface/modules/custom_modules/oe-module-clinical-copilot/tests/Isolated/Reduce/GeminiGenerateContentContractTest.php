@@ -195,4 +195,37 @@ final class GeminiGenerateContentContractTest extends TestCase
 
         self::assertSame(LlmUnavailableException::REASON_UNREACHABLE, $classified->reason());
     }
+
+    /**
+     * @param array<string, mixed> $decoded
+     */
+    private function extractOutputTokenCount(array $decoded): int
+    {
+        $method = new ReflectionMethod(GeminiApiLlmClient::class, 'extractOutputTokenCount');
+        $method->setAccessible(true);
+
+        return $method->invoke(null, $decoded);
+    }
+
+    /**
+     * #7: `candidatesTokenCount` excludes Gemini 2.5 thinking; tokens_out must
+     * fold in `thoughtsTokenCount` so a thinking-heavy runaway shows up in the
+     * trace instead of hiding behind a normal-looking candidate count.
+     */
+    public function testOutputTokenCountFoldsInThinkingTokens(): void
+    {
+        $decoded = ['usageMetadata' => ['candidatesTokenCount' => 100, 'thoughtsTokenCount' => 900]];
+
+        self::assertSame(1000, $this->extractOutputTokenCount($decoded));
+    }
+
+    public function testOutputTokenCountWithoutThinkingIsJustCandidates(): void
+    {
+        self::assertSame(42, $this->extractOutputTokenCount(['usageMetadata' => ['candidatesTokenCount' => 42]]));
+    }
+
+    public function testOutputTokenCountIsZeroWhenUsageAbsent(): void
+    {
+        self::assertSame(0, $this->extractOutputTokenCount([]));
+    }
 }
