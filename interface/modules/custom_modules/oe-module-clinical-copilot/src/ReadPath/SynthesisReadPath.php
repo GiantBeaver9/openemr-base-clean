@@ -93,7 +93,10 @@ final class SynthesisReadPath
      */
     private const CODE_SET_VERSION = '1';
 
-    private const PROMPT_VERSION = 'reduce-v1';
+    // reduce-v2: system instructions now cap the narrative at a 3-5 claim
+    // brief. Bumped so existing (longer) cached docs are treated as stale and
+    // regenerate. MUST stay in lockstep with ChatFreshnessChecker::PROMPT_VERSION.
+    private const PROMPT_VERSION = 'reduce-v2';
 
     private static function model(): string
     {

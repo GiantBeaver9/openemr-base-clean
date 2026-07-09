@@ -54,7 +54,10 @@ final class ChatFreshnessChecker
 {
     private const CODE_SET_VERSION = '1';
     private const DOC_TYPE = 'endo-previsit-v1';
-    private const PROMPT_VERSION = 'reduce-v1';
+    // Lockstep with SynthesisReadPath::PROMPT_VERSION (bumped to reduce-v2 when
+    // the narrative was capped to a 3-5 claim brief) -- this digest MUST match
+    // the one SynthesisReadPath computed for the cached doc.
+    private const PROMPT_VERSION = 'reduce-v2';
 
     private static function model(): string
     {

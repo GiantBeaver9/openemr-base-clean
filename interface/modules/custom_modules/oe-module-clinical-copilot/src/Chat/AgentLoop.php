@@ -64,6 +64,15 @@ final class AgentLoop
      *        labs… verifying…')") -- a no-op by default so every non-SSE
      *        caller (including every test) is unaffected; `public/chat.php`
      *        is the one caller that supplies a real emitter.
+     * @param bool $toolsEnabled DISABLED by default. The chat brief is a
+     *        single-shot answer over the facts we already send (the session's
+     *        preloaded synthesis facts) -- the doctor skims it to prep for THIS
+     *        appointment; it is NOT a deep-research agent. With tools off the
+     *        model answers in one round with no tool loop (the source of the
+     *        re-call / budget-exhaustion / timeout failures). The tool code
+     *        below is kept intact and dormant; the test factory passes true to
+     *        keep exercising it, and a future "search all appointments" feature
+     *        can re-enable it here.
      */
     public function __construct(
         private readonly ChatLlmClientInterface $llmClient,
@@ -74,6 +83,7 @@ final class AgentLoop
         private readonly PatientIdentifiers $identifiers,
         private readonly PromptContext $context,
         private readonly ?\Closure $onStatus = null,
+        private readonly bool $toolsEnabled = false,
     ) {
     }
 
@@ -112,7 +122,7 @@ final class AgentLoop
 
         while ($budget->startRound()) {
             $this->emitStatus($budget->roundsUsed() === 1 ? 'thinking…' : 'checking whether more data is needed…');
-            $toolsOffered = (!$forceFinalAnswer && $budget->remainingCalls() > 0) ? ToolCatalog::all() : [];
+            $toolsOffered = ($this->toolsEnabled && !$forceFinalAnswer && $budget->remainingCalls() > 0) ? ToolCatalog::all() : [];
 
             // Bound only what the model is shown; $facts stays full for
             // accumulation and for the verifier's fact set (a windowed cited

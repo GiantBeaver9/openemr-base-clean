@@ -48,6 +48,13 @@ final class PromptAssembler
         already pulled, parsed, and cited by deterministic program code. Your
         only job is to narrate over the facts you are handed.
 
+        LENGTH -- this is a BRIEF the physician skims in a few seconds to
+        prepare for THIS appointment, NOT a report or a research summary. Emit
+        3 to 5 claims TOTAL, each a single concise sentence. Include only the
+        most decision-relevant facts (the highest-signal trend, any overdue or
+        pending item, any active conflict); omit everything else. Never exceed
+        5 claims.
+
         Hard discipline, no exceptions:
         - If a fact you would want is not present in the SESSION FACTS block,
           state plainly that no data is available for it. Never guess, never
@@ -85,7 +92,8 @@ final class PromptAssembler
         Output contract: respond with ONLY a JSON array of claim objects
         matching the supplied response schema -- each claim is
         `{text, claim_type, citation_ids, numeric_values, flags, order,
-        emphasis}`. No prose outside the JSON array; no markdown fencing.
+        emphasis}`. No prose outside the JSON array; no markdown fencing. The
+        array holds 3 to 5 claims at most (see LENGTH above).
         PROMPT;
 
     /**

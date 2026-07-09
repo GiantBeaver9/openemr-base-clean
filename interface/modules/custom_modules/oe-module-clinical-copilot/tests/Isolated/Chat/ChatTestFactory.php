@@ -65,6 +65,9 @@ final class ChatTestFactory
             self::identifiers(),
             self::promptContext(),
             $onStatus,
+            // Tests exercise the (production-dormant) tool loop -- keep it on
+            // here so the dedup/budget/tool-failure coverage still runs.
+            toolsEnabled: true,
         );
     }
 
