@@ -8,4 +8,5 @@
 !railway-preinstall-db.sh
 !railway-ensure-ssl.sh
 !railway-configure-apache.sh
+!railway-install-copilot.sh
 !patch-flex-openemr.sh
