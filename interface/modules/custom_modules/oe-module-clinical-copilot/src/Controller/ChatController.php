@@ -84,6 +84,13 @@ use Ramsey\Uuid\Uuid;
 final class ChatController
 {
     private const MAX_TURNS_PER_SESSION = 30;
+
+    // Only the most recent turn rows are replayed into the prompt. The full
+    // transcript was re-sent every turn (BL-3), so per-turn token usage climbed
+    // with the conversation and eventually tripped the provider's rate/quota
+    // limit -- the chat "worked, then stopped after a few messages". A quick
+    // per-appointment brief only needs recent context, so cap it.
+    private const MAX_TRANSCRIPT_TURNS = 16;
     private const DOC_TYPE = 'endo-previsit-chat-v1';
     private const PROMPT_VERSION = 'chat-v1';
 
@@ -493,18 +500,18 @@ final class ChatController
             // Chat is interactive and answers over already-extracted facts, so
             // it runs a deliberately small thinking budget -- speed over deep
             // reasoning. The richer budget is reserved for the narrative.
-            // Budgets doubled to move QA forward: thinkingBudget 5000 -> 10000
-            // and maxOutputTokens 24576 -> 49152. With the QA/verifier gate off
-            // there is headroom to spend on accuracy, and the larger output cap
-            // keeps a long answer from being truncated (which the finishReason
-            // guard would otherwise surface as a degrade). Both valid for Flash
-            // (thinking 0-24576; output <= 65536).
+            // Chat answers are small and concise, so these are kept modest --
+            // thinkingBudget 2048, maxOutputTokens 8192. The earlier 10000/49152
+            // were re-spent EVERY turn and drove per-minute token usage into the
+            // provider's rate/quota limit after a few messages; a tight per-turn
+            // budget (plus the bounded transcript above) keeps a session's token
+            // rate flat instead of climbing. Both valid for Flash.
             new PromptContext(
                 self::DOC_TYPE,
                 self::PROMPT_VERSION,
                 self::model(),
-                maxOutputTokens: 49152,
-                thinkingBudget: 10000,
+                maxOutputTokens: 8192,
+                thinkingBudget: 2048,
             ),
             $onStatus,
         );
@@ -717,6 +724,10 @@ final class ChatController
      */
     private static function renderTranscript(array $turns): array
     {
+        // Keep only the most recent turns so the prompt does not grow unbounded
+        // across the session (see MAX_TRANSCRIPT_TURNS).
+        $turns = array_slice($turns, -self::MAX_TRANSCRIPT_TURNS);
+
         $lines = [];
         foreach ($turns as $turn) {
             if ($turn->role === ChatTurnRole::User) {

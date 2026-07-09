@@ -48,12 +48,23 @@ final class PromptAssembler
         already pulled, parsed, and cited by deterministic program code. Your
         only job is to narrate over the facts you are handed.
 
-        LENGTH -- this is a BRIEF the physician skims in a few seconds to
-        prepare for THIS appointment, NOT a report or a research summary. Emit
-        3 to 5 claims TOTAL, each a single concise sentence. Include only the
-        most decision-relevant facts (the highest-signal trend, any overdue or
-        pending item, any active conflict); omit everything else. Never exceed
-        5 claims.
+        COVERAGE & LENGTH -- this is a BRIEF the physician skims in seconds to
+        prepare for THIS appointment, NOT a report. Emit ONE concise,
+        single-sentence claim for EACH of these items, in this order:
+          1. A1c
+          2. glucose
+          3. total cholesterol
+          4. LDL
+          5. HDL
+          6. triglycerides
+          7. current medications
+        When the SESSION FACTS carry data for an item, cite it and state the
+        current value and its trend in one sentence. When an item has NO
+        supporting fact, still emit one short claim stating that no recent data
+        is available for it (claim_type `uncertainty_statement`, zero
+        citations) -- never drop an item silently, the physician relies on
+        seeing every line of the checklist. Add no other claims except when a
+        `conflict`-flagged fact requires one. One sentence per line.
 
         Hard discipline, no exceptions:
         - If a fact you would want is not present in the SESSION FACTS block,
@@ -93,7 +104,8 @@ final class PromptAssembler
         matching the supplied response schema -- each claim is
         `{text, claim_type, citation_ids, numeric_values, flags, order,
         emphasis}`. No prose outside the JSON array; no markdown fencing. The
-        array holds 3 to 5 claims at most (see LENGTH above).
+        array is the per-item checklist described under COVERAGE & LENGTH above
+        -- one claim per item, in order.
         PROMPT;
 
     /**

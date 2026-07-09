@@ -93,10 +93,11 @@ final class SynthesisReadPath
      */
     private const CODE_SET_VERSION = '1';
 
-    // reduce-v2: system instructions now cap the narrative at a 3-5 claim
-    // brief. Bumped so existing (longer) cached docs are treated as stale and
-    // regenerate. MUST stay in lockstep with ChatFreshnessChecker::PROMPT_VERSION.
-    private const PROMPT_VERSION = 'reduce-v2';
+    // reduce-v3: narrative is now a fixed per-item checklist (A1c, glucose,
+    // total cholesterol, LDL, HDL, triglycerides, medications -- one line each).
+    // Bumped so existing cached docs are treated as stale and regenerate in the
+    // new shape. MUST stay in lockstep with ChatFreshnessChecker::PROMPT_VERSION.
+    private const PROMPT_VERSION = 'reduce-v3';
 
     private static function model(): string
     {
@@ -323,11 +324,12 @@ final class SynthesisReadPath
             $correlationId,
             $extraction->survivingFacts,
             $identifiers,
-            // The narrative is now a short 3-5 claim brief generated on page
-            // load, so the thinking budget is cut 8192 -> 2048: enough to reason
-            // over the facts, small enough to keep the on-load synthesis fast
-            // and cheap (it no longer needs the deep budget a long summary did).
-            new PromptContext(self::DOC_TYPE, self::digestPromptVersion(), self::model(), thinkingBudget: 2048),
+            // The narrative is a fixed 7-item checklist generated on page load.
+            // thinkingBudget 4096: enough headroom to reason over each item's
+            // trend without dragging the on-load generation out. Spending here
+            // is acceptable -- the brief is the time-saving artifact and is
+            // generated once per (patient, fact-digest).
+            new PromptContext(self::DOC_TYPE, self::digestPromptVersion(), self::model(), thinkingBudget: 4096),
         );
         $verificationContext = new VerificationContext(
             new SessionFactSet($pid, $extraction->survivingFacts),
