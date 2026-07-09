@@ -43,6 +43,19 @@ use PHPUnit\Framework\TestCase;
  */
 final class VerifiedGenerationTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        // This suite asserts the verifier GATE's behaviour, so pin it enforced
+        // regardless of the (currently-disabled) runtime default -- see
+        // OpenEMR\Modules\ClinicalCopilot\Verify\VerificationPolicy.
+        putenv('CLINICAL_COPILOT_VERIFY_ENFORCE=1');
+    }
+
+    protected function tearDown(): void
+    {
+        putenv('CLINICAL_COPILOT_VERIFY_ENFORCE');
+    }
+
     public function testFirstAttemptCleanPassesWithoutAnyRetry(): void
     {
         $client = new QueuedLlmClient([self::cleanResponse()]);

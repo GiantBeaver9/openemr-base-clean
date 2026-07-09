@@ -63,6 +63,10 @@ final class SynthesisReadPathTest extends TestCase
 
     protected function setUp(): void
     {
+        // These evals assert the verifier GATE's behaviour, so pin it enforced
+        // regardless of the (currently-disabled) runtime default -- see
+        // OpenEMR\Modules\ClinicalCopilot\Verify\VerificationPolicy.
+        putenv('CLINICAL_COPILOT_VERIFY_ENFORCE=1');
         QueryUtils::startTransaction();
         $this->pid = self::insertSyntheticPatient();
         $this->docStore = new DocStore();
@@ -71,6 +75,7 @@ final class SynthesisReadPathTest extends TestCase
 
     protected function tearDown(): void
     {
+        putenv('CLINICAL_COPILOT_VERIFY_ENFORCE');
         QueryUtils::rollbackTransaction();
     }
 

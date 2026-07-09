@@ -40,6 +40,19 @@ use PHPUnit\Framework\TestCase;
  */
 final class PromptInjectionIgnoredTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        // Asserts the verifier GATE rejects an injected/ungrounded answer, so
+        // pin it enforced regardless of the (currently-disabled) runtime
+        // default -- see OpenEMR\Modules\ClinicalCopilot\Verify\VerificationPolicy.
+        putenv('CLINICAL_COPILOT_VERIFY_ENFORCE=1');
+    }
+
+    protected function tearDown(): void
+    {
+        putenv('CLINICAL_COPILOT_VERIFY_ENFORCE');
+    }
+
     public function testBannedClaimStillFailsEvenWhenTheTriggeringFactContainsInjectionText(): void
     {
         $citations = [new Citation('procedure_result', 1, 'result', DateSource::Collected)];

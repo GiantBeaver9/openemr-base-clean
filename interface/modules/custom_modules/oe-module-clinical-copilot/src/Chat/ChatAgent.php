@@ -24,6 +24,7 @@ use OpenEMR\Modules\ClinicalCopilot\Verify\Sev1Signal;
 use OpenEMR\Modules\ClinicalCopilot\Verify\SessionFactSet;
 use OpenEMR\Modules\ClinicalCopilot\Verify\VerificationContext;
 use OpenEMR\Modules\ClinicalCopilot\Verify\VerificationPath;
+use OpenEMR\Modules\ClinicalCopilot\Verify\VerificationPolicy;
 use OpenEMR\Modules\ClinicalCopilot\Verify\Verifier;
 use OpenEMR\Modules\ClinicalCopilot\Verify\Verdict;
 
@@ -113,6 +114,16 @@ final class ChatAgent
 
         if ($verification->hasSev1()) {
             return ChatAnswer::frozen($loopResult, $verification->verdicts, self::sev1Signal($correlationId, $pid, $verification->find(CheckId::PatientIdentity)), self::usage($loopResult), 1);
+        }
+
+        // TEMP (QA): verifier content gate disabled -- return the produced
+        // answer as-is rather than gating, running the fail-closed LLM retry,
+        // and degrading to "couldn't produce a verifiable answer". The verifier
+        // still ran above (verdicts recorded) and the sev-1 wrong-patient
+        // freeze above still applies. Re-enable via VerificationPolicy
+        // (CLINICAL_COPILOT_VERIFY_ENFORCE=1 or flip its default).
+        if (!VerificationPolicy::gateEnforced()) {
+            return ChatAnswer::passed($loopResult, $verification->claims ?? [], $verification->verdicts, self::usage($loopResult), 1);
         }
 
         if ($verification->allPassed() && ($verification->claims ?? []) !== []) {
