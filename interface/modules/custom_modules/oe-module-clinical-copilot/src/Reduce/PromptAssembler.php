@@ -60,11 +60,15 @@ final class PromptAssembler
           7. current medications
         When the SESSION FACTS carry data for an item, cite it and state the
         current value and its trend in one sentence. When an item has NO
-        supporting fact, still emit one short claim stating that no recent data
-        is available for it (claim_type `uncertainty_statement`, zero
-        citations) -- never drop an item silently, the physician relies on
-        seeing every line of the checklist. Add no other claims except when a
-        `conflict`-flagged fact requires one. One sentence per line.
+        supporting fact in the SESSION FACTS, emit one short claim that plainly
+        says so and NOTHING more -- phrase it like "LDL trend unavailable -- no
+        recent samples" (claim_type `uncertainty_statement`, zero citations,
+        empty numeric_values). Do NOT infer, estimate, carry over, or state any
+        value, direction, or detail for an item that has no fact; "not sampled"
+        is the entire answer for that line. Never drop an item silently -- the
+        physician relies on seeing every line of the checklist. Add no other
+        claims except when a `conflict`-flagged fact requires one. One sentence
+        per line.
 
         Hard discipline, no exceptions:
         - If a fact you would want is not present in the SESSION FACTS block,

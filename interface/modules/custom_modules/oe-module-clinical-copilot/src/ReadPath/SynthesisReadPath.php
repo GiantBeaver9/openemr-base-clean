@@ -93,11 +93,11 @@ final class SynthesisReadPath
      */
     private const CODE_SET_VERSION = '1';
 
-    // reduce-v3: narrative is now a fixed per-item checklist (A1c, glucose,
-    // total cholesterol, LDL, HDL, triglycerides, medications -- one line each).
-    // Bumped so existing cached docs are treated as stale and regenerate in the
-    // new shape. MUST stay in lockstep with ChatFreshnessChecker::PROMPT_VERSION.
-    private const PROMPT_VERSION = 'reduce-v3';
+    // reduce-v4: per-item checklist with explicit "no recent samples" wording
+    // for items with no fact (never fabricate a value). Bumped so existing
+    // cached docs are treated as stale and regenerate in the new shape. MUST
+    // stay in lockstep with ChatFreshnessChecker::PROMPT_VERSION.
+    private const PROMPT_VERSION = 'reduce-v4';
 
     private static function model(): string
     {
