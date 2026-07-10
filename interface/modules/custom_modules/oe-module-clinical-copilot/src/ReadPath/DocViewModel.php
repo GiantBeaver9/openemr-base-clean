@@ -137,6 +137,193 @@ final class DocViewModel
     }
 
     /**
+     * The "Recent Narratives" tab: the last {@see $limit} PAST narrative
+     * attempts (never the one already shown in the Current Narrative tab),
+     * each re-rendered from its OWN persisted fact snapshot
+     * ({@see SynthesisDocPayload}) so a past attempt's citations resolve
+     * against the facts that were true when it was generated, not today's
+     * chart. A degraded attempt (no claims) is skipped -- there is nothing to
+     * show in a narrative tab for it.
+     *
+     * @param list<DocRow> $history most-recent-first ({@see DocHistoryReader::forPid()})
+     * @return list<array{id: int, computed_at: string, narrative: list<array{text: string, claim_type: string, flags: list<string>, emphasis: ?string, citations: list<array{label: string, url: ?string}>}>}>
+     */
+    public static function recentNarratives(array $history, string $webRoot, ?int $excludeDocId, int $limit = 3): array
+    {
+        $out = [];
+        foreach ($history as $row) {
+            if (count($out) >= $limit) {
+                break;
+            }
+            if ($excludeDocId !== null && $row->id === $excludeDocId) {
+                continue;
+            }
+
+            $payload = SynthesisDocPayload::fromDocArray($row->doc);
+            if ($payload->claims === null || $payload->claims === []) {
+                continue;
+            }
+
+            $factById = [];
+            foreach ($payload->facts as $fact) {
+                $factById[$fact->factId] = $fact;
+            }
+
+            $narrative = self::buildNarrative($payload->claims, $factById, $webRoot);
+            if ($narrative === []) {
+                continue;
+            }
+
+            $out[] = [
+                'id' => $row->id,
+                'computed_at' => $row->computedAt->format('Y-m-d H:i'),
+                'narrative' => $narrative,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * The "Previous Results / Visits" subtab: one line per past synthesis
+     * attempt. This module has no separate "visit" record of its own (a
+     * `DocRow` is keyed by `pid` + `fact_digest`, not by appointment) --
+     * `computed_at` is the closest honest proxy, alongside the appointment id
+     * when {@see \OpenEMR\Modules\ClinicalCopilot\DocStore} happened to have
+     * one at insert time.
+     *
+     * A one-liner needs only the claim COUNT, not the claims themselves, so
+     * this reads `doc['claims']` straight off the raw decoded row rather
+     * than going through {@see SynthesisDocPayload::fromDocArray()} -- which
+     * would also hydrate and validate every persisted Fact just to be
+     * discarded, unnecessary work for up to
+     * {@see DocHistoryReader::forPid()}'s 50-row default on every page load.
+     *
+     * @param list<DocRow> $history most-recent-first
+     * @return list<array{id: int, computed_at: string, appt_id: ?int, verify_status: string, claim_count: int}>
+     */
+    public static function visitRows(array $history): array
+    {
+        return array_map(static function (DocRow $row): array {
+            $claimsRaw = $row->doc['claims'] ?? null;
+
+            return [
+                'id' => $row->id,
+                'computed_at' => $row->computedAt->format('Y-m-d H:i'),
+                'appt_id' => $row->apptId,
+                'verify_status' => $row->verifyStatus->value,
+                'claim_count' => is_array($claimsRaw) ? count($claimsRaw) : 0,
+            ];
+        }, $history);
+    }
+
+    /**
+     * The "Previous Results / Variance" subtab: every lab and vitals draw
+     * that has a computable "change vs prior", flattened to ONE ROW PER
+     * DRAW/READING across all analytes -- the Chart Facts tab keeps these
+     * split into a tab per analyte, but this view is deliberately one flat,
+     * zebra-stripable table.
+     *
+     * Labs are already split per analyte upstream ({@see $analyteByFactId}),
+     * so consolidating each analyte's rows separately can never confuse one
+     * analyte's delta for another's. Vitals need the same per-series
+     * isolation applied here explicitly: {@see \OpenEMR\Modules\ClinicalCopilot\Capability\VitalsTrend}
+     * emits weight and BMI as two independent series that often share a
+     * clinical_date (same visit, same form_vitals row) -- consolidating them
+     * as one combined bucket would let a same-day weight delta collide with
+     * that day's BMI delta in {@see self::consolidateLabRows()}'s
+     * date-keyed lookup. Grouping vitals by their citation `field` first
+     * (weight/BMI/bp, via {@see self::vitalsMetricKey()}) keeps each series
+     * isolated exactly like the per-analyte lab split does. Blood pressure
+     * has no derived-fact math (VitalsTrend's documented v1 scope limit) and
+     * is shown as-is with no change column.
+     *
+     * @param list<Fact> $facts current extraction's full fact set
+     * @param array<string, array{key: string, label: string}> $analyteByFactId
+     * @return list<array<string, mixed>> most-recent-first, each row carrying a 'group_label' (the analyte/metric name)
+     */
+    public static function varianceRows(array $facts, string $webRoot, array $analyteByFactId): array
+    {
+        /** @var array<string, array{label: string, rows: list<array<string, mixed>>}> $labByAnalyte */
+        $labByAnalyte = [];
+        /** @var array<string, list<array<string, mixed>>> $vitalsByMetric */
+        $vitalsByMetric = [];
+
+        foreach ($facts as $fact) {
+            if ($fact->capability->value === 'control_proxy') {
+                $analyte = $analyteByFactId[$fact->factId] ?? null;
+                $key = $analyte['key'] ?? 'unlabeled';
+                $labByAnalyte[$key]['label'] ??= $analyte['label'] ?? 'Lab';
+                $labByAnalyte[$key]['rows'][] = self::factRow($fact, $webRoot, $analyteByFactId);
+                continue;
+            }
+
+            if ($fact->capability->value === 'vitals_trend') {
+                $metric = self::vitalsMetricKey($fact);
+                if ($metric !== null) {
+                    $vitalsByMetric[$metric][] = self::factRow($fact, $webRoot, $analyteByFactId);
+                }
+            }
+        }
+
+        $rows = [];
+        foreach ($labByAnalyte as $bucket) {
+            [$consolidated] = self::consolidateLabRows($bucket['rows']);
+            foreach ($consolidated as $row) {
+                $row['group_label'] = $bucket['label'];
+                $rows[] = $row;
+            }
+        }
+
+        foreach ($vitalsByMetric as $metric => $metricRows) {
+            if ($metric === 'bp') {
+                foreach ($metricRows as $row) {
+                    $row['group_label'] = 'Blood pressure';
+                    $row['change_display'] = null;
+                    $rows[] = $row;
+                }
+                continue;
+            }
+
+            [$consolidated] = self::consolidateLabRows($metricRows);
+            $label = $metric === 'weight' ? 'Weight' : 'BMI';
+            foreach ($consolidated as $row) {
+                $row['group_label'] = $label;
+                $rows[] = $row;
+            }
+        }
+
+        usort($rows, static function (array $a, array $b): int {
+            $ad = is_string($a['clinical_date'] ?? null) ? $a['clinical_date'] : '';
+            $bd = is_string($b['clinical_date'] ?? null) ? $b['clinical_date'] : '';
+
+            return $bd <=> $ad;
+        });
+
+        return $rows;
+    }
+
+    /**
+     * Which VitalsTrend series a Fact belongs to, read off its own citation
+     * field rather than re-deriving it from capability + kind -- every vital
+     * Fact and every derived fact built from it carries this same field on
+     * every citation ({@see \OpenEMR\Modules\ClinicalCopilot\Capability\VitalsTrend::buildNumericVital()},
+     * {@see \OpenEMR\Modules\ClinicalCopilot\Capability\Support\DerivedFacts::deltas()}
+     * unions the series' own citations), so this is exact, not a guess.
+     */
+    private static function vitalsMetricKey(Fact $fact): ?string
+    {
+        $field = $fact->citations[0]->field ?? null;
+
+        return match ($field) {
+            'weight' => 'weight',
+            'BMI' => 'bmi',
+            'bps', 'bpd' => 'bp',
+            default => null,
+        };
+    }
+
+    /**
      * ARCHITECTURE.md §2.5: "hover: exactly which checks V1-V6 ran and
      * their verdicts."
      *

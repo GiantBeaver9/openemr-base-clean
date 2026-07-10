@@ -87,7 +87,7 @@ if ($pid <= 0) {
         'patient' => null,
         'history_rows' => [],
         'doc' => ['capability_crash' => false],
-        'view_model' => ['narrative' => [], 'fact_groups' => []],
+        'view_model' => ['narrative' => [], 'fact_groups' => [], 'recent_narratives' => [], 'visit_rows' => [], 'variance_rows' => []],
         'visit_label' => null,
     ];
 } elseif ($isPost && ($_POST['action'] ?? '') === 'regenerate') {
@@ -201,9 +201,26 @@ function buildDocTemplateVars(
         $templateVars['doc'] = DocViewModel::summary($viewData['result']);
         $analyteByFactId = (new FactAnalyteResolver())->labelByFactId($viewData['result']->facts);
         $templateVars['view_model'] = DocViewModel::build($viewData['result'], $webRoot, $analyteByFactId);
+        $templateVars['view_model']['recent_narratives'] = DocViewModel::recentNarratives(
+            $viewData['history'],
+            $webRoot,
+            $viewData['result']->docId,
+        );
+        $templateVars['view_model']['visit_rows'] = DocViewModel::visitRows($viewData['history']);
+        $templateVars['view_model']['variance_rows'] = DocViewModel::varianceRows(
+            $viewData['result']->facts,
+            $webRoot,
+            $analyteByFactId,
+        );
     } else {
         $templateVars['doc'] = ['capability_crash' => false];
-        $templateVars['view_model'] = ['narrative' => [], 'fact_groups' => []];
+        $templateVars['view_model'] = [
+            'narrative' => [],
+            'fact_groups' => [],
+            'recent_narratives' => [],
+            'visit_rows' => [],
+            'variance_rows' => [],
+        ];
     }
 
     return $templateVars;

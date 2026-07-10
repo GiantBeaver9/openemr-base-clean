@@ -14,6 +14,8 @@ declare(strict_types=1);
 
 namespace OpenEMR\Modules\ClinicalCopilot\Tests\Isolated\ReadPath;
 
+use OpenEMR\Modules\ClinicalCopilot\Capability\Support\DerivedFacts;
+use OpenEMR\Modules\ClinicalCopilot\Doc\DocRow;
 use OpenEMR\Modules\ClinicalCopilot\Doc\QaStatus;
 use OpenEMR\Modules\ClinicalCopilot\Doc\RegenReason;
 use OpenEMR\Modules\ClinicalCopilot\Doc\VerifyStatus;
@@ -31,6 +33,7 @@ use OpenEMR\Modules\ClinicalCopilot\Fact\Flag;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\Claim;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\ClaimType;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\DocViewModel;
+use OpenEMR\Modules\ClinicalCopilot\ReadPath\SynthesisDocPayload;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\SynthesisReadResult;
 use PHPUnit\Framework\TestCase;
 
@@ -211,6 +214,245 @@ final class DocViewModelTest extends TestCase
 
         self::assertNotNull(self::group($viewModel, 'control_proxy'));
         self::assertNull(self::group($viewModel, 'lab:a1c'));
+    }
+
+    public function testRecentNarrativesExcludesTheCurrentlyServedRowAndSkipsDegradedAttempts(): void
+    {
+        $fact = self::trendPointFact();
+        $claim = new Claim('A1c is stable.', ClaimType::Trend, [$fact->factId], [7.2], [], 0);
+        $passedDoc = SynthesisDocPayload::build([$fact], [$claim], VerifyStatus::Passed, null, null, [], 1);
+        $degradedDoc = SynthesisDocPayload::build([$fact], null, VerifyStatus::Degraded, 'llm_unavailable', 'no narrative', [], 1);
+
+        $current = self::docRow(3, '2026-07-08 09:00:00', $passedDoc);
+        $degraded = self::docRow(2, '2026-07-05 09:00:00', $degradedDoc);
+        $past = self::docRow(1, '2026-07-01 09:00:00', $passedDoc);
+
+        $recent = DocViewModel::recentNarratives([$current, $degraded, $past], 'https://example.test', excludeDocId: 3);
+
+        self::assertCount(1, $recent, 'the served row is excluded and the degraded attempt has no claims to show');
+        self::assertSame(1, $recent[0]['id']);
+        self::assertSame('A1c is stable.', $recent[0]['narrative'][0]['text']);
+    }
+
+    public function testRecentNarrativesLimitsToRequestedCount(): void
+    {
+        $fact = self::trendPointFact();
+        $claim = new Claim('note', ClaimType::Trend, [], [], [], 0);
+        $doc = SynthesisDocPayload::build([$fact], [$claim], VerifyStatus::Passed, null, null, [], 1);
+
+        $history = [
+            self::docRow(4, '2026-07-08 09:00:00', $doc),
+            self::docRow(3, '2026-07-07 09:00:00', $doc),
+            self::docRow(2, '2026-07-06 09:00:00', $doc),
+            self::docRow(1, '2026-07-05 09:00:00', $doc),
+        ];
+
+        $recent = DocViewModel::recentNarratives($history, 'https://example.test', excludeDocId: null, limit: 3);
+
+        self::assertSame([4, 3, 2], array_column($recent, 'id'));
+    }
+
+    public function testVisitRowsSummarizesEachHistoryRowWithoutFullyDecodingFacts(): void
+    {
+        $fact = self::trendPointFact();
+        $claimA = new Claim('a', ClaimType::Trend, [], [], [], 0);
+        $claimB = new Claim('b', ClaimType::Trend, [], [], [], 1);
+        $twoClaimDoc = SynthesisDocPayload::build([$fact], [$claimA, $claimB], VerifyStatus::Passed, null, null, [], 1);
+        $degradedDoc = SynthesisDocPayload::build([$fact], null, VerifyStatus::Degraded, 'llm_unavailable', 'no narrative', [], 1);
+
+        $history = [
+            self::docRow(2, '2026-07-08 09:00:00', $twoClaimDoc, apptId: 501, verifyStatus: VerifyStatus::Passed),
+            self::docRow(1, '2026-07-01 09:00:00', $degradedDoc, apptId: null, verifyStatus: VerifyStatus::Degraded),
+        ];
+
+        $rows = DocViewModel::visitRows($history);
+
+        self::assertSame(
+            ['id' => 2, 'computed_at' => '2026-07-08 09:00', 'appt_id' => 501, 'verify_status' => 'passed', 'claim_count' => 2],
+            $rows[0],
+        );
+        self::assertSame(
+            ['id' => 1, 'computed_at' => '2026-07-01 09:00', 'appt_id' => null, 'verify_status' => 'degraded', 'claim_count' => 0],
+            $rows[1],
+        );
+    }
+
+    public function testVarianceRowsKeepsSameDayWeightAndBmiDeltasSeparate(): void
+    {
+        // Same visit (same form_vitals row date) records both weight and BMI
+        // -- the exact shape that would collide in consolidateLabRows' bare
+        // date-keyed lookup if the two series were not isolated first.
+        $weightEarly = self::weightFact('2026-01-01', 1, 180.0);
+        $weightLate = self::weightFact('2026-06-01', 2, 175.0);
+        $bmiEarly = self::bmiFact('2026-01-01', 1, 28.0);
+        $bmiLate = self::bmiFact('2026-06-01', 2, 26.0);
+
+        $weightDeltas = DerivedFacts::deltas(Capability::VitalsTrend, '1', [$weightEarly, $weightLate]);
+        $bmiDeltas = DerivedFacts::deltas(Capability::VitalsTrend, '1', [$bmiEarly, $bmiLate]);
+
+        $facts = [$weightEarly, $weightLate, $bmiEarly, $bmiLate, ...$weightDeltas, ...$bmiDeltas];
+
+        $rows = DocViewModel::varianceRows($facts, 'https://example.test', []);
+
+        $weightRow = self::rowFor($rows, 'Weight', '2026-06-01');
+        $bmiRow = self::rowFor($rows, 'BMI', '2026-06-01');
+
+        self::assertSame('-5.00 lb', $weightRow['change_display'], 'the weight delta must never pick up the same-day BMI delta');
+        self::assertSame('-2.00', $bmiRow['change_display'], 'the BMI delta must never pick up the same-day weight delta');
+    }
+
+    public function testVarianceRowsShowsBloodPressureRowsWithNoChangeColumn(): void
+    {
+        $bp = self::bpFact('2026-06-01', 1, '132', '84');
+
+        $rows = DocViewModel::varianceRows([$bp], 'https://example.test', []);
+
+        self::assertCount(1, $rows);
+        self::assertSame('Blood pressure', $rows[0]['group_label']);
+        self::assertNull($rows[0]['change_display'], 'VitalsTrend never computes a delta over a composite BP reading');
+        self::assertSame('132/84', $rows[0]['raw']);
+    }
+
+    public function testVarianceRowsSplitsLabAnalytesSoSameDayDeltasNeverCollide(): void
+    {
+        $a1cEarly = self::trendPointOn('2026-01-01', 1, 6.9);
+        $a1cLate = self::trendPointOn('2026-06-01', 2, 7.2);
+        $ldlEarly = self::trendPointOn('2026-01-01', 3, 110.0);
+        $ldlLate = self::trendPointOn('2026-06-01', 4, 90.0);
+        $a1cDelta = self::derivedOn('2026-06-01', FactKind::DerivedDelta, '+0.30', 0.3, '%');
+        $ldlDelta = self::derivedOn('2026-06-01', FactKind::DerivedDelta, '-20.00', -20.0, '');
+
+        $map = [
+            $a1cEarly->factId => ['key' => 'a1c', 'label' => 'A1c'],
+            $a1cLate->factId => ['key' => 'a1c', 'label' => 'A1c'],
+            $a1cDelta->factId => ['key' => 'a1c', 'label' => 'A1c'],
+            $ldlEarly->factId => ['key' => 'ldl', 'label' => 'LDL Cholesterol'],
+            $ldlLate->factId => ['key' => 'ldl', 'label' => 'LDL Cholesterol'],
+            $ldlDelta->factId => ['key' => 'ldl', 'label' => 'LDL Cholesterol'],
+        ];
+
+        $rows = DocViewModel::varianceRows(
+            [$a1cEarly, $a1cLate, $ldlEarly, $ldlLate, $a1cDelta, $ldlDelta],
+            'https://example.test',
+            $map,
+        );
+
+        self::assertSame('+0.30 %', self::rowFor($rows, 'A1c', '2026-06-01')['change_display']);
+        self::assertSame('-20.00', self::rowFor($rows, 'LDL Cholesterol', '2026-06-01')['change_display']);
+    }
+
+    public function testVarianceRowsSortsMostRecentFirstAcrossLabsAndVitals(): void
+    {
+        $lab = self::trendPointOn('2026-03-01', 1, 7.0);
+        $weight = self::weightFact('2026-06-01', 2, 180.0);
+        $bp = self::bpFact('2026-01-01', 3, '120', '80');
+
+        $rows = DocViewModel::varianceRows([$lab, $weight, $bp], 'https://example.test', []);
+
+        self::assertSame(['2026-06-01', '2026-03-01', '2026-01-01'], array_column($rows, 'clinical_date'));
+    }
+
+    /**
+     * @param list<array<string, mixed>> $rows
+     * @return array<string, mixed>
+     */
+    private static function rowFor(array $rows, string $groupLabel, string $clinicalDate): array
+    {
+        foreach ($rows as $row) {
+            if ($row['group_label'] === $groupLabel && $row['clinical_date'] === $clinicalDate) {
+                return $row;
+            }
+        }
+
+        self::fail("no variance row found for group '{$groupLabel}' on {$clinicalDate}");
+    }
+
+    /**
+     * @param array<string, mixed> $doc a SynthesisDocPayload::build() array
+     */
+    private static function docRow(
+        int $id,
+        string $computedAt,
+        array $doc,
+        ?int $apptId = null,
+        VerifyStatus $verifyStatus = VerifyStatus::Passed,
+    ): DocRow {
+        return new DocRow(
+            $id,
+            42,
+            'digest-' . $id,
+            'pre_visit',
+            $apptId,
+            $doc,
+            [],
+            'v1',
+            new \DateTimeImmutable($computedAt),
+            'corr-' . $id,
+            null,
+            null,
+            null,
+            null,
+            null,
+            QaStatus::Pending,
+            null,
+            RegenReason::None,
+            $verifyStatus,
+        );
+    }
+
+    private static function weightFact(string $date, int $formVitalsId, float $value): Fact
+    {
+        return self::numericVitalFact($date, $formVitalsId, 'weight', $value, 'lb');
+    }
+
+    private static function bmiFact(string $date, int $formVitalsId, float $value): Fact
+    {
+        return self::numericVitalFact($date, $formVitalsId, 'BMI', $value, '');
+    }
+
+    private static function numericVitalFact(string $date, int $formVitalsId, string $field, float $value, string $unit): Fact
+    {
+        $citations = [new Citation('form_vitals', $formVitalsId, $field, DateSource::Collected)];
+        $factValue = new FactValue((string) $value, $value, Comparator::None, $unit, $unit !== '' ? $unit : null, null);
+        $factId = FactId::compute(Capability::VitalsTrend, FactKind::Vital, $citations, $factValue);
+
+        return new Fact(
+            $factId,
+            Capability::VitalsTrend,
+            '1',
+            FactKind::Vital,
+            42,
+            new \DateTimeImmutable($date),
+            DateSource::Collected,
+            $factValue,
+            FactStatus::Final,
+            [],
+            $citations,
+        );
+    }
+
+    private static function bpFact(string $date, int $formVitalsId, string $bps, string $bpd): Fact
+    {
+        $citations = [
+            new Citation('form_vitals', $formVitalsId, 'bps', DateSource::Collected),
+            new Citation('form_vitals', $formVitalsId, 'bpd', DateSource::Collected),
+        ];
+        $value = new FactValue("{$bps}/{$bpd}", null, Comparator::None, 'mmHg', 'mmHg', null);
+        $factId = FactId::compute(Capability::VitalsTrend, FactKind::Vital, $citations, $value);
+
+        return new Fact(
+            $factId,
+            Capability::VitalsTrend,
+            '1',
+            FactKind::Vital,
+            42,
+            new \DateTimeImmutable($date),
+            DateSource::Collected,
+            $value,
+            FactStatus::Final,
+            [],
+            $citations,
+        );
     }
 
     /**
