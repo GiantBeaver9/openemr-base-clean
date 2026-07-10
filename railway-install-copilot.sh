@@ -16,9 +16,10 @@
 #     threshold / rate-limit config; directive-aware #IfNotTable, idempotent)
 #   - registers + activates the clinical_copilot_worker background service
 #
-# Optional: set CLINICAL_COPILOT_SEED_DEMO=1 to ALSO seed synthetic diabetes
-# patients. Demo/testing only -- do NOT enable on a deployment carrying real
-# charts. Default off.
+# Demo seeding is ON by default: this is a demo/testing deployment and a Railway
+# redeploy rebuilds the whole environment, so the synthetic diabetes patients are
+# re-created every deploy. To DISABLE it -- e.g. if this instance ever carries
+# real charts -- set CLINICAL_COPILOT_SEED_DEMO=0 on the service.
 set -u
 
 OPENEMR_ROOT=/var/www/localhost/htdocs/openemr
@@ -67,9 +68,9 @@ else
     exit 1
 fi
 
-if [ "${CLINICAL_COPILOT_SEED_DEMO:-0}" = "1" ]; then
+if [ "${CLINICAL_COPILOT_SEED_DEMO:-1}" = "1" ]; then
     if [ -f "${SEEDER}" ]; then
-        log "CLINICAL_COPILOT_SEED_DEMO=1 -- seeding synthetic demo patients (not for real-chart deployments)."
+        log "seeding synthetic demo patients (on by default; set CLINICAL_COPILOT_SEED_DEMO=0 to disable)."
         # Pass the opt-in through explicitly: su may strip the environment, and
         # the seeder honors CLINICAL_COPILOT_SEED_DEMO=1 as its authorization.
         if run_as_apache "CLINICAL_COPILOT_SEED_DEMO=1 php '${SEEDER}' --force"; then
@@ -81,9 +82,8 @@ if [ "${CLINICAL_COPILOT_SEED_DEMO:-0}" = "1" ]; then
         log "CLINICAL_COPILOT_SEED_DEMO=1 but the seeder was not found at ${SEEDER}; skipping demo seed." >&2
     fi
 else
-    # Loud, so a deploy that shows no demo patients is self-explanatory in the
-    # logs instead of looking like a silent failure.
-    log "CLINICAL_COPILOT_SEED_DEMO is not '1' (value='${CLINICAL_COPILOT_SEED_DEMO:-unset}') -- NOT seeding demo patients. The module is installed but no synthetic patients were added. Set CLINICAL_COPILOT_SEED_DEMO=1 on the service and redeploy to populate demo data."
+    # Explicitly opted out; log it so an empty chart is self-explanatory.
+    log "CLINICAL_COPILOT_SEED_DEMO=0 -- demo seeding disabled by the operator. The module is installed but no synthetic patients were added."
 fi
 
 log "done."
