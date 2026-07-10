@@ -35,6 +35,22 @@ trait SeedCoreTableHelpers
         return $id !== null ? (int)$id : 1;
     }
 
+    /**
+     * "Today" as the DATABASE sees it (CURDATE()), not the PHP process's clock.
+     * The scheduled-patient list matches appointments with
+     * `pc_eventDate = CURDATE()`, so anchoring every seeded date -- above all the
+     * appointment date -- to the DB's own today guarantees the demo patients
+     * appear in the list even when PHP and MySQL are in different timezones (as
+     * on Railway, where they are separate services and a PHP "today" can be a
+     * day off from the MySQL CURDATE() the list compares against).
+     */
+    private function resolveToday(): \DateTimeImmutable
+    {
+        $curdate = QueryUtils::fetchSingleValue("SELECT CURDATE() AS `d`", 'd');
+
+        return new \DateTimeImmutable(is_string($curdate) && $curdate !== '' ? $curdate : 'today');
+    }
+
     private function findPidByPubpid(string $pubpid): ?int
     {
         $pid = QueryUtils::fetchSingleValue("SELECT `pid` FROM `patient_data` WHERE `pubpid` = ?", 'pid', [$pubpid]);

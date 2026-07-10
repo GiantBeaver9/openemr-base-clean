@@ -172,7 +172,7 @@ final class SeedEndoCohort
     public function __construct()
     {
         $this->providerId = $this->resolveProviderId();
-        $this->today = new \DateTimeImmutable('today');
+        $this->today = $this->resolveToday();
     }
 
     public function run(): void
