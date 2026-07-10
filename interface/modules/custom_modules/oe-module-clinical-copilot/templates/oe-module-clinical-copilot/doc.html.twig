@@ -13,14 +13,16 @@
 # @copyright Copyright (c) 2026 OpenEMR Foundation
 # @license   https://github.com/openemr/openemr/blob/master/LICENSE GNU General Public License 3
 #}
+{# Consolidated provenance: one group per source table ("Lab result",
+   "Prescription", ...) followed by its deduped pks -- "Lab result 5240, 5241,
+   5242 · Prescription 318, 320" -- instead of a wall of repeated
+   "[Lab result #5240.result]" chips. `citations` is the grouped view-model
+   shape {label, refs:[{pk, url}]} built by DocViewModel::consolidateCitations. #}
 {% macro citation_refs(citations) %}
-    {% for c in citations %}
-        {% if c.url %}
-            <a href="{{ c.url|attr }}" target="_blank" rel="noopener" class="ccp-citation" title="{{ c.label|attr }}">[{{ c.label|text }}]</a>
-        {% else %}
-            <span class="ccp-citation ccp-citation-tooltip" title="{{ c.label|attr }}">[{{ c.label|text }}]</span>
-        {% endif %}
-    {% endfor %}
+    {%- for g in citations -%}
+        {%- if not loop.first %} · {% endif -%}
+        <span class="ccp-citation-group">{{ g.label|text }}{% for r in g.refs %}{{ loop.first ? ' ' : ', ' }}{% if r.url %}<a href="{{ r.url|attr }}" target="_blank" rel="noopener" class="ccp-citation-pk">{{ r.pk|text }}</a>{% else %}<span class="ccp-citation-pk">{{ r.pk|text }}</span>{% endif %}{% endfor %}</span>
+    {%- endfor -%}
 {% endmacro %}
 
 {% macro narrative_action_form(doc_url, needs_generation) %}
@@ -184,6 +186,11 @@
     <style>
         .ccp-citation { text-decoration: none; font-size: 0.85em; }
         .ccp-citation-tooltip { color: #6c757d; cursor: help; border-bottom: 1px dotted #6c757d; }
+        /* Consolidated provenance: a muted "Lab result 5240, 5241" group with
+           its pks; links keep the default link colour, plain pks stay muted. */
+        .ccp-citation-group { font-size: 0.85em; color: #6c757d; margin-left: 0.25rem; }
+        .ccp-citation-group + .ccp-citation-group { margin-left: 0; }
+        .ccp-citation-pk { text-decoration: none; }
         .ccp-badge-checked { cursor: help; }
         .ccp-narrative-claim { margin-bottom: 0.75rem; }
         .ccp-history-table th, .ccp-history-table td { font-size: 0.85em; }
@@ -436,24 +443,14 @@
                 {% elseif doc.regen_reason == 'manual' %}
                     {{ _self.status_pipe() }}
                     <span class="badge badge-secondary">{{ "manually regenerated"|xlt }}</span>
-                {% elseif doc.regen_reason == 'qa_low' %}
-                    {{ _self.status_pipe() }}
-                    <span class="badge badge-secondary">{{ "auto-regenerated after low QA score"|xlt }}</span>
                 {% endif %}
                 {% if doc.served_from_cache %}
                     {{ _self.status_pipe() }}
                     <span class="badge badge-light">{{ "served from cache -- no model call this read"|xlt }}</span>
                 {% endif %}
-                {# Only show a QA badge once an actual QA verdict/score exists. The
-                   'pending' default (there is no QA agent running the async
-                   second-pass sweep yet) is suppressed rather than shown as a
-                   perpetual "QA pending" flag. #}
-                {% if doc.qa_status and doc.qa_status != 'pending' %}
-                    {{ _self.status_pipe() }}
-                    <span class="badge badge-light" title="{{ "advisory second-pass QA review -- never a serving gate"|xla }}">
-                        {{ "QA"|xlt }}: {{ doc.qa_status|text }}{{ doc.qa_score is not null ? ' (' ~ doc.qa_score ~ ')' : '' }}
-                    </span>
-                {% endif %}
+                {# QA score/badge intentionally omitted: the advisory second-pass
+                   QA reviewer is no longer used (deterministic verification V1-V6
+                   is the only gate), so there is no QA verdict to surface here. #}
                 {{ _self.status_pipe() }}
                 <span class="ccp-meta-line">{{ "computed"|xlt }} <span id="ccpComputedAt">{{ doc.computed_at ? doc.computed_at|text : '—' }}</span></span>
                 {{ _self.status_pipe() }}
@@ -754,7 +751,7 @@
                     <table class="table table-sm ccp-history-table">
                         <thead><tr>
                             <th>{{ "Computed"|xlt }}</th><th>{{ "Digest"|xlt }}</th><th>{{ "Verify"|xlt }}</th>
-                            <th>{{ "Regen reason"|xlt }}</th><th>{{ "QA"|xlt }}</th><th>{{ "Correlation"|xlt }}</th>
+                            <th>{{ "Regen reason"|xlt }}</th><th>{{ "Correlation"|xlt }}</th>
                         </tr></thead>
                         <tbody>
                         {% for row in history_rows %}
@@ -763,11 +760,10 @@
                                 <td><code>{{ row.fact_digest|text }}&hellip;</code></td>
                                 <td>{{ row.verify_status|text }}</td>
                                 <td>{{ row.regen_reason|text }}</td>
-                                <td>{{ row.qa_status == 'pending' ? '—' : row.qa_status|text }}{{ row.qa_score is not null ? ' (' ~ row.qa_score ~ ')' : '' }}</td>
                                 <td><small>{{ row.correlation_id|text }}</small></td>
                             </tr>
                         {% else %}
-                            <tr><td colspan="6" class="text-muted">{{ "No prior attempts."|xlt }}</td></tr>
+                            <tr><td colspan="5" class="text-muted">{{ "No prior attempts."|xlt }}</td></tr>
                         {% endfor %}
                         </tbody>
                     </table>
@@ -814,23 +810,38 @@
         return text == null ? '' : String(text);
     }
 
-    function appendCitation(parent, citation) {
-        if (citation.url) {
-            var link = document.createElement('a');
-            link.href = citation.url;
-            link.target = '_blank';
-            link.rel = 'noopener';
-            link.className = 'ccp-citation';
-            link.title = citation.label || '';
-            link.textContent = '[' + (citation.label || '') + ']';
-            parent.appendChild(link);
+    // Render the consolidated provenance groups ({label, refs:[{pk, url}]})
+    // the server builds -- "Lab result 5240, 5241 · Prescription 318" -- so
+    // the JS-refreshed narrative matches the server-rendered citation_refs
+    // macro exactly, one group per source table with deduped pks.
+    function appendCitations(parent, groups) {
+        if (!Array.isArray(groups)) {
             return;
         }
-        var span = document.createElement('span');
-        span.className = 'ccp-citation ccp-citation-tooltip';
-        span.title = citation.label || '';
-        span.textContent = '[' + (citation.label || '') + ']';
-        parent.appendChild(span);
+        groups.forEach(function (group, groupIndex) {
+            if (groupIndex > 0) {
+                parent.appendChild(document.createTextNode(' · '));
+            }
+            var wrap = document.createElement('span');
+            wrap.className = 'ccp-citation-group';
+            wrap.appendChild(document.createTextNode((group.label || '') ));
+            (group.refs || []).forEach(function (ref, refIndex) {
+                wrap.appendChild(document.createTextNode(refIndex === 0 ? ' ' : ', '));
+                var node;
+                if (ref.url) {
+                    node = document.createElement('a');
+                    node.href = ref.url;
+                    node.target = '_blank';
+                    node.rel = 'noopener';
+                } else {
+                    node = document.createElement('span');
+                }
+                node.className = 'ccp-citation-pk';
+                node.textContent = String(ref.pk == null ? '' : ref.pk);
+                wrap.appendChild(node);
+            });
+            parent.appendChild(wrap);
+        });
     }
 
     function renderNarrative(claims, doc) {
@@ -869,11 +880,7 @@
                     row.appendChild(document.createTextNode(' '));
                 }
                 row.appendChild(document.createTextNode(escapeText(claim.text) + ' '));
-                if (Array.isArray(claim.citations)) {
-                    claim.citations.forEach(function (citation) {
-                        appendCitation(row, citation);
-                    });
-                }
+                appendCitations(row, claim.citations);
                 if (visitLabel) {
                     var pipe = document.createElement('span');
                     pipe.className = 'ccp-pipe';

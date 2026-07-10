@@ -100,11 +100,51 @@ final class DocViewModelTest extends TestCase
         $viewModel = DocViewModel::build($result, 'https://example.test');
 
         self::assertCount(1, $viewModel['narrative']);
+        // Consolidated provenance: one group for the source table, its pk listed
+        // beneath (the "#501.result" chip noise is gone from what the doctor sees).
         self::assertCount(1, $viewModel['narrative'][0]['citations']);
-        self::assertSame('Lab result #501.result', $viewModel['narrative'][0]['citations'][0]['label']);
+        self::assertSame('Lab result', $viewModel['narrative'][0]['citations'][0]['label']);
+        self::assertSame(501, $viewModel['narrative'][0]['citations'][0]['refs'][0]['pk']);
         // procedure_result has no verified deep-link route (ChartLinkResolver's
         // own documented scope) -- tooltip fallback, url is null.
-        self::assertNull($viewModel['narrative'][0]['citations'][0]['url']);
+        self::assertNull($viewModel['narrative'][0]['citations'][0]['refs'][0]['url']);
+    }
+
+    public function testNarrativeConsolidatesAndDedupesCitationsByTableAndPk(): void
+    {
+        // Two facts citing the SAME physical lab row (pk 501) under different
+        // fields, plus a distinct row (pk 502): the doctor should see one
+        // "Lab result" group with 501 then 502, never the row repeated.
+        $factA = self::trendPointFact();
+        $factB = self::trendPointOn('2026-02-01', 502, 7.5);
+        $claim = new Claim('A1c is rising.', ClaimType::Trend, [$factA->factId, $factB->factId], [7.2], [], 0);
+
+        $result = self::servedResult([$factA, $factB], [$claim]);
+        $viewModel = DocViewModel::build($result, 'https://example.test');
+
+        $citations = $viewModel['narrative'][0]['citations'];
+        self::assertCount(1, $citations, 'both facts share one source table -> one group');
+        self::assertSame('Lab result', $citations[0]['label']);
+        self::assertSame([501, 502], array_column($citations[0]['refs'], 'pk'));
+    }
+
+    public function testNarrativeStripsInlineFactIdMarkersFromDoctorFacingText(): void
+    {
+        $trend = self::trendPointFact();
+        $hash = str_repeat('a', 64);
+        $claim = new Claim(
+            "A1c was 9.4% (fact_id: {$hash}), which is out of range.",
+            ClaimType::Trend,
+            [$trend->factId],
+            [9.4],
+            [],
+            0,
+        );
+
+        $result = self::servedResult([$trend], [$claim]);
+        $viewModel = DocViewModel::build($result, 'https://example.test');
+
+        self::assertSame('A1c was 9.4%, which is out of range.', $viewModel['narrative'][0]['text']);
     }
 
     public function testCapabilityCrashResultStillPresentsSurvivingFactsThroughTheSameBuckets(): void
@@ -267,13 +307,12 @@ final class DocViewModelTest extends TestCase
 
         $rows = DocViewModel::visitRows($history);
 
+        // The passed attempt is summarized from the cheap claim count; the
+        // degraded attempt (no served narrative) is hidden from history.
+        self::assertCount(1, $rows);
         self::assertSame(
             ['id' => 2, 'computed_at' => '2026-07-08 09:00', 'appt_id' => 501, 'verify_status' => 'passed', 'claim_count' => 2],
             $rows[0],
-        );
-        self::assertSame(
-            ['id' => 1, 'computed_at' => '2026-07-01 09:00', 'appt_id' => null, 'verify_status' => 'degraded', 'claim_count' => 0],
-            $rows[1],
         );
     }
 

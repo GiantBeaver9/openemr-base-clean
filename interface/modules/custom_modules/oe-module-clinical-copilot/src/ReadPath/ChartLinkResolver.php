@@ -57,7 +57,13 @@ final class ChartLinkResolver
         return "{$visit->appointmentTitle} · {$visit->appointmentTime}";
     }
 
-    private static function tableLabel(string $table): string
+    /**
+     * The table's human-readable group name ("Lab result", "Prescription",
+     * ...) with no pk/field suffix -- used both by {@see self::label()} and by
+     * the consolidated citation display, which groups many citations under one
+     * such label ("Lab result 5240, 5241, 5242").
+     */
+    public static function tableLabel(string $table): string
     {
         return match ($table) {
             'procedure_result' => 'Lab result',

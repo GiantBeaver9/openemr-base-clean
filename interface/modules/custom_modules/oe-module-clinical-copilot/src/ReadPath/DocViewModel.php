@@ -15,6 +15,7 @@ declare(strict_types=1);
 namespace OpenEMR\Modules\ClinicalCopilot\ReadPath;
 
 use OpenEMR\Modules\ClinicalCopilot\Doc\DocRow;
+use OpenEMR\Modules\ClinicalCopilot\Doc\VerifyStatus;
 use OpenEMR\Modules\ClinicalCopilot\Fact\Citation;
 use OpenEMR\Modules\ClinicalCopilot\Fact\Enum\FactKind;
 use OpenEMR\Modules\ClinicalCopilot\Fact\Fact;
@@ -65,7 +66,7 @@ final class DocViewModel
      *        capability, unsplit). Threaded in rather than resolved here so
      *        this presenter stays DB-free.
      * @return array{
-     *     narrative: list<array{text: string, claim_type: string, flags: list<string>, emphasis: ?string, citations: list<array{label: string, url: ?string}>}>,
+     *     narrative: list<array{text: string, claim_type: string, flags: list<string>, emphasis: ?string, citations: list<array{label: string, refs: list<array{pk: int, url: ?string}>}>}>,
      *     fact_groups: list<array{key: string, label: string, total: int, shown: int, consolidated: bool, summary: array<string, mixed>|null, facts: list<array<string, mixed>>}>
      * }
      */
@@ -117,23 +118,31 @@ final class DocViewModel
     }
 
     /**
+     * The technical "History" audit table: one row per past synthesis attempt.
+     * Degraded attempts are hidden -- they produced no served narrative, so a
+     * clinician scanning history has nothing to view in them. QA is intentionally
+     * omitted: the advisory second-pass reviewer is no longer used.
+     *
      * @param list<DocRow> $history
-     * @return list<array{computed_at: string, fact_digest: string, verify_status: string, regen_reason: string, qa_status: string, qa_score: ?float, correlation_id: string}>
+     * @return list<array{computed_at: string, fact_digest: string, verify_status: string, regen_reason: string, correlation_id: string}>
      */
     public static function historyRows(array $history): array
     {
-        return array_map(
-            static fn (DocRow $row): array => [
+        $rows = [];
+        foreach ($history as $row) {
+            if ($row->verifyStatus === VerifyStatus::Degraded) {
+                continue;
+            }
+            $rows[] = [
                 'computed_at' => $row->computedAt->format('Y-m-d H:i:s'),
                 'fact_digest' => substr($row->factDigest, 0, 12),
                 'verify_status' => $row->verifyStatus->value,
                 'regen_reason' => $row->regenReason->value,
-                'qa_status' => $row->qaStatus->value,
-                'qa_score' => $row->qaScore,
                 'correlation_id' => $row->correlationId,
-            ],
-            $history,
-        );
+            ];
+        }
+
+        return $rows;
     }
 
     /**
@@ -151,7 +160,7 @@ final class DocViewModel
      * hydrated just to be discarded on every page load.
      *
      * @param list<DocRow> $history most-recent-first ({@see DocHistoryReader::forPid()})
-     * @return list<array{id: int, computed_at: string, narrative: list<array{text: string, claim_type: string, flags: list<string>, emphasis: ?string, citations: list<array{label: string, url: ?string}>}>}>
+     * @return list<array{id: int, computed_at: string, narrative: list<array{text: string, claim_type: string, flags: list<string>, emphasis: ?string, citations: list<array{label: string, refs: list<array{pk: int, url: ?string}>}>}>}>
      */
     public static function recentNarratives(array $history, string $webRoot, ?int $excludeDocId, int $limit = 3): array
     {
@@ -218,6 +227,11 @@ final class DocViewModel
         $rows = [];
         foreach ($history as $row) {
             if ($excludeDocId !== null && $row->id === $excludeDocId) {
+                continue;
+            }
+            // Degraded attempts served no narrative -- hide them from the
+            // clinician-facing history rather than listing empty rows.
+            if ($row->verifyStatus === VerifyStatus::Degraded) {
                 continue;
             }
 
@@ -393,7 +407,7 @@ final class DocViewModel
     /**
      * @param list<Claim>|null $claims
      * @param array<string, Fact> $factById
-     * @return list<array{text: string, claim_type: string, flags: list<string>, emphasis: ?string, citations: list<array{label: string, url: ?string}>}>
+     * @return list<array{text: string, claim_type: string, flags: list<string>, emphasis: ?string, citations: list<array{label: string, refs: list<array{pk: int, url: ?string}>}>}>
      */
     private static function buildNarrative(?array $claims, array $factById, string $webRoot): array
     {
@@ -413,16 +427,16 @@ final class DocViewModel
                     continue;
                 }
                 foreach ($fact->citations as $citation) {
-                    $citations[] = self::citationLink($citation, $webRoot);
+                    $citations[] = $citation;
                 }
             }
 
             $narrative[] = [
-                'text' => $claim->text,
+                'text' => self::stripInlineFactIds($claim->text),
                 'claim_type' => $claim->claimType->value,
                 'flags' => $claim->flags,
-                'emphasis' => $claim->emphasis,
-                'citations' => $citations,
+                'emphasis' => self::stripInlineFactIds($claim->emphasis ?? '') ?: null,
+                'citations' => self::consolidateCitations($citations, $webRoot),
             ];
         }
 
@@ -683,19 +697,73 @@ final class DocViewModel
             'status_label' => FactDisplayFormatter::statusLabel($fact->status->value),
             'capability_label' => FactDisplayFormatter::capabilityLabel($fact->capability->value),
             'is_excluded' => $fact->kind === FactKind::Exclusion,
-            'citations' => array_map(static fn (Citation $c): array => self::citationLink($c, $webRoot), $fact->citations),
+            'citations' => self::consolidateCitations($fact->citations, $webRoot),
         ];
     }
 
     /**
-     * @return array{label: string, url: ?string}
+     * Group a flat citation list into one display token per source table so
+     * many provenance pointers read as "Lab result 5240, 5241, 5242 ·
+     * Prescription 318, 320" instead of a wall of repeated
+     * "[Lab result #5240.result]" chips. Deduplicated by (table, pk) -- the
+     * same physical row cited by several facts, or under different `field`s,
+     * collapses to one pk -- with table groups and pks both kept in first-seen
+     * order. Purely a display transform: the raw per-citation provenance is
+     * untouched in the persisted doc and in `citation_ids`.
+     *
+     * @param list<Citation> $citations
+     * @return list<array{label: string, refs: list<array{pk: int, url: ?string}>}>
      */
-    private static function citationLink(Citation $citation, string $webRoot): array
+    private static function consolidateCitations(array $citations, string $webRoot): array
     {
-        return [
-            'label' => ChartLinkResolver::label($citation),
-            'url' => ChartLinkResolver::url($citation, $webRoot),
-        ];
+        /** @var array<string, array{label: string, refs: array<int, array{pk: int, url: ?string}>}> $groups */
+        $groups = [];
+        foreach ($citations as $citation) {
+            $table = $citation->table;
+            if (!isset($groups[$table])) {
+                $groups[$table] = ['label' => ChartLinkResolver::tableLabel($table), 'refs' => []];
+            }
+            if (!isset($groups[$table]['refs'][$citation->pk])) {
+                $groups[$table]['refs'][$citation->pk] = [
+                    'pk' => $citation->pk,
+                    'url' => ChartLinkResolver::url($citation, $webRoot),
+                ];
+            }
+        }
+
+        $out = [];
+        foreach ($groups as $group) {
+            $out[] = ['label' => $group['label'], 'refs' => array_values($group['refs'])];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Remove the "(fact_id: <hash>)" provenance markers the model emits inline
+     * in claim prose. The fact ids are already carried structurally in
+     * `citation_ids` (persisted, and what verification runs on), so the inline
+     * copies are pure redundant noise -- 64-hex-char hashes that dominate the
+     * clinician's screen. Stripping happens only on the read/display path;
+     * the persisted claim text in SQL keeps its raw form for audit.
+     */
+    private static function stripInlineFactIds(string $text): string
+    {
+        // Matches " (fact_id: <hex>)" and " (fact_ids: <hex>, <hex>)", with the
+        // leading whitespace consumed so no double space is left behind.
+        $stripped = preg_replace(
+            '/\s*\(fact_ids?:\s*[0-9a-f]{6,}(?:\s*,\s*[0-9a-f]{6,})*\s*\)/i',
+            '',
+            $text,
+        );
+        $stripped = $stripped ?? $text;
+
+        // Collapse any run of spaces the removal may have created, and tidy a
+        // stray space left in front of sentence punctuation.
+        $stripped = preg_replace('/ {2,}/', ' ', $stripped) ?? $stripped;
+        $stripped = preg_replace('/ +([.,;:])/', '$1', $stripped) ?? $stripped;
+
+        return trim($stripped);
     }
 
     /**

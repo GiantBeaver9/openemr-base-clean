@@ -108,6 +108,22 @@
         statusEl.textContent = text;
     }
 
+    // Remove the "(fact_id: <hash>)" provenance markers the model emits inline
+    // in claim prose before showing them to the clinician. The fact ids remain
+    // in the turn's structured citation_ids and in SQL for audit -- this strips
+    // only what the doctor sees, matching DocViewModel::stripInlineFactIds on
+    // the narrative side.
+    function stripInlineFactIds(text) {
+        if (text == null) {
+            return '';
+        }
+        return String(text)
+            .replace(/\s*\(fact_ids?:\s*[0-9a-f]{6,}(?:\s*,\s*[0-9a-f]{6,})*\s*\)/gi, '')
+            .replace(/ {2,}/g, ' ')
+            .replace(/ +([.,;:])/g, '$1')
+            .trim();
+    }
+
     function appendLine(role, text) {
         var row = document.createElement('div');
         row.className = 'ccp-narrative-claim';
@@ -144,7 +160,7 @@
             // label; each subsequent fact is a label-less continuation row.
             var rendered = 0;
             for (var i = 0; i < result.claims.length; i++) {
-                var claimText = result.claims[i] && result.claims[i].text;
+                var claimText = stripInlineFactIds(result.claims[i] && result.claims[i].text);
                 if (claimText) {
                     appendLine(rendered === 0 ? 'Assistant' : '', claimText);
                     rendered++;
