@@ -45,4 +45,29 @@ mariadb --skip-ssl \
 GRANT ALL PRIVILEGES ON \`${MYSQL_DATABASE}\`.* TO '${MYSQL_USER}'@'%'; \
 FLUSH PRIVILEGES;"
 
+# Harden server settings before the heavy base install to remove the
+# timeout/packet-size flavours of "MySQL server has gone away" (error 2006):
+#   - larger max_allowed_packet so a big install INSERT is not rejected/dropped
+#   - long wait/interactive timeouts so an idle-between-statements connection is
+#     not reaped mid-install
+#   - generous net read/write timeouts so a slow statement on a busy server is
+#     not treated as a dead connection
+#   - a longer innodb_lock_wait_timeout so background stats/histogram locks do
+#     not abort install statements (the log showed these lock-wait warnings)
+# These are GLOBALs (apply to the base install's fresh connections). They do NOT
+# fix out-of-memory: if MySQL restarts under memory pressure these reset and the
+# only real fix is a larger DB instance. Non-fatal -- a managed MySQL may withhold
+# SET GLOBAL, and that must not abort the deploy.
+echo "Railway DB prep: raising server timeouts / packet size (non-fatal if not permitted)"
+mariadb --skip-ssl \
+    -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" \
+    -u "${MYSQL_ROOT_USER}" -p"${MYSQL_ROOT_PASS}" \
+    -e "SET GLOBAL max_allowed_packet = 67108864; \
+SET GLOBAL wait_timeout = 28800; \
+SET GLOBAL interactive_timeout = 28800; \
+SET GLOBAL net_read_timeout = 600; \
+SET GLOBAL net_write_timeout = 600; \
+SET GLOBAL innodb_lock_wait_timeout = 300;" \
+    2>&1 || echo "Railway DB prep: could not raise server settings (insufficient privilege on managed MySQL?); continuing"
+
 echo "Railway DB prep: done"
