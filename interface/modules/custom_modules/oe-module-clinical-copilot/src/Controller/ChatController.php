@@ -519,9 +519,6 @@ final class ChatController
         return new ChatAgent($agentLoop, new Verifier(), $onStatus);
     }
 
-    /**
-     * @param list<ChatTurn> $priorTurns
-     */
     private function persistToolTurns(int $sessionId, int $pid, int $userId, ChatAnswer $answer, string $correlationId): void
     {
         foreach ($answer->toolCallLog as $entry) {

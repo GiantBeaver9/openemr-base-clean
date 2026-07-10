@@ -270,17 +270,6 @@ class ModuleManagerListener extends AbstractModuleActionListener
     }
 
     /**
-     * @param      $flag
-     * @param      $serviceArray
-     * @param bool $reset
-     * @param bool $removeTask
-     * @return void
-     */
-    private static function setTaskState($flag, $serviceArray, bool $reset = false, bool $removeTask = false): void
-    {
-    }
-
-    /**
      * @param $modId   int|string module id or directory name
      * @param $flag    int|string 1 or 0 to activate or deactivate module.
      * @param $flag_ui int|string custom flag to activate or deactivate Manager UI button states.
