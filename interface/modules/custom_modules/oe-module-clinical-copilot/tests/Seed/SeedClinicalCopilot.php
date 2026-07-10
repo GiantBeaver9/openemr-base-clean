@@ -72,8 +72,15 @@ $interfaceDir = dirname(__DIR__, 5);
 $devMarker = $projectRoot . '/docker/development-easy';
 $forced = in_array('--force', $argv, true);
 
-if (!is_dir($devMarker)) {
-    fwrite(STDERR, "Refusing to run: dev-stack marker '$devMarker' not found. This seeder only runs against the OpenEMR dev checkout.\n");
+// The Railway deploy pipeline opts in explicitly via CLINICAL_COPILOT_SEED_DEMO=1
+// (railway-install-copilot.sh only reaches this script when that is set). On a
+// flex deploy the dev-stack marker directory is not the right signal, so an
+// explicit operator opt-in is sufficient authorization there -- still gated by
+// --force below, so nothing seeds by accident.
+$explicitOptIn = getenv('CLINICAL_COPILOT_SEED_DEMO') === '1';
+
+if (!$explicitOptIn && !is_dir($devMarker)) {
+    fwrite(STDERR, "Refusing to run: dev-stack marker '$devMarker' not found and CLINICAL_COPILOT_SEED_DEMO is not '1'. This seeder only runs against the OpenEMR dev checkout or with an explicit demo opt-in.\n");
     exit(1);
 }
 

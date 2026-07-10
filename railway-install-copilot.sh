@@ -67,10 +67,23 @@ else
     exit 1
 fi
 
-if [ "${CLINICAL_COPILOT_SEED_DEMO:-0}" = "1" ] && [ -f "${SEEDER}" ]; then
-    log "CLINICAL_COPILOT_SEED_DEMO=1 -- seeding synthetic demo patients (not for real-chart deployments)."
-    run_as_apache "php '${SEEDER}' --force" \
-        || log "demo seeding failed (non-fatal -- module itself is installed)." >&2
+if [ "${CLINICAL_COPILOT_SEED_DEMO:-0}" = "1" ]; then
+    if [ -f "${SEEDER}" ]; then
+        log "CLINICAL_COPILOT_SEED_DEMO=1 -- seeding synthetic demo patients (not for real-chart deployments)."
+        # Pass the opt-in through explicitly: su may strip the environment, and
+        # the seeder honors CLINICAL_COPILOT_SEED_DEMO=1 as its authorization.
+        if run_as_apache "CLINICAL_COPILOT_SEED_DEMO=1 php '${SEEDER}' --force"; then
+            log "demo patients seeded."
+        else
+            log "demo seeding FAILED (non-fatal -- the module itself is installed). See the seeder output above for the reason." >&2
+        fi
+    else
+        log "CLINICAL_COPILOT_SEED_DEMO=1 but the seeder was not found at ${SEEDER}; skipping demo seed." >&2
+    fi
+else
+    # Loud, so a deploy that shows no demo patients is self-explanatory in the
+    # logs instead of looking like a silent failure.
+    log "CLINICAL_COPILOT_SEED_DEMO is not '1' (value='${CLINICAL_COPILOT_SEED_DEMO:-unset}') -- NOT seeding demo patients. The module is installed but no synthetic patients were added. Set CLINICAL_COPILOT_SEED_DEMO=1 on the service and redeploy to populate demo data."
 fi
 
 log "done."
