@@ -23,6 +23,7 @@ use OpenEMR\Modules\ClinicalCopilot\DocStore;
 use OpenEMR\Modules\ClinicalCopilot\Chat\TracePoller;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\DocHistoryReader;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\DocViewModel;
+use OpenEMR\Modules\ClinicalCopilot\ReadPath\FactAnalyteResolver;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\PatientIdentifierLookup;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\ScheduledPatientListReader;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\ScheduledPatientRow;
@@ -144,23 +145,30 @@ final class DocController
         }
 
         $result = $this->synthesisResultFromDocRow($correlationId, $docRow);
+        $history = $this->historyReader->forPid($docRow->pid);
 
         return [
             'ok' => true,
             'done' => true,
             'spans' => $spans,
-            'result' => $this->formatRegenerateJson($result, $webRoot),
+            'result' => $this->formatRegenerateJson($result, $webRoot, $history),
         ];
     }
 
     /**
+     * @param list<DocRow> $history {@see DocHistoryReader::forPid()} for the same pid as `$result` -- used to
+     *        refresh the Recent Narratives / Previous Results tabs after a Regenerate, the same data
+     *        {@see \OpenEMR\Modules\ClinicalCopilot\ReadPath\DocViewModel::recentNarratives()}/`visitRows()`/
+     *        `varianceRows()` compute for the initial page render (`public/doc.php`'s `buildDocTemplateVars()`).
      * @return array<string, mixed>
      */
-    public function formatRegenerateJson(SynthesisReadResult $result, string $webRoot): array
+    public function formatRegenerateJson(SynthesisReadResult $result, string $webRoot, array $history): array
     {
         $doc = DocViewModel::summary($result);
-        $viewModel = DocViewModel::build($result, $webRoot);
+        $analyteByFactId = (new FactAnalyteResolver())->labelByFactId($result->facts);
+        $viewModel = DocViewModel::build($result, $webRoot, $analyteByFactId);
         $narrative = is_array($viewModel['narrative'] ?? null) ? $viewModel['narrative'] : [];
+        $factGroups = is_array($viewModel['fact_groups'] ?? null) ? $viewModel['fact_groups'] : [];
         $verifyStatus = $result->verifyStatus?->value ?? '';
         $needsGeneration = !$result->capabilityCrash
             && LlmRuntimeConfig::llmConfigured()
@@ -171,6 +179,9 @@ final class DocController
             'doc' => $doc,
             'view_model' => [
                 'narrative' => $narrative,
+                'recent_narratives' => DocViewModel::recentNarratives($history, $webRoot, $result->docId),
+                'visit_rows' => DocViewModel::visitRows($history, $result->docId),
+                'variance_rows' => DocViewModel::varianceRows($factGroups, $result->facts, $webRoot, $analyteByFactId),
             ],
             'needs_narrative_generation' => $needsGeneration,
         ];

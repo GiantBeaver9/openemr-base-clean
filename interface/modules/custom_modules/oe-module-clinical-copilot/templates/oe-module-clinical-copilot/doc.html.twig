@@ -60,7 +60,7 @@
 {% endmacro %}
 
 {% macro fact_row(fact, visit_label) %}
-    <tr class="{% if fact.flags is defined and 'conflict' in fact.flags %}table-warning{% elseif fact.is_excluded is defined and fact.is_excluded %}table-light text-muted{% endif %}">
+    <tr class="{{ _self.trend_row_class(fact) }}">
         <td>
             {{ fact.analyte_label|default(fact.kind_label|default(fact.kind))|text }}
             {%- if fact.analyte_label and fact.kind_label -%}
@@ -103,18 +103,32 @@
     </tr></thead>
 {% endmacro %}
 
+{# Shared by consolidated_fact_row and variance_fact_row: a conflict-flagged
+   fact stays table-warning, an excluded fact (only reachable if a caller
+   ever feeds one in -- both current callers filter FactKind::Exclusion
+   upstream) stays table-light/text-muted, exactly like the plain fact_row
+   macro above. #}
+{% macro trend_row_class(fact) %}{%- if fact.flags is defined and 'conflict' in fact.flags -%}table-warning{%- elseif fact.is_excluded is defined and fact.is_excluded -%}table-light text-muted{%- endif -%}{% endmacro %}
+
+{# Shared by consolidated_fact_row and variance_fact_row: the Value / Change
+   vs prior / Status / Date cells every consolidated (one-row-per-draw) fact
+   renders identically, whichever table it appears in. #}
+{% macro value_change_status_date_cells(fact) %}
+    <td>
+        {%- if fact.parsed is not null -%}
+            {{ fact.comparator != 'none' ? (fact.comparator == 'lt' ? '<' : (fact.comparator == 'lte' ? '<=' : (fact.comparator == 'gt' ? '>' : '>='))) : '' }}{{ fact.parsed }}{{ fact.unit ? ' ' ~ fact.unit|text : '' }}
+        {%- else -%}
+            {{ fact.raw|default('')|text }}
+        {%- endif -%}
+    </td>
+    <td>{{ fact.change_display is not null ? fact.change_display|text : '—' }}</td>
+    <td>{{ fact.status_label|default(fact.status)|text }}</td>
+    <td>{{ fact.clinical_date ? fact.clinical_date|text : '—' }}</td>
+{% endmacro %}
+
 {% macro consolidated_fact_row(fact, visit_label) %}
-    <tr class="{% if fact.flags is defined and 'conflict' in fact.flags %}table-warning{% endif %}">
-        <td>
-            {%- if fact.parsed is not null -%}
-                {{ fact.comparator != 'none' ? (fact.comparator == 'lt' ? '<' : (fact.comparator == 'lte' ? '<=' : (fact.comparator == 'gt' ? '>' : '>='))) : '' }}{{ fact.parsed }}{{ fact.unit ? ' ' ~ fact.unit|text : '' }}
-            {%- else -%}
-                {{ fact.raw|default('')|text }}
-            {%- endif -%}
-        </td>
-        <td>{{ fact.change_display is not null ? fact.change_display|text : '—' }}</td>
-        <td>{{ fact.status_label|default(fact.status)|text }}</td>
-        <td>{{ fact.clinical_date ? fact.clinical_date|text : '—' }}</td>
+    <tr class="{{ _self.trend_row_class(fact) }}">
+        {{ _self.value_change_status_date_cells(fact) }}
         <td>
             {% for label in fact.flag_labels|default(fact.flags) %}
                 <span class="badge badge-secondary">{{ label|text }}</span>
@@ -138,18 +152,9 @@
 {% endmacro %}
 
 {% macro variance_fact_row(fact) %}
-    <tr class="{% if fact.flags is defined and 'conflict' in fact.flags %}table-warning{% endif %}">
+    <tr class="{{ _self.trend_row_class(fact) }}">
         <td>{{ fact.group_label|default('')|text }}</td>
-        <td>
-            {%- if fact.parsed is not null -%}
-                {{ fact.comparator != 'none' ? (fact.comparator == 'lt' ? '<' : (fact.comparator == 'lte' ? '<=' : (fact.comparator == 'gt' ? '>' : '>='))) : '' }}{{ fact.parsed }}{{ fact.unit ? ' ' ~ fact.unit|text : '' }}
-            {%- else -%}
-                {{ fact.raw|default('')|text }}
-            {%- endif -%}
-        </td>
-        <td>{{ fact.change_display is not null ? fact.change_display|text : '—' }}</td>
-        <td>{{ fact.status_label|default(fact.status)|text }}</td>
-        <td>{{ fact.clinical_date ? fact.clinical_date|text : '—' }}</td>
+        {{ _self.value_change_status_date_cells(fact) }}
         <td>{{ _self.citation_refs(fact.citations) }}</td>
     </tr>
 {% endmacro %}
@@ -244,8 +249,8 @@
             overflow-y: auto;
         }
         /* Zebra-stripe one-row-per-result tables (per-analyte fact rows,
-           the flattened Variance table, the Visits/Recent-Narratives lists)
-           so consecutive rows are easy to tell apart instead of blending
+           the flattened Variance table, the Visits table) so consecutive
+           rows are easy to tell apart instead of blending
            into one block. Rows that already carry a semantic colour keep it
            -- conflict rows stay `.table-warning`, excluded rows stay
            `.table-light` -- so only the plain rows alternate white / light
@@ -965,6 +970,17 @@
         btn.setAttribute('data-needs-generation', needsGeneration ? '1' : '0');
     }
 
+    // The server response already carries fresh view_model.recent_narratives /
+    // visit_rows / variance_rows (DocController::formatRegenerateJson()) --
+    // available for a client that wants to refresh those tabs in place. This
+    // reference client only refreshes the Current Narrative pane synchronously
+    // and leaves Recent Narratives / Previous Results showing the state as of
+    // the last full page load, catching up on the next navigation; rebuilding
+    // three nested Bootstrap tab structures from scratch via DOM APIs (no
+    // innerHTML with model/physician text, per this file's own escaping
+    // discipline) is real surface area deliberately left out of this
+    // reference implementation to keep it simple, matching the same
+    // trade-off chat_panel.html.twig's client documents for its own SSE path.
     function applyRegenerateResult(data) {
         var doc = data.doc || {};
         renderNarrative((data.view_model && data.view_model.narrative) || [], doc);

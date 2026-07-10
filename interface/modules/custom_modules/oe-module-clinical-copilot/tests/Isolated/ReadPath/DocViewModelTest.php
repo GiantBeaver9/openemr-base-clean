@@ -277,6 +277,21 @@ final class DocViewModelTest extends TestCase
         );
     }
 
+    public function testVisitRowsExcludesTheCurrentlyServedRow(): void
+    {
+        $fact = self::trendPointFact();
+        $doc = SynthesisDocPayload::build([$fact], null, VerifyStatus::Degraded, 'llm_unavailable', 'no narrative', [], 1);
+
+        $history = [
+            self::docRow(2, '2026-07-08 09:00:00', $doc),
+            self::docRow(1, '2026-07-01 09:00:00', $doc),
+        ];
+
+        $rows = DocViewModel::visitRows($history, excludeDocId: 2);
+
+        self::assertSame([1], array_column($rows, 'id'));
+    }
+
     public function testVarianceRowsKeepsSameDayWeightAndBmiDeltasSeparate(): void
     {
         // Same visit (same form_vitals row date) records both weight and BMI
@@ -292,7 +307,7 @@ final class DocViewModelTest extends TestCase
 
         $facts = [$weightEarly, $weightLate, $bmiEarly, $bmiLate, ...$weightDeltas, ...$bmiDeltas];
 
-        $rows = DocViewModel::varianceRows($facts, 'https://example.test', []);
+        $rows = DocViewModel::varianceRows([], $facts, 'https://example.test', []);
 
         $weightRow = self::rowFor($rows, 'Weight', '2026-06-01');
         $bmiRow = self::rowFor($rows, 'BMI', '2026-06-01');
@@ -305,7 +320,7 @@ final class DocViewModelTest extends TestCase
     {
         $bp = self::bpFact('2026-06-01', 1, '132', '84');
 
-        $rows = DocViewModel::varianceRows([$bp], 'https://example.test', []);
+        $rows = DocViewModel::varianceRows([], [$bp], 'https://example.test', []);
 
         self::assertCount(1, $rows);
         self::assertSame('Blood pressure', $rows[0]['group_label']);
@@ -330,15 +345,28 @@ final class DocViewModelTest extends TestCase
             $ldlLate->factId => ['key' => 'ldl', 'label' => 'LDL Cholesterol'],
             $ldlDelta->factId => ['key' => 'ldl', 'label' => 'LDL Cholesterol'],
         ];
+        $facts = [$a1cEarly, $a1cLate, $ldlEarly, $ldlLate, $a1cDelta, $ldlDelta];
 
-        $rows = DocViewModel::varianceRows(
-            [$a1cEarly, $a1cLate, $ldlEarly, $ldlLate, $a1cDelta, $ldlDelta],
-            'https://example.test',
-            $map,
-        );
+        $viewModel = DocViewModel::build(self::servedResult($facts, null), 'https://example.test', $map);
+        $rows = DocViewModel::varianceRows($viewModel['fact_groups'], $facts, 'https://example.test', $map);
 
         self::assertSame('+0.30 %', self::rowFor($rows, 'A1c', '2026-06-01')['change_display']);
         self::assertSame('-20.00', self::rowFor($rows, 'LDL Cholesterol', '2026-06-01')['change_display']);
+    }
+
+    public function testVarianceRowsNeverIncludesExcludedLabFacts(): void
+    {
+        // Sourced from the already-consolidated `lab:*` fact_groups (see
+        // buildFactGroups' own exclusion filter), so an excluded/invalid lab
+        // reading must never surface here looking like a valid trend point --
+        // the same guarantee testExclusionRoutesToExclusionsBucketOnly()
+        // checks for the Chart Facts tab.
+        $exclusion = self::exclusionFact();
+
+        $viewModel = DocViewModel::build(self::servedResult([$exclusion], null), 'https://example.test');
+        $rows = DocViewModel::varianceRows($viewModel['fact_groups'], [$exclusion], 'https://example.test', []);
+
+        self::assertSame([], $rows);
     }
 
     public function testVarianceRowsSortsMostRecentFirstAcrossLabsAndVitals(): void
@@ -346,8 +374,11 @@ final class DocViewModelTest extends TestCase
         $lab = self::trendPointOn('2026-03-01', 1, 7.0);
         $weight = self::weightFact('2026-06-01', 2, 180.0);
         $bp = self::bpFact('2026-01-01', 3, '120', '80');
+        $map = [$lab->factId => ['key' => 'a1c', 'label' => 'A1c']];
+        $facts = [$lab, $weight, $bp];
 
-        $rows = DocViewModel::varianceRows([$lab, $weight, $bp], 'https://example.test', []);
+        $viewModel = DocViewModel::build(self::servedResult($facts, null), 'https://example.test', $map);
+        $rows = DocViewModel::varianceRows($viewModel['fact_groups'], $facts, 'https://example.test', $map);
 
         self::assertSame(['2026-06-01', '2026-03-01', '2026-01-01'], array_column($rows, 'clinical_date'));
     }
