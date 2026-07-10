@@ -388,14 +388,15 @@
                     {{ _self.status_pipe() }}
                     <span class="badge badge-light">{{ "served from cache -- no model call this read"|xlt }}</span>
                 {% endif %}
+                {# Only show a QA badge once an actual QA verdict/score exists. The
+                   'pending' default (there is no QA agent running the async
+                   second-pass sweep yet) is suppressed rather than shown as a
+                   perpetual "QA pending" flag. #}
                 {% if doc.qa_status and doc.qa_status != 'pending' %}
                     {{ _self.status_pipe() }}
                     <span class="badge badge-light" title="{{ "advisory second-pass QA review -- never a serving gate"|xla }}">
                         {{ "QA"|xlt }}: {{ doc.qa_status|text }}{{ doc.qa_score is not null ? ' (' ~ doc.qa_score ~ ')' : '' }}
                     </span>
-                {% elseif doc.qa_status == 'pending' %}
-                    {{ _self.status_pipe() }}
-                    <span class="badge badge-light">{{ "QA pending"|xlt }}</span>
                 {% endif %}
                 {{ _self.status_pipe() }}
                 <span class="ccp-meta-line">{{ "computed"|xlt }} <span id="ccpComputedAt">{{ doc.computed_at ? doc.computed_at|text : '—' }}</span></span>
@@ -586,7 +587,7 @@
                                 <td><code>{{ row.fact_digest|text }}&hellip;</code></td>
                                 <td>{{ row.verify_status|text }}</td>
                                 <td>{{ row.regen_reason|text }}</td>
-                                <td>{{ row.qa_status|text }}{{ row.qa_score is not null ? ' (' ~ row.qa_score ~ ')' : '' }}</td>
+                                <td>{{ row.qa_status == 'pending' ? '—' : row.qa_status|text }}{{ row.qa_score is not null ? ' (' ~ row.qa_score ~ ')' : '' }}</td>
                                 <td><small>{{ row.correlation_id|text }}</small></td>
                             </tr>
                         {% else %}
