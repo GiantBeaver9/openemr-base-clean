@@ -111,9 +111,14 @@
     function appendLine(role, text) {
         var row = document.createElement('div');
         row.className = 'ccp-narrative-claim';
-        var strong = document.createElement('strong');
-        strong.textContent = role + ': ';
-        row.appendChild(strong);
+        // A falsy role renders a label-less continuation line, so a
+        // multi-fact answer can stack each fact on its own row under a
+        // single "Assistant:" label instead of repeating it per fact.
+        if (role) {
+            var strong = document.createElement('strong');
+            strong.textContent = role + ': ';
+            row.appendChild(strong);
+        }
         row.appendChild(document.createTextNode(text));
         turnsEl.appendChild(row);
         turnsEl.scrollTop = turnsEl.scrollHeight;
@@ -133,16 +138,19 @@
         }
 
         if (Array.isArray(result.claims) && result.claims.length > 0) {
-            var texts = [];
+            // Render each claim on its own line -- when the answer carries
+            // multiple pieces of data, one fact per line rather than one
+            // run-on paragraph. The first line carries the "Assistant:"
+            // label; each subsequent fact is a label-less continuation row.
+            var rendered = 0;
             for (var i = 0; i < result.claims.length; i++) {
                 var claimText = result.claims[i] && result.claims[i].text;
                 if (claimText) {
-                    texts.push(claimText);
+                    appendLine(rendered === 0 ? 'Assistant' : '', claimText);
+                    rendered++;
                 }
             }
-            if (texts.length > 0) {
-                appendLine('Assistant', texts.join(' '));
-            } else if (result.degraded_message) {
+            if (rendered === 0 && result.degraded_message) {
                 appendLine('Assistant', result.degraded_message);
             }
         } else if (result.degraded_message) {
