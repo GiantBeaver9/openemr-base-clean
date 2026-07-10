@@ -60,7 +60,7 @@
 {% endmacro %}
 
 {% macro fact_row(fact, visit_label) %}
-    <tr class="{% if fact.flags is defined and 'conflict' in fact.flags %}table-warning{% elseif fact.is_excluded is defined and fact.is_excluded %}table-light text-muted{% endif %}">
+    <tr class="{{ _self.trend_row_class(fact) }}">
         <td>
             {{ fact.analyte_label|default(fact.kind_label|default(fact.kind))|text }}
             {%- if fact.analyte_label and fact.kind_label -%}
@@ -103,24 +103,77 @@
     </tr></thead>
 {% endmacro %}
 
+{# Shared by consolidated_fact_row and variance_fact_row: a conflict-flagged
+   fact stays table-warning, an excluded fact (only reachable if a caller
+   ever feeds one in -- both current callers filter FactKind::Exclusion
+   upstream) stays table-light/text-muted, exactly like the plain fact_row
+   macro above. #}
+{% macro trend_row_class(fact) %}{%- if fact.flags is defined and 'conflict' in fact.flags -%}table-warning{%- elseif fact.is_excluded is defined and fact.is_excluded -%}table-light text-muted{%- endif -%}{% endmacro %}
+
+{# Shared by consolidated_fact_row and variance_fact_row: the Value / Change
+   vs prior / Status / Date cells every consolidated (one-row-per-draw) fact
+   renders identically, whichever table it appears in. #}
+{% macro value_change_status_date_cells(fact) %}
+    <td>
+        {%- if fact.parsed is not null -%}
+            {{ fact.comparator != 'none' ? (fact.comparator == 'lt' ? '<' : (fact.comparator == 'lte' ? '<=' : (fact.comparator == 'gt' ? '>' : '>='))) : '' }}{{ fact.parsed }}{{ fact.unit ? ' ' ~ fact.unit|text : '' }}
+        {%- else -%}
+            {{ fact.raw|default('')|text }}
+        {%- endif -%}
+    </td>
+    <td>{{ fact.change_display is not null ? fact.change_display|text : '—' }}</td>
+    <td>{{ fact.status_label|default(fact.status)|text }}</td>
+    <td>{{ fact.clinical_date ? fact.clinical_date|text : '—' }}</td>
+{% endmacro %}
+
 {% macro consolidated_fact_row(fact, visit_label) %}
-    <tr class="{% if fact.flags is defined and 'conflict' in fact.flags %}table-warning{% endif %}">
-        <td>
-            {%- if fact.parsed is not null -%}
-                {{ fact.comparator != 'none' ? (fact.comparator == 'lt' ? '<' : (fact.comparator == 'lte' ? '<=' : (fact.comparator == 'gt' ? '>' : '>='))) : '' }}{{ fact.parsed }}{{ fact.unit ? ' ' ~ fact.unit|text : '' }}
-            {%- else -%}
-                {{ fact.raw|default('')|text }}
-            {%- endif -%}
-        </td>
-        <td>{{ fact.change_display is not null ? fact.change_display|text : '—' }}</td>
-        <td>{{ fact.status_label|default(fact.status)|text }}</td>
-        <td>{{ fact.clinical_date ? fact.clinical_date|text : '—' }}</td>
+    <tr class="{{ _self.trend_row_class(fact) }}">
+        {{ _self.value_change_status_date_cells(fact) }}
         <td>
             {% for label in fact.flag_labels|default(fact.flags) %}
                 <span class="badge badge-secondary">{{ label|text }}</span>
             {% endfor %}
         </td>
         <td>{{ _self.source_cell(fact.citations, visit_label) }}</td>
+    </tr>
+{% endmacro %}
+
+{# "Previous Results / Variance" subtab: the flattened, one-row-per-draw
+   view across every consolidated analyte/metric (labs + vitals), so a
+   physician scanning for "what changed" never has to click through each
+   analyte's own Chart Facts tab. Same row shape as consolidated_fact_row,
+   plus the leading Type column since rows from different analytes now share
+   one table. #}
+{% macro variance_facts_table() %}
+    <thead><tr>
+        <th>{{ "Type"|xlt }}</th><th>{{ "Value"|xlt }}</th><th>{{ "Change vs prior"|xlt }}</th>
+        <th>{{ "Status"|xlt }}</th><th>{{ "Date"|xlt }}</th><th>{{ "Source"|xlt }}</th>
+    </tr></thead>
+{% endmacro %}
+
+{% macro variance_fact_row(fact) %}
+    <tr class="{{ _self.trend_row_class(fact) }}">
+        <td>{{ fact.group_label|default('')|text }}</td>
+        {{ _self.value_change_status_date_cells(fact) }}
+        <td>{{ _self.citation_refs(fact.citations) }}</td>
+    </tr>
+{% endmacro %}
+
+{# "Previous Results / Visits" subtab: one line per past synthesis attempt
+   (see DocViewModel::visitRows() for why an attempt, not an appointment, is
+   this module's closest honest proxy for "a visit"). #}
+{% macro visits_table() %}
+    <thead><tr>
+        <th>{{ "Computed"|xlt }}</th><th>{{ "Appt"|xlt }}</th><th>{{ "Verify"|xlt }}</th><th>{{ "Claims"|xlt }}</th>
+    </tr></thead>
+{% endmacro %}
+
+{% macro visit_row(visit) %}
+    <tr>
+        <td>{{ visit.computed_at|text }}</td>
+        <td>{{ visit.appt_id ? ('#' ~ visit.appt_id|text) : '—' }}</td>
+        <td>{{ visit.verify_status|text }}</td>
+        <td>{{ visit.claim_count|text }}</td>
     </tr>
 {% endmacro %}
 
@@ -195,16 +248,19 @@
             max-height: calc(100vh - 10rem);
             overflow-y: auto;
         }
-        /* Zebra-stripe the per-analyte fact rows (A1c, glucose, ...) so
-           consecutive readings from similar visits are easy to tell apart
-           instead of blending into one block. Rows that already carry a
-           semantic colour keep it -- conflict rows stay `.table-warning`,
-           excluded rows stay `.table-light` -- so only the plain rows
-           alternate white / light grey. */
-        .ccp-facts-tab-content tbody tr:not(.table-warning):not(.table-light):nth-child(odd) {
+        /* Zebra-stripe one-row-per-result tables (per-analyte fact rows,
+           the flattened Variance table, the Visits table) so consecutive
+           rows are easy to tell apart instead of blending
+           into one block. Rows that already carry a semantic colour keep it
+           -- conflict rows stay `.table-warning`, excluded rows stay
+           `.table-light` -- so only the plain rows alternate white / light
+           grey. Any table opts in via the `ccp-zebra-table` class rather
+           than a container-scoped selector, so every one-line-per-row table
+           in this page (Chart Facts, Previous Results) shares one rule. */
+        .ccp-zebra-table tbody tr:not(.table-warning):not(.table-light):nth-child(odd) {
             background-color: #ffffff;
         }
-        .ccp-facts-tab-content tbody tr:not(.table-warning):not(.table-light):nth-child(even) {
+        .ccp-zebra-table tbody tr:not(.table-warning):not(.table-light):nth-child(even) {
             background-color: #f2f3f5;
         }
         @media (max-width: 991.98px) {
@@ -431,15 +487,34 @@
         <section class="ccp-section">
         <div class="ccp-main-layout">
             {% set ccpNarrativeAvailable = not doc.capability_crash %}
-            {# Narrative (default) vs Chart Facts as top-level tabs. On a
-               capability crash there is no narrative, so only the Chart Facts
-               tab is shown and it is the active one. #}
+            {% set ccpRecentNarrativesAvailable = view_model.recent_narratives is not empty %}
+            {% set ccpPreviousResultsAvailable = (view_model.visit_rows is not empty) or (view_model.variance_rows is not empty) %}
+            {# Current Narrative (default) vs Recent Narratives vs Previous
+               Results vs Chart Facts as top-level tabs. On a capability crash
+               there is no narrative, so Current/Recent Narratives are hidden
+               and Chart Facts becomes the active tab. #}
             <ul class="nav nav-tabs mb-3" id="ccpDocTabs" role="tablist">
                 {% if ccpNarrativeAvailable %}
                 <li class="nav-item">
                     <a class="nav-link active" id="ccpDocTab-narrative" data-toggle="tab"
                        href="#ccpDocPane-narrative" role="tab" aria-controls="ccpDocPane-narrative"
-                       aria-selected="true">{{ "Narrative"|xlt }}</a>
+                       aria-selected="true">{{ "Current Narrative"|xlt }}</a>
+                </li>
+                {% endif %}
+                {% if ccpNarrativeAvailable and ccpRecentNarrativesAvailable %}
+                <li class="nav-item">
+                    <a class="nav-link" id="ccpDocTab-recent" data-toggle="tab"
+                       href="#ccpDocPane-recent" role="tab" aria-controls="ccpDocPane-recent"
+                       aria-selected="false">
+                        {{ "Recent Narratives"|xlt }} <span class="badge badge-light ml-1">{{ view_model.recent_narratives|length|text }}</span>
+                    </a>
+                </li>
+                {% endif %}
+                {% if ccpPreviousResultsAvailable %}
+                <li class="nav-item">
+                    <a class="nav-link" id="ccpDocTab-previous" data-toggle="tab"
+                       href="#ccpDocPane-previous" role="tab" aria-controls="ccpDocPane-previous"
+                       aria-selected="false">{{ "Previous Results"|xlt }}</a>
                 </li>
                 {% endif %}
                 <li class="nav-item">
@@ -477,6 +552,107 @@
                             {% else %}
                                 <p class="text-muted mb-0">{{ "No narrative yet. Use Generate narrative to run the model over the chart facts."|xlt }}</p>
                             {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if ccpNarrativeAvailable and ccpRecentNarrativesAvailable %}
+                <div class="tab-pane fade" id="ccpDocPane-recent" role="tabpanel" aria-labelledby="ccpDocTab-recent">
+                    <div class="card mb-0">
+                        <div class="card-header">
+                            <strong>{{ "Recent Narratives"|xlt }}</strong>
+                            <small class="text-muted">{{ view_model.recent_narratives|length|text }} {{ "prior attempts before this one"|xlt }}</small>
+                        </div>
+                        <div class="card-body">
+                            <ul class="nav nav-tabs ccp-facts-tabs" role="tablist">
+                                {% for entry in view_model.recent_narratives %}
+                                    <li class="nav-item">
+                                        <a class="nav-link{% if loop.first %} active{% endif %}"
+                                           id="ccpRecentTab-{{ entry.id|attr }}" data-toggle="tab"
+                                           href="#ccpRecentPane-{{ entry.id|attr }}" role="tab"
+                                           aria-controls="ccpRecentPane-{{ entry.id|attr }}"
+                                           aria-selected="{{ loop.first ? 'true' : 'false' }}">
+                                            {{ entry.computed_at|text }}
+                                        </a>
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                            <div class="tab-content ccp-facts-tab-content">
+                                {% for entry in view_model.recent_narratives %}
+                                    <div class="tab-pane fade{% if loop.first %} show active{% endif %}"
+                                         id="ccpRecentPane-{{ entry.id|attr }}" role="tabpanel"
+                                         aria-labelledby="ccpRecentTab-{{ entry.id|attr }}">
+                                        <div class="mt-2">
+                                            {% for claim in entry.narrative %}
+                                                <div class="ccp-narrative-claim">
+                                                    {% if 'conflict' in claim.flags %}<span class="badge badge-warning">{{ "Conflict"|xlt }}</span>{% endif %}
+                                                    {{ claim.text|text }}
+                                                    {{ _self.citation_refs(claim.citations) }}
+                                                </div>
+                                            {% endfor %}
+                                        </div>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if ccpPreviousResultsAvailable %}
+                <div class="tab-pane fade" id="ccpDocPane-previous" role="tabpanel" aria-labelledby="ccpDocTab-previous">
+                    <div class="card mb-0">
+                        <div class="card-header">
+                            <strong>{{ "Previous Results"|xlt }}</strong>
+                        </div>
+                        <div class="card-body">
+                            <ul class="nav nav-tabs ccp-facts-tabs" role="tablist">
+                                <li class="nav-item">
+                                    <a class="nav-link active" id="ccpPrevTab-visits" data-toggle="tab"
+                                       href="#ccpPrevPane-visits" role="tab" aria-controls="ccpPrevPane-visits"
+                                       aria-selected="true">
+                                        {{ "Visits"|xlt }} <span class="badge badge-light ml-1">{{ view_model.visit_rows|length|text }}</span>
+                                    </a>
+                                </li>
+                                <li class="nav-item">
+                                    <a class="nav-link" id="ccpPrevTab-variance" data-toggle="tab"
+                                       href="#ccpPrevPane-variance" role="tab" aria-controls="ccpPrevPane-variance"
+                                       aria-selected="false">
+                                        {{ "Variance"|xlt }} <span class="badge badge-light ml-1">{{ view_model.variance_rows|length|text }}</span>
+                                    </a>
+                                </li>
+                            </ul>
+                            <div class="tab-content ccp-facts-tab-content">
+                                <div class="tab-pane fade show active" id="ccpPrevPane-visits" role="tabpanel" aria-labelledby="ccpPrevTab-visits">
+                                    <div class="table-responsive mt-2">
+                                        {% if view_model.visit_rows is empty %}
+                                            <p class="text-muted mb-0 mt-2">{{ "No prior visits."|xlt }}</p>
+                                        {% else %}
+                                            <table class="table table-sm table-borderless mb-0 ccp-zebra-table">
+                                                {{ _self.visits_table() }}
+                                                <tbody>
+                                                {% for visit in view_model.visit_rows %}{{ _self.visit_row(visit) }}{% endfor %}
+                                                </tbody>
+                                            </table>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <div class="tab-pane fade" id="ccpPrevPane-variance" role="tabpanel" aria-labelledby="ccpPrevTab-variance">
+                                    <div class="table-responsive mt-2">
+                                        {% if view_model.variance_rows is empty %}
+                                            <p class="text-muted mb-0 mt-2">{{ "No trend changes to show."|xlt }}</p>
+                                        {% else %}
+                                            <table class="table table-sm table-borderless mb-0 ccp-zebra-table">
+                                                {{ _self.variance_facts_table() }}
+                                                <tbody>
+                                                {% for fact in view_model.variance_rows %}{{ _self.variance_fact_row(fact) }}{% endfor %}
+                                                </tbody>
+                                            </table>
+                                        {% endif %}
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -530,7 +706,7 @@
                                                 </div>
                                             {% endif %}
                                             <div class="table-responsive mt-2">
-                                                <table class="table table-sm table-borderless mb-0">
+                                                <table class="table table-sm table-borderless mb-0 ccp-zebra-table">
                                                     {% if g.consolidated %}
                                                         {{ _self.consolidated_facts_table(visit_label) }}
                                                         <tbody>
@@ -794,6 +970,17 @@
         btn.setAttribute('data-needs-generation', needsGeneration ? '1' : '0');
     }
 
+    // The server response already carries fresh view_model.recent_narratives /
+    // visit_rows / variance_rows (DocController::formatRegenerateJson()) --
+    // available for a client that wants to refresh those tabs in place. This
+    // reference client only refreshes the Current Narrative pane synchronously
+    // and leaves Recent Narratives / Previous Results showing the state as of
+    // the last full page load, catching up on the next navigation; rebuilding
+    // three nested Bootstrap tab structures from scratch via DOM APIs (no
+    // innerHTML with model/physician text, per this file's own escaping
+    // discipline) is real surface area deliberately left out of this
+    // reference implementation to keep it simple, matching the same
+    // trade-off chat_panel.html.twig's client documents for its own SSE path.
     function applyRegenerateResult(data) {
         var doc = data.doc || {};
         renderNarrative((data.view_model && data.view_model.narrative) || [], doc);

@@ -87,7 +87,7 @@ if ($pid <= 0) {
         'patient' => null,
         'history_rows' => [],
         'doc' => ['capability_crash' => false],
-        'view_model' => ['narrative' => [], 'fact_groups' => []],
+        'view_model' => emptyDocViewModel(),
         'visit_label' => null,
     ];
 } elseif ($isPost && ($_POST['action'] ?? '') === 'regenerate') {
@@ -127,7 +127,7 @@ if ($pid <= 0) {
             exit;
         }
 
-        $emit('done', $controller->formatRegenerateJson($viewData['result'], $webRoot));
+        $emit('done', $controller->formatRegenerateJson($viewData['result'], $webRoot, $viewData['history']));
         exit;
     }
 
@@ -138,7 +138,7 @@ if ($pid <= 0) {
             echo json_encode(['ok' => false, 'reason' => 'patient not found']);
             exit;
         }
-        echo json_encode($controller->formatRegenerateJson($viewData['result'], $webRoot));
+        echo json_encode($controller->formatRegenerateJson($viewData['result'], $webRoot, $viewData['history']));
         exit;
     }
     $todayVisit = $controller->todayAppointmentForPatient($pid);
@@ -200,13 +200,35 @@ function buildDocTemplateVars(
     if ($viewData['found']) {
         $templateVars['doc'] = DocViewModel::summary($viewData['result']);
         $analyteByFactId = (new FactAnalyteResolver())->labelByFactId($viewData['result']->facts);
-        $templateVars['view_model'] = DocViewModel::build($viewData['result'], $webRoot, $analyteByFactId);
+        $viewModel = DocViewModel::build($viewData['result'], $webRoot, $analyteByFactId);
+        $viewModel['recent_narratives'] = DocViewModel::recentNarratives($viewData['history'], $webRoot, $viewData['result']->docId);
+        $viewModel['visit_rows'] = DocViewModel::visitRows($viewData['history'], $viewData['result']->docId);
+        $viewModel['variance_rows'] = DocViewModel::varianceRows($viewModel['fact_groups'], $viewData['result']->facts, $webRoot, $analyteByFactId);
+        $templateVars['view_model'] = $viewModel;
     } else {
         $templateVars['doc'] = ['capability_crash' => false];
-        $templateVars['view_model'] = ['narrative' => [], 'fact_groups' => []];
+        $templateVars['view_model'] = emptyDocViewModel();
     }
 
     return $templateVars;
+}
+
+/**
+ * The doc.html.twig-required view_model shape with every list empty --
+ * shared by every branch that has no synthesis to show (no pid yet, patient
+ * not found) so the template's `view_model.*` keys are always present.
+ *
+ * @return array{narrative: list<mixed>, fact_groups: list<mixed>, recent_narratives: list<mixed>, visit_rows: list<mixed>, variance_rows: list<mixed>}
+ */
+function emptyDocViewModel(): array
+{
+    return [
+        'narrative' => [],
+        'fact_groups' => [],
+        'recent_narratives' => [],
+        'visit_rows' => [],
+        'variance_rows' => [],
+    ];
 }
 
 /**

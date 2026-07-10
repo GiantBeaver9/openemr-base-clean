@@ -137,6 +137,236 @@ final class DocViewModel
     }
 
     /**
+     * The "Recent Narratives" tab: the last {@see $limit} PAST narrative
+     * attempts (never the one already shown in the Current Narrative tab),
+     * each re-rendered from its OWN persisted fact snapshot
+     * ({@see SynthesisDocPayload}) so a past attempt's citations resolve
+     * against the facts that were true when it was generated, not today's
+     * chart. A degraded attempt (no claims) is skipped -- there is nothing to
+     * show in a narrative tab for it, and is detected cheaply off the raw
+     * `doc['claims']` array before paying for a full {@see SynthesisDocPayload}
+     * hydration (which validates every persisted Fact) -- the same
+     * cheap-check-first approach {@see self::visitRows()} uses, needed here
+     * too because a long run of degraded attempts would otherwise be fully
+     * hydrated just to be discarded on every page load.
+     *
+     * @param list<DocRow> $history most-recent-first ({@see DocHistoryReader::forPid()})
+     * @return list<array{id: int, computed_at: string, narrative: list<array{text: string, claim_type: string, flags: list<string>, emphasis: ?string, citations: list<array{label: string, url: ?string}>}>}>
+     */
+    public static function recentNarratives(array $history, string $webRoot, ?int $excludeDocId, int $limit = 3): array
+    {
+        $out = [];
+        foreach ($history as $row) {
+            if (count($out) >= $limit) {
+                break;
+            }
+            if ($excludeDocId !== null && $row->id === $excludeDocId) {
+                continue;
+            }
+
+            $claimsRaw = $row->doc['claims'] ?? null;
+            if (!is_array($claimsRaw) || $claimsRaw === []) {
+                continue;
+            }
+
+            $payload = SynthesisDocPayload::fromDocArray($row->doc);
+            if ($payload->claims === null || $payload->claims === []) {
+                continue;
+            }
+
+            $factById = [];
+            foreach ($payload->facts as $fact) {
+                $factById[$fact->factId] = $fact;
+            }
+
+            $narrative = self::buildNarrative($payload->claims, $factById, $webRoot);
+            if ($narrative === []) {
+                continue;
+            }
+
+            $out[] = [
+                'id' => $row->id,
+                'computed_at' => $row->computedAt->format('Y-m-d H:i'),
+                'narrative' => $narrative,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * The "Previous Results / Visits" subtab: one line per past synthesis
+     * attempt (never the one already shown in the Current Narrative tab).
+     * This module has no separate "visit" record of its own (a `DocRow` is
+     * keyed by `pid` + `fact_digest`, not by appointment) -- `computed_at` is
+     * the closest honest proxy, alongside the appointment id when
+     * {@see \OpenEMR\Modules\ClinicalCopilot\DocStore} happened to have one
+     * at insert time.
+     *
+     * A one-liner needs only the claim COUNT, not the claims themselves, so
+     * this reads `doc['claims']` straight off the raw decoded row rather
+     * than going through {@see SynthesisDocPayload::fromDocArray()} -- which
+     * would also hydrate and validate every persisted Fact just to be
+     * discarded, unnecessary work for up to
+     * {@see DocHistoryReader::forPid()}'s 50-row default on every page load.
+     *
+     * @param list<DocRow> $history most-recent-first
+     * @return list<array{id: int, computed_at: string, appt_id: ?int, verify_status: string, claim_count: int}>
+     */
+    public static function visitRows(array $history, ?int $excludeDocId = null): array
+    {
+        $rows = [];
+        foreach ($history as $row) {
+            if ($excludeDocId !== null && $row->id === $excludeDocId) {
+                continue;
+            }
+
+            $claimsRaw = $row->doc['claims'] ?? null;
+            $rows[] = [
+                'id' => $row->id,
+                'computed_at' => $row->computedAt->format('Y-m-d H:i'),
+                'appt_id' => $row->apptId,
+                'verify_status' => $row->verifyStatus->value,
+                'claim_count' => is_array($claimsRaw) ? count($claimsRaw) : 0,
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * The "Previous Results / Variance" subtab: every lab and vitals draw
+     * that has a computable "change vs prior", flattened to ONE ROW PER
+     * DRAW/READING across all analytes -- the Chart Facts tab keeps these
+     * split into a tab per analyte, but this view is deliberately one flat,
+     * zebra-stripable table.
+     *
+     * Labs are read straight off {@see $factGroups} -- the SAME `lab:*`
+     * consolidated groups {@see self::buildFactGroups()} already built for
+     * the Chart Facts tab -- rather than re-deriving them from `$facts`:
+     * this avoids running {@see self::factRow()} a second time over every
+     * lab fact, and for free inherits buildFactGroups()'s own exclusion of
+     * `FactKind::Exclusion`/in-flight kinds (I5 -- an excluded, unreliable
+     * lab value must never render as if it were a normal trend point; only a
+     * `consolidated` group can ever be a `lab:*` group, so filtering on
+     * `consolidated` here is exactly "labs, already exclusion-filtered").
+     *
+     * Vitals are NOT available pre-built this way (VitalsTrend's single
+     * `vitals_trend` group is never marked `consolidated` -- see the note on
+     * {@see self::vitalsMetricKey()}), so they are derived here from the raw
+     * `$facts` instead, which needs each Citation's `field` to route
+     * weight/BMI/bp -- something the already-flattened `fact_groups` rows no
+     * longer carry (only the resolved citation label/url survive
+     * {@see self::factRow()}). VitalsTrend never emits `FactKind::Exclusion`
+     * or an in-flight kind (verified: it only ever builds `vital` and
+     * `derived_*` facts), so no equivalent exclusion filter is needed on
+     * this branch.
+     *
+     * Vitals need the same per-series isolation the per-analyte lab split
+     * gets: {@see \OpenEMR\Modules\ClinicalCopilot\Capability\VitalsTrend}
+     * emits weight and BMI as two independent series that often share a
+     * clinical_date (same visit, same form_vitals row) -- consolidating them
+     * as one combined bucket would let a same-day weight delta collide with
+     * that day's BMI delta in {@see self::consolidateLabRows()}'s
+     * date-keyed lookup. Grouping vitals by their citation `field` first
+     * (weight/BMI/bp, via {@see self::vitalsMetricKey()}) keeps each series
+     * isolated. Blood pressure has no derived-fact math (VitalsTrend's
+     * documented v1 scope limit) and is shown as-is with no change column.
+     *
+     * @param list<array{key: string, label: string, total: int, shown: int, consolidated: bool, summary: array<string, mixed>|null, facts: list<array<string, mixed>>}> $factGroups {@see self::buildFactGroups()}'s output for the SAME `$facts`
+     * @param list<Fact> $facts current extraction's full fact set
+     * @param array<string, array{key: string, label: string}> $analyteByFactId
+     * @return list<array<string, mixed>> most-recent-first, each row carrying a 'group_label' (the analyte/metric name)
+     */
+    public static function varianceRows(array $factGroups, array $facts, string $webRoot, array $analyteByFactId): array
+    {
+        $rows = [];
+        foreach ($factGroups as $group) {
+            if (!$group['consolidated']) {
+                continue;
+            }
+            foreach ($group['facts'] as $row) {
+                $row['group_label'] = $group['label'];
+                $rows[] = $row;
+            }
+        }
+
+        /** @var array<string, list<array<string, mixed>>> $vitalsByMetric */
+        $vitalsByMetric = [];
+        foreach ($facts as $fact) {
+            if ($fact->capability->value !== 'vitals_trend') {
+                continue;
+            }
+            $metric = self::vitalsMetricKey($fact);
+            if ($metric !== null) {
+                $vitalsByMetric[$metric][] = self::factRow($fact, $webRoot, $analyteByFactId);
+            }
+        }
+
+        foreach ($vitalsByMetric as $metric => $metricRows) {
+            if ($metric === 'bp') {
+                foreach ($metricRows as $row) {
+                    $row['group_label'] = 'Blood pressure';
+                    $row['change_display'] = null;
+                    $rows[] = $row;
+                }
+                continue;
+            }
+
+            [$consolidated] = self::consolidateLabRows($metricRows);
+            $label = $metric === 'weight' ? 'Weight' : 'BMI';
+            foreach ($consolidated as $row) {
+                $row['group_label'] = $label;
+                $rows[] = $row;
+            }
+        }
+
+        return self::sortMostRecentFirst($rows);
+    }
+
+    /**
+     * Which VitalsTrend series a Fact belongs to, read off its own citation
+     * field rather than re-deriving it from capability + kind -- every vital
+     * Fact and every derived fact built from it carries this same field on
+     * every citation ({@see \OpenEMR\Modules\ClinicalCopilot\Capability\VitalsTrend::buildNumericVital()},
+     * {@see \OpenEMR\Modules\ClinicalCopilot\Capability\Support\DerivedFacts::deltas()}
+     * unions the series' own citations), so this is exact, not a guess.
+     */
+    private static function vitalsMetricKey(Fact $fact): ?string
+    {
+        $field = $fact->citations[0]->field ?? null;
+
+        return match ($field) {
+            'weight' => 'weight',
+            'BMI' => 'bmi',
+            'bps', 'bpd' => 'bp',
+            default => null,
+        };
+    }
+
+    /**
+     * Most-recent-first by `clinical_date` (ISO `Y-m-d` sorts correctly as a
+     * plain string); undated rows trail. Shared by {@see self::group()} (the
+     * Chart Facts panel) and {@see self::varianceRows()} (the flattened
+     * Previous Results / Variance table) so both views order rows the same
+     * way from one implementation.
+     *
+     * @param list<array<string, mixed>> $rows
+     * @return list<array<string, mixed>>
+     */
+    private static function sortMostRecentFirst(array $rows): array
+    {
+        usort($rows, static function (array $a, array $b): int {
+            $ad = is_string($a['clinical_date'] ?? null) ? $a['clinical_date'] : '';
+            $bd = is_string($b['clinical_date'] ?? null) ? $b['clinical_date'] : '';
+
+            return $bd <=> $ad;
+        });
+
+        return $rows;
+    }
+
+    /**
      * ARCHITECTURE.md §2.5: "hover: exactly which checks V1-V6 ran and
      * their verdicts."
      *
@@ -307,13 +537,7 @@ final class DocViewModel
      */
     private static function group(string $key, string $label, array $rows, bool $consolidated = false, ?array $summary = null): array
     {
-        usort($rows, static function (array $a, array $b): int {
-            $ad = is_string($a['clinical_date'] ?? null) ? $a['clinical_date'] : '';
-            $bd = is_string($b['clinical_date'] ?? null) ? $b['clinical_date'] : '';
-
-            // ISO Y-m-d sorts correctly as a string; empty (undated) trails.
-            return $bd <=> $ad;
-        });
+        $rows = self::sortMostRecentFirst($rows);
 
         $total = count($rows);
         $shown = array_slice($rows, 0, self::MAX_FACTS_PER_GROUP);
