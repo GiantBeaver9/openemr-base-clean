@@ -142,9 +142,16 @@ final class Worker
             [$warmedCount, $warmSkipped] = $this->warm($now);
         });
 
+        // The advisory second-pass QA reviewer is a second model call and is
+        // no longer used: deterministic verification (V1-V6) is the only gate.
+        // Gated off by default via WorkerConfig::qaReviewEnabled() (also still
+        // requires the background-LLM master switch); the code stays in place so
+        // it can be re-enabled with an env flag alone.
+        $qaEnabled = WorkerConfig::backgroundLlmEnabled() && WorkerConfig::qaReviewEnabled();
+
         $qaSummary = null;
         $qaSweepOk = true;
-        if (WorkerConfig::backgroundLlmEnabled()) {
+        if ($qaEnabled) {
             $qaSweepOk = $this->safely('qa_sweep', function () use (&$qaSummary): void {
                 $qaSummary = $this->tick->runQaSweep(self::QA_SWEEP_LIMIT);
             });
@@ -152,7 +159,7 @@ final class Worker
 
         $qaReruns = 0;
         $qaRerunOk = true;
-        if ($qaSummary !== null && WorkerConfig::backgroundLlmEnabled()) {
+        if ($qaSummary !== null && $qaEnabled) {
             $qaRerunOk = $this->safely('qa_rerun', function () use ($qaSummary, $now, &$qaReruns): void {
                 $qaReruns = $this->runQaDrivenReruns($qaSummary, $now);
             });

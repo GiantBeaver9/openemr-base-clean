@@ -24,13 +24,33 @@ final class WorkerConfig
 {
     public const ENV_BACKGROUND_LLM_ENABLED = 'CLINICAL_COPILOT_WORKER_LLM_ENABLED';
 
+    /**
+     * The advisory second-pass QA reviewer ({@see \OpenEMR\Modules\ClinicalCopilot\Observability\Qa\QaReviewer})
+     * is a SECOND model call layered on top of the serving path. It is disabled
+     * by default: deterministic verification (V1-V6) is the only serving gate,
+     * and the primary prompt now carries the quality the QA pass used to advise
+     * on, so the extra model call earns nothing. Opt back in by setting this env
+     * truthy (also requires {@see self::ENV_BACKGROUND_LLM_ENABLED}).
+     */
+    public const ENV_QA_REVIEW_ENABLED = 'CLINICAL_COPILOT_WORKER_QA_ENABLED';
+
     private function __construct()
     {
     }
 
     public static function backgroundLlmEnabled(): bool
     {
-        $raw = LlmEnv::getString(self::ENV_BACKGROUND_LLM_ENABLED);
+        return self::envFlagEnabled(self::ENV_BACKGROUND_LLM_ENABLED);
+    }
+
+    public static function qaReviewEnabled(): bool
+    {
+        return self::envFlagEnabled(self::ENV_QA_REVIEW_ENABLED);
+    }
+
+    private static function envFlagEnabled(string $env): bool
+    {
+        $raw = LlmEnv::getString($env);
         if ($raw === '') {
             return false;
         }

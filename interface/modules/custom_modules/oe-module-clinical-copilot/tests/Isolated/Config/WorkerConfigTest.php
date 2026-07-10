@@ -21,11 +21,10 @@ final class WorkerConfigTest extends TestCase
 {
     protected function tearDown(): void
     {
-        putenv(WorkerConfig::ENV_BACKGROUND_LLM_ENABLED);
-        unset(
-            $_ENV[WorkerConfig::ENV_BACKGROUND_LLM_ENABLED],
-            $_SERVER[WorkerConfig::ENV_BACKGROUND_LLM_ENABLED],
-        );
+        foreach ([WorkerConfig::ENV_BACKGROUND_LLM_ENABLED, WorkerConfig::ENV_QA_REVIEW_ENABLED] as $env) {
+            putenv($env);
+            unset($_ENV[$env], $_SERVER[$env]);
+        }
     }
 
     public function testBackgroundLlmDisabledByDefault(): void
@@ -38,5 +37,17 @@ final class WorkerConfigTest extends TestCase
         putenv(WorkerConfig::ENV_BACKGROUND_LLM_ENABLED . '=true');
 
         self::assertTrue(WorkerConfig::backgroundLlmEnabled());
+    }
+
+    public function testQaReviewDisabledByDefault(): void
+    {
+        self::assertFalse(WorkerConfig::qaReviewEnabled(), 'the second-model QA reviewer is off unless explicitly opted in');
+    }
+
+    public function testQaReviewEnabledWhenEnvTrue(): void
+    {
+        putenv(WorkerConfig::ENV_QA_REVIEW_ENABLED . '=true');
+
+        self::assertTrue(WorkerConfig::qaReviewEnabled());
     }
 }
