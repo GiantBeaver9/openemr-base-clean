@@ -71,6 +71,17 @@ try {
     echo "  [ok] ran table.sql (mod_copilot_* tables + cadence/threshold/limit config)\n";
 
     // 3. background_services worker row (mirrors ModuleManagerListener::enable()).
+    // The warm worker runs synthesis (LLM + DB reads/writes) for scheduled
+    // patients on every tick; a 5-minute interval is steady load a small,
+    // memory-constrained MySQL (e.g. a 1 GB Railway plan) struggles under. The
+    // interval is configurable via CLINICAL_COPILOT_WORKER_INTERVAL_MIN so a
+    // constrained deployment can dial it back; default a gentler 30 minutes
+    // (pre-visit narratives do not need minute-level freshness). Applied on both
+    // insert and re-run so a redeploy re-paces an existing row.
+    $workerIntervalMin = (int) (getenv('CLINICAL_COPILOT_WORKER_INTERVAL_MIN') ?: '30');
+    if ($workerIntervalMin < 1) {
+        $workerIntervalMin = 30;
+    }
     $svc = QueryUtils::fetchRecords(
         "SELECT `name` FROM `background_services` WHERE `name` = 'clinical_copilot_worker'"
     );
@@ -78,15 +89,16 @@ try {
         QueryUtils::sqlInsert(
             "INSERT INTO `background_services`
                 (`name`, `title`, `active`, `running`, `next_run`, `execute_interval`, `function`, `require_once`, `sort_order`)
-             VALUES ('clinical_copilot_worker', 'Clinical Co-Pilot Warm Worker', 1, 0, NOW(), 5, 'clinicalCopilotWorkerRun', ?, 100)",
-            [$workerRequireOnce]
+             VALUES ('clinical_copilot_worker', 'Clinical Co-Pilot Warm Worker', 1, 0, NOW(), ?, 'clinicalCopilotWorkerRun', ?, 100)",
+            [$workerIntervalMin, $workerRequireOnce]
         );
-        echo "  [ok] registered + activated background_services worker (every 5 min)\n";
+        echo "  [ok] registered + activated background_services worker (every {$workerIntervalMin} min)\n";
     } else {
         QueryUtils::sqlStatementThrowException(
-            "UPDATE `background_services` SET `active` = 1 WHERE `name` = 'clinical_copilot_worker'"
+            "UPDATE `background_services` SET `active` = 1, `execute_interval` = ? WHERE `name` = 'clinical_copilot_worker'",
+            [$workerIntervalMin]
         );
-        echo "  [ok] background_services worker already present -- ensured active\n";
+        echo "  [ok] background_services worker already present -- ensured active (every {$workerIntervalMin} min)\n";
     }
 
     echo "== DONE: module installed + enabled ==\n";

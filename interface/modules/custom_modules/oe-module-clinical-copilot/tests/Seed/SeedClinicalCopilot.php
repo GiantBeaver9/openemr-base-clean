@@ -147,13 +147,40 @@ final class SeedClinicalCopilot
 
     public function run(): void
     {
+        // Each patient is ~50 inserts (labs, meds, vitals, schedule). On a
+        // small, memory-constrained MySQL (e.g. a 1 GB Railway plan) bursting
+        // all four back-to-back adds to the pressure that already makes the base
+        // install unstable, so pause between patients to let the server breathe.
+        // Tunable via CLINICAL_COPILOT_SEED_THROTTLE_SECONDS (default 2; set 0 to
+        // disable, e.g. on a roomy dev box).
+        $throttle = $this->seedThrottleSeconds();
         $this->seedPatientOne();
+        $this->pause($throttle);
         $this->seedPatientTwo();
+        $this->pause($throttle);
         $this->seedPatientThree();
+        $this->pause($throttle);
         $this->seedPatientFour();
         $this->writeFixtures();
 
         fwrite(STDOUT, "Clinical Co-Pilot synthetic seed complete: " . count($this->patientFixtures) . " patients, fixtures written to " . self::FIXTURE_DIR . "\n");
+    }
+
+    private function seedThrottleSeconds(): int
+    {
+        $raw = getenv('CLINICAL_COPILOT_SEED_THROTTLE_SECONDS');
+        if ($raw === false || !is_numeric($raw)) {
+            return 2;
+        }
+
+        return max(0, (int) $raw);
+    }
+
+    private function pause(int $seconds): void
+    {
+        if ($seconds > 0) {
+            sleep($seconds);
+        }
     }
 
     // ------------------------------------------------------------------

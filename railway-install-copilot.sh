@@ -53,7 +53,18 @@ if [ "${tries}" -eq 0 ]; then
     exit 1
 fi
 
-log "OpenEMR base install detected -- installing + enabling the module."
+log "OpenEMR base install detected."
+
+# The base install hammers MySQL (hundreds of CREATE TABLEs + reference-data
+# inserts). On a small Railway MySQL that pushes it to the edge -- "MySQL server
+# has gone away", lock-wait timeouts, even a restart. Do NOT pile the module
+# install and seed on top the instant the base install finishes: let MySQL
+# quiesce first, then run each step gently and retry transient disconnects
+# rather than failing the whole deploy on one blip. Tunable via
+# CLINICAL_COPILOT_SETTLE_SECONDS (default 30).
+SETTLE="${CLINICAL_COPILOT_SETTLE_SECONDS:-30}"
+log "letting MySQL settle for ${SETTLE}s before touching it (avoids piling onto the base install)."
+sleep "${SETTLE}"
 
 # OpenEMR CLI scripts refuse UID 0 (RootCliGuard); run as the web user, exactly
 # as ops/local/setup.sh does inside the dev container.
@@ -61,22 +72,47 @@ run_as_apache() {
     su -s /bin/sh apache -c "$1"
 }
 
-if run_as_apache "php '${INSTALLER}'"; then
+# Retry an idempotent step across transient MySQL disconnects (error 2006,
+# "MySQL server has gone away") with a widening backoff, so a stressed DB gets
+# time to recover instead of the deploy giving up on the first drop.
+run_as_apache_retry() {
+    _label="$1"
+    _cmd="$2"
+    _attempt=1
+    _max="${CLINICAL_COPILOT_MAX_ATTEMPTS:-5}"
+    while :; do
+        if run_as_apache "${_cmd}"; then
+            return 0
+        fi
+        if [ "${_attempt}" -ge "${_max}" ]; then
+            return 1
+        fi
+        _wait=$((_attempt * 15))
+        log "${_label}: attempt ${_attempt}/${_max} failed (likely a transient DB disconnect); waiting ${_wait}s for MySQL to recover, then retrying." >&2
+        sleep "${_wait}"
+        _attempt=$((_attempt + 1))
+    done
+}
+
+if run_as_apache_retry "module install" "php '${INSTALLER}'"; then
     log "module installed + enabled."
 else
-    log "module install FAILED (see output above)." >&2
+    log "module install FAILED after retries (see output above)." >&2
     exit 1
 fi
 
 if [ "${CLINICAL_COPILOT_SEED_DEMO:-1}" = "1" ]; then
     if [ -f "${SEEDER}" ]; then
+        # Breather between the install and the seed so we are not back-to-back
+        # against MySQL.
+        sleep 10
         log "seeding synthetic demo patients (on by default; set CLINICAL_COPILOT_SEED_DEMO=0 to disable)."
         # Pass the opt-in through explicitly: su may strip the environment, and
         # the seeder honors CLINICAL_COPILOT_SEED_DEMO=1 as its authorization.
-        if run_as_apache "CLINICAL_COPILOT_SEED_DEMO=1 php '${SEEDER}' --force"; then
+        if run_as_apache_retry "demo seeding" "CLINICAL_COPILOT_SEED_DEMO=1 php '${SEEDER}' --force"; then
             log "demo patients seeded."
         else
-            log "demo seeding FAILED (non-fatal -- the module itself is installed). See the seeder output above for the reason." >&2
+            log "demo seeding FAILED after retries (non-fatal -- the module itself is installed). See the seeder output above for the reason." >&2
         fi
     else
         log "CLINICAL_COPILOT_SEED_DEMO=1 but the seeder was not found at ${SEEDER}; skipping demo seed." >&2
