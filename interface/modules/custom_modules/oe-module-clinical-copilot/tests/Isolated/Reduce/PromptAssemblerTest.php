@@ -95,4 +95,47 @@ final class PromptAssemblerTest extends TestCase
         self::assertStringContainsString('cite the fact_id', $assembled->systemInstructions);
         self::assertStringContainsString('causation', $assembled->systemInstructions);
     }
+
+    /**
+     * The reading-guide fix: with fact labels supplied, the CHART DATA BY ITEM
+     * block groups each value under its checklist line, so a value the raw JSON
+     * leaves analyte-blind (every mg/dL lab looks alike) is attributable. An
+     * item with no labeled fact reports "No recent samples".
+     */
+    public function testChartDataGuideGroupsFactsUnderTheirLabeledItem(): void
+    {
+        $facts = ReduceTestFactory::twoFactSet();
+        $labels = [];
+        foreach ($facts as $fact) {
+            $labels[$fact->factId] = ['key' => 'a1c', 'label' => 'A1c'];
+        }
+
+        $assembled = (new PromptAssembler())->assemble(
+            $facts,
+            ReduceTestFactory::context(),
+            ReduceTestFactory::patientIdentifiers(),
+            null,
+            $labels,
+        );
+
+        self::assertStringContainsString('CHART DATA BY ITEM', $assembled->userContent);
+        self::assertStringContainsString('# A1c', $assembled->userContent);
+        self::assertStringContainsString('Recent results', $assembled->userContent);
+        self::assertStringContainsString('7.6 %', $assembled->userContent);
+        // An item with no labeled fact is explicitly reported empty, never guessed.
+        self::assertStringContainsString('# LDL Cholesterol', $assembled->userContent);
+        self::assertStringContainsString('No recent samples', $assembled->userContent);
+    }
+
+    public function testMedicationsAreFramedAsLastPrescribedNeverAsCurrentlyTaken(): void
+    {
+        $assembled = (new PromptAssembler())->assemble(
+            ReduceTestFactory::twoFactSet(),
+            ReduceTestFactory::context(),
+            ReduceTestFactory::patientIdentifiers(),
+        );
+
+        self::assertStringContainsString('last prescribed', $assembled->systemInstructions);
+        self::assertStringContainsString('currently taking', $assembled->systemInstructions);
+    }
 }

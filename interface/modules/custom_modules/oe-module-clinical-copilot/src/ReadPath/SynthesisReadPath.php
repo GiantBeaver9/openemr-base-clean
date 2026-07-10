@@ -93,11 +93,14 @@ final class SynthesisReadPath
      */
     private const CODE_SET_VERSION = '1';
 
-    // reduce-v4: per-item checklist with explicit "no recent samples" wording
-    // for items with no fact (never fabricate a value). Bumped so existing
-    // cached docs are treated as stale and regenerate in the new shape. MUST
-    // stay in lockstep with ChatFreshnessChecker::PROMPT_VERSION.
-    private const PROMPT_VERSION = 'reduce-v4';
+    // reduce-v5: prompt now carries a per-item "CHART DATA BY ITEM" reading
+    // guide that labels each lab fact with its analyte and each medication with
+    // its drug name, so every mg/dL value is attributable to the right checklist
+    // line (previously only A1c, the lone "%" value, was identifiable) and
+    // medications are stated as "last prescribed", never as currently taken.
+    // Bumped so existing cached docs are treated as stale and regenerate in the
+    // new shape. MUST stay in lockstep with ChatFreshnessChecker::PROMPT_VERSION.
+    private const PROMPT_VERSION = 'reduce-v5';
 
     // Time-based narrative cache: a patient's brief is generated at most once
     // per this many hours; within the window every copilot-link view serves the
@@ -122,6 +125,8 @@ final class SynthesisReadPath
         private readonly Redactor $redactor,
         private readonly TraceRecorderInterface $tracer = new NullTraceRecorder(),
         private readonly AlertSinkInterface $alertSink = new NullAlertSink(),
+        private readonly FactAnalyteResolver $analyteResolver = new FactAnalyteResolver(),
+        private readonly MedNameResolver $medNameResolver = new MedNameResolver(),
     ) {
     }
 
@@ -346,6 +351,14 @@ final class SynthesisReadPath
     ): DocRow {
         $identifiers = $this->identifierLookup->forPid($pid) ?? new PatientIdentifiers('', '', '', '');
 
+        // Resolve which analyte each lab fact is and which drug each medication
+        // fact names -- the identity dropped after extraction -- so the prompt's
+        // per-item reading guide can attribute every mg/dL value to the right
+        // checklist line and name each medication (the "only A1c and meds reach
+        // the model" fix). The same read-only DB hop the Chart Facts UI uses.
+        $factLabels = $this->analyteResolver->labelByFactId($extraction->survivingFacts)
+            + $this->medNameResolver->labelByFactId($extraction->survivingFacts);
+
         $reduceRequest = new ReduceRequest(
             "doc:{$pid}",
             $correlationId,
@@ -357,6 +370,7 @@ final class SynthesisReadPath
             // is acceptable -- the brief is the time-saving artifact and is
             // generated once per (patient, fact-digest).
             new PromptContext(self::DOC_TYPE, self::digestPromptVersion(), self::model(), thinkingBudget: 4096),
+            factLabels: $factLabels,
         );
         $verificationContext = new VerificationContext(
             new SessionFactSet($pid, $extraction->survivingFacts),

@@ -38,6 +38,7 @@ use OpenEMR\Modules\ClinicalCopilot\Fact\PromptFactWindow;
 final class PromptAssembler
 {
     private const FACTS_HEADER = '=== SESSION FACTS (canonical JSON -- authoritative; do not alter, recompute, or invent any value) ===';
+    private const CHART_DATA_HEADER = '=== CHART DATA BY ITEM (reading guide: this is the SAME data as the SESSION FACTS below, grouped under each checklist line so you can tell which value belongs to which item -- cite the (fact_id: ...) shown here) ===';
     private const PATIENT_HEADER = '=== PATIENT (refer to the patient only by these tokens; never guess or restate an identifier) ===';
     private const FINDINGS_HEADER = '=== PRIOR VERIFICATION FINDINGS (this is a regeneration -- resolve every finding below) ===';
 
@@ -58,17 +59,28 @@ final class PromptAssembler
           5. HDL
           6. triglycerides
           7. current medications
-        When the SESSION FACTS carry data for an item, cite it and state the
-        current value and its trend in one sentence. When an item has NO
-        supporting fact in the SESSION FACTS, emit one short claim that plainly
-        says so and NOTHING more -- phrase it like "LDL trend unavailable -- no
-        recent samples" (claim_type `uncertainty_statement`, zero citations,
-        empty numeric_values). Do NOT infer, estimate, carry over, or state any
-        value, direction, or detail for an item that has no fact; "not sampled"
-        is the entire answer for that line. Never drop an item silently -- the
-        physician relies on seeing every line of the checklist. Add no other
-        claims except when a `conflict`-flagged fact requires one. One sentence
-        per line.
+        Read the "CHART DATA BY ITEM" section: it groups the exact same facts
+        under each line above so you can see which value belongs to which item
+        (A1c is in %, every other lab is in mg/dL, so they are otherwise easy to
+        confuse). For each lab line, relay the most recent result and the
+        overall trend in one sentence, citing the fact_id(s) shown for the value
+        and for any change/span/count you mention. When an item's block says "No
+        recent samples", emit one short claim that plainly says so and NOTHING
+        more -- phrase it like "LDL trend unavailable -- no recent samples"
+        (claim_type `uncertainty_statement`, zero citations, empty
+        numeric_values). Do NOT infer, estimate, carry over, or state any value,
+        direction, or detail for an item that has no fact; "not sampled" is the
+        entire answer for that line. Never drop an item silently -- the
+        physician relies on seeing every line of the checklist. One sentence per
+        line; add no other claims except when a `conflict`-flagged fact requires
+        one.
+
+        MEDICATIONS LINE -- state each medication as what it is in the chart: a
+        prescription LAST WRITTEN on its date ("metformin last prescribed on
+        2025-03-01"). NEVER assert or imply the patient is currently taking,
+        still on, or actively using any medication -- a prescription record is
+        not proof of current adherence, and the co-pilot does not know whether a
+        med is still being taken. Cite the medication fact_id.
 
         Hard discipline, no exceptions:
         - If a fact you would want is not present in the SESSION FACTS block,
@@ -116,24 +128,40 @@ final class PromptAssembler
      * @param list<Fact> $facts the full session fact set (preloaded ∪ this
      *        session's tool results) -- recomputed fresh at read time, never
      *        cached (I2)
+     * @param array<string, array{key: string, label: string}> $factLabels fact_id => analyte / medication label
+     *        (see {@see ReduceRequest::$factLabels}); drives the readable CHART DATA BY ITEM reading guide so the
+     *        model can attribute each mg/dL value to the right checklist line. Empty renders every lab line as
+     *        "no recent samples".
      */
     public function assemble(
         array $facts,
         PromptContext $context,
         PatientIdentifiers $identifiers,
         ?string $priorFindings = null,
+        array $factLabels = [],
     ): PromptRequest {
         // Narrative window: the synthesis sees the last ~20 visits of the
         // chart, not the full multi-year fact set (~60K tokens for a 20-year
         // patient), which would stall the one-shot reduce call. The digest and
         // the verifier still see the full $facts; this only bounds what is
         // serialized into the prompt (a subset, so every cited fact resolves).
+        $windowed = PromptFactWindow::forNarrative($facts);
+
+        // The readable per-item reading guide (grouped by checklist line) and
+        // the authoritative canonical JSON are rendered over the SAME windowed
+        // fact set, so every fact_id the guide cites also appears in the JSON
+        // block below -- the guide only tells the model which line each value
+        // belongs to; the JSON remains the source of exact bytes the digest
+        // addresses and the verifier resolves citations against.
         $sections = [
             self::PATIENT_HEADER,
             self::patientBlock($identifiers),
             '',
+            self::CHART_DATA_HEADER,
+            PromptFactRenderer::render($windowed, $factLabels),
+            '',
             self::FACTS_HEADER,
-            CanonicalSerializer::serializeFacts(PromptFactWindow::forNarrative($facts)),
+            CanonicalSerializer::serializeFacts($windowed),
         ];
 
         if ($priorFindings !== null && trim($priorFindings) !== '') {

@@ -50,6 +50,7 @@ final class Reducer
             $request->context,
             $request->identifiers,
             $request->priorFindings,
+            $request->factLabels,
         );
 
         $redacted = $this->redactor->redactPrompt($request->sessionId, $request->identifiers, $assembled);

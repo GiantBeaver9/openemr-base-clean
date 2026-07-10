@@ -69,6 +69,10 @@ final class VerifiedGeneration
             $request->reduceRequest->identifiers,
             $request->reduceRequest->context,
             self::formatFindings($first->verdicts),
+            // Carry the analyte / medication labels into the retry too, or the
+            // regeneration's per-item reading guide would collapse to "no
+            // recent samples" for every lab and lose the fix.
+            $request->reduceRequest->factLabels,
         );
 
         $second = $this->attempt($retryRequest, $request->verificationContext);

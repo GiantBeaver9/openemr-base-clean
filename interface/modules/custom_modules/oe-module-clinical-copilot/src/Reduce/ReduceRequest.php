@@ -28,6 +28,11 @@ final readonly class ReduceRequest
 {
     /**
      * @param list<Fact> $facts
+     * @param array<string, array{key: string, label: string}> $factLabels fact_id => analyte / medication label,
+     *        resolved upstream (the DB hop {@see \OpenEMR\Modules\ClinicalCopilot\ReadPath\FactAnalyteResolver}
+     *        and {@see \OpenEMR\Modules\ClinicalCopilot\ReadPath\MedNameResolver} already do for the UI), so the
+     *        prompt can tell A1c from LDL from glucose and name each medication. Empty is safe: the readable
+     *        per-item block simply reports every lab line as "no recent samples".
      */
     public function __construct(
         public string $sessionId,
@@ -36,6 +41,7 @@ final readonly class ReduceRequest
         public PatientIdentifiers $identifiers,
         public PromptContext $context,
         public ?string $priorFindings = null,
+        public array $factLabels = [],
     ) {
         if ($this->sessionId === '') {
             throw new \DomainException('ReduceRequest.sessionId must not be empty');
