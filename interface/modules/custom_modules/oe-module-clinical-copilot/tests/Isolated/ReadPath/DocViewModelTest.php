@@ -164,6 +164,45 @@ final class DocViewModelTest extends TestCase
         self::assertSame('lab:a1c', $viewModel['fact_groups'][0]['key'], 'A1c is the headline tab and sorts first');
     }
 
+    public function testLabGroupConsolidatesDrawsIntoOneRowWithChangeColumnAndSeriesSummary(): void
+    {
+        // Two A1c draws plus the derived facts ControlProxy emits for the
+        // series: the change ending at the later draw, and the series-level span
+        // and count. The panel must show ONE row per draw (not one per fact),
+        // the change as a column on the draw it lands on, and span/count lifted
+        // into the group summary.
+        $early = self::trendPointOn('2026-01-01', 1, 6.9);
+        $late = self::trendPointOn('2026-06-01', 2, 7.2);
+        $change = self::derivedOn('2026-06-01', FactKind::DerivedDelta, '+0.30', 0.3, '%');
+        $span = self::derivedOn('2026-06-01', FactKind::DerivedSpan, '+0.30', 0.3, '%');
+        $count = self::derivedOn('2026-06-01', FactKind::DerivedCount, '2', 2.0, '');
+
+        $facts = [$early, $late, $change, $span, $count];
+        $map = [];
+        foreach ($facts as $fact) {
+            $map[$fact->factId] = ['key' => 'a1c', 'label' => 'A1c'];
+        }
+
+        $viewModel = DocViewModel::build(self::servedResult($facts, null), 'https://example.test', $map);
+        $group = self::group($viewModel, 'lab:a1c');
+
+        self::assertNotNull($group);
+        self::assertTrue($group['consolidated']);
+        self::assertCount(2, $group['facts'], 'one row per draw -- derived facts are not their own rows');
+
+        // Most recent draw first, carrying the change-from-prior in its column.
+        self::assertSame('2026-06-01', $group['facts'][0]['clinical_date']);
+        self::assertSame('+0.30 %', $group['facts'][0]['change_display']);
+        // The earliest draw has no prior, so no change.
+        self::assertSame('2026-01-01', $group['facts'][1]['clinical_date']);
+        self::assertNull($group['facts'][1]['change_display']);
+
+        // Span and count are the one-line series summary, not rows.
+        self::assertNotNull($group['summary']);
+        self::assertSame('2', $group['summary']['count']);
+        self::assertSame('+0.30 %', $group['summary']['span']);
+    }
+
     public function testWithoutAnAnalyteMapLabsStayGroupedByCapability(): void
     {
         // Back-compat: no map => the trend labs remain a single control_proxy
@@ -175,8 +214,8 @@ final class DocViewModelTest extends TestCase
     }
 
     /**
-     * @param array{narrative: mixed, fact_groups: list<array{key: string, label: string, total: int, shown: int, facts: list<array<string, mixed>>}>} $viewModel
-     * @return array{key: string, label: string, total: int, shown: int, facts: list<array<string, mixed>>}|null
+     * @param array{narrative: mixed, fact_groups: list<array{key: string, label: string, total: int, shown: int, consolidated: bool, summary: array<string, mixed>|null, facts: list<array<string, mixed>>}>} $viewModel
+     * @return array{key: string, label: string, total: int, shown: int, consolidated: bool, summary: array<string, mixed>|null, facts: list<array<string, mixed>>}|null
      */
     private static function group(array $viewModel, string $key): ?array
     {
@@ -200,6 +239,31 @@ final class DocViewModelTest extends TestCase
             Capability::ControlProxy,
             '1',
             FactKind::TrendPoint,
+            42,
+            new \DateTimeImmutable($date),
+            DateSource::Collected,
+            $factValue,
+            FactStatus::Final,
+            [],
+            $citations,
+        );
+    }
+
+    private static function derivedOn(string $date, FactKind $kind, string $raw, float $parsed, string $unit): Fact
+    {
+        $citations = [
+            new Citation('procedure_result', 1, 'result', DateSource::Collected),
+            new Citation('procedure_result', 2, 'result', DateSource::Collected),
+        ];
+        $unitCanonical = $unit !== '' ? $unit : null;
+        $factValue = new FactValue($raw, $parsed, Comparator::None, $unit, $unitCanonical, null);
+        $factId = FactId::compute(Capability::ControlProxy, $kind, $citations, $factValue);
+
+        return new Fact(
+            $factId,
+            Capability::ControlProxy,
+            '1',
+            $kind,
             42,
             new \DateTimeImmutable($date),
             DateSource::Collected,

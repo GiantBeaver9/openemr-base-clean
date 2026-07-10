@@ -92,6 +92,38 @@
     </tr></thead>
 {% endmacro %}
 
+{# Consolidated trend-lab table: one row per draw, the change-from-prior draw as
+   its own column, so a single draw is one row instead of separate trend_point /
+   derived_change / derived_span / derived_count rows. Span and count are a
+   one-line series summary above the table (see the group render below). #}
+{% macro consolidated_facts_table(visit_label) %}
+    <thead><tr>
+        <th>{{ "Value"|xlt }}</th><th>{{ "Change vs prior"|xlt }}</th><th>{{ "Status"|xlt }}</th>
+        <th>{{ "Date"|xlt }}</th><th>{{ "Flags"|xlt }}</th><th>{{ "Source / Visit"|xlt }}</th>
+    </tr></thead>
+{% endmacro %}
+
+{% macro consolidated_fact_row(fact, visit_label) %}
+    <tr class="{% if fact.flags is defined and 'conflict' in fact.flags %}table-warning{% endif %}">
+        <td>
+            {%- if fact.parsed is not null -%}
+                {{ fact.comparator != 'none' ? (fact.comparator == 'lt' ? '<' : (fact.comparator == 'lte' ? '<=' : (fact.comparator == 'gt' ? '>' : '>='))) : '' }}{{ fact.parsed }}{{ fact.unit ? ' ' ~ fact.unit|text : '' }}
+            {%- else -%}
+                {{ fact.raw|default('')|text }}
+            {%- endif -%}
+        </td>
+        <td>{{ fact.change_display is not null ? fact.change_display|text : '—' }}</td>
+        <td>{{ fact.status_label|default(fact.status)|text }}</td>
+        <td>{{ fact.clinical_date ? fact.clinical_date|text : '—' }}</td>
+        <td>
+            {% for label in fact.flag_labels|default(fact.flags) %}
+                <span class="badge badge-secondary">{{ label|text }}</span>
+            {% endfor %}
+        </td>
+        <td>{{ _self.source_cell(fact.citations, visit_label) }}</td>
+    </tr>
+{% endmacro %}
+
 <html>
 <head>
     <title>{{ "Clinical Co-Pilot"|xlt }}</title>
@@ -489,12 +521,26 @@
                                                     {{ "Showing"|xlt }} {{ g.shown|text }} {{ "of"|xlt }} {{ g.total|text }} — {{ "most recent first"|xlt }}
                                                 </div>
                                             {% endif %}
+                                            {% if g.consolidated and g.summary %}
+                                                <div class="text-muted small mt-2">
+                                                    {% if g.summary.count is not null %}{{ g.summary.count|text }} {{ "results"|xlt }}{% endif %}
+                                                    {%- if g.summary.count is not null and g.summary.span is not null %} · {% endif -%}
+                                                    {% if g.summary.span is not null %}{{ "span"|xlt }} {{ g.summary.span|text }}{% endif %}
+                                                </div>
+                                            {% endif %}
                                             <div class="table-responsive mt-2">
                                                 <table class="table table-sm table-borderless mb-0">
-                                                    {{ _self.facts_table(visit_label) }}
-                                                    <tbody>
-                                                    {% for fact in g.facts %}{{ _self.fact_row(fact, visit_label) }}{% endfor %}
-                                                    </tbody>
+                                                    {% if g.consolidated %}
+                                                        {{ _self.consolidated_facts_table(visit_label) }}
+                                                        <tbody>
+                                                        {% for fact in g.facts %}{{ _self.consolidated_fact_row(fact, visit_label) }}{% endfor %}
+                                                        </tbody>
+                                                    {% else %}
+                                                        {{ _self.facts_table(visit_label) }}
+                                                        <tbody>
+                                                        {% for fact in g.facts %}{{ _self.fact_row(fact, visit_label) }}{% endfor %}
+                                                        </tbody>
+                                                    {% endif %}
                                                 </table>
                                             </div>
                                         </div>

@@ -66,7 +66,7 @@ final class DocViewModel
      *        this presenter stays DB-free.
      * @return array{
      *     narrative: list<array{text: string, claim_type: string, flags: list<string>, emphasis: ?string, citations: list<array{label: string, url: ?string}>}>,
-     *     fact_groups: list<array{key: string, label: string, total: int, shown: int, facts: list<array<string, mixed>>}>
+     *     fact_groups: list<array{key: string, label: string, total: int, shown: int, consolidated: bool, summary: array<string, mixed>|null, facts: list<array<string, mixed>>}>
      * }
      */
     public static function build(SynthesisReadResult $result, string $webRoot, array $analyteByFactId = []): array
@@ -215,7 +215,7 @@ final class DocViewModel
      *
      * @param list<Fact> $facts
      * @param array<string, array{key: string, label: string}> $analyteByFactId
-     * @return list<array{key: string, label: string, total: int, shown: int, facts: list<array<string, mixed>>}>
+     * @return list<array{key: string, label: string, total: int, shown: int, consolidated: bool, summary: array<string, mixed>|null, facts: list<array<string, mixed>>}>
      */
     private static function buildFactGroups(array $facts, string $webRoot, array $analyteByFactId): array
     {
@@ -249,7 +249,19 @@ final class DocViewModel
             $groups[] = self::group('in_flight', 'In flight', $inFlight);
         }
         foreach ($grouped as $key => $bucket) {
-            $groups[] = self::group($key, $bucket['label'], $bucket['rows']);
+            // A trend lab (control_proxy, one group per analyte) explodes into a
+            // separate row per fact -- the draw's trend_point, then its
+            // derived_change, plus the series-level derived_span and
+            // derived_count -- so one LDL draw became 4+ near-identical rows.
+            // Collapse them: one row per draw (date), the change-from-prior as a
+            // column on that row, and the span/count carried as a one-line series
+            // summary. Every other group stays a flat fact-per-row table.
+            if (str_starts_with($key, 'lab:')) {
+                [$rows, $summary] = self::consolidateLabRows($bucket['rows']);
+                $groups[] = self::group($key, $bucket['label'], $rows, consolidated: true, summary: $summary);
+            } else {
+                $groups[] = self::group($key, $bucket['label'], $bucket['rows']);
+            }
         }
         if ($exclusions !== []) {
             $groups[] = self::group('exclusions', 'Excluded', $exclusions);
@@ -290,9 +302,10 @@ final class DocViewModel
      * the pre-cap total so the panel can disclose what was trimmed.
      *
      * @param list<array<string, mixed>> $rows
-     * @return array{key: string, label: string, total: int, shown: int, facts: list<array<string, mixed>>}
+     * @param array{count: ?string, count_citations: list<array{label: string, url: ?string}>, span: ?string, span_citations: list<array{label: string, url: ?string}>}|null $summary
+     * @return array{key: string, label: string, total: int, shown: int, consolidated: bool, summary: array<string, mixed>|null, facts: list<array<string, mixed>>}
      */
-    private static function group(string $key, string $label, array $rows): array
+    private static function group(string $key, string $label, array $rows, bool $consolidated = false, ?array $summary = null): array
     {
         usort($rows, static function (array $a, array $b): int {
             $ad = is_string($a['clinical_date'] ?? null) ? $a['clinical_date'] : '';
@@ -310,8 +323,93 @@ final class DocViewModel
             'label' => $label,
             'total' => $total,
             'shown' => count($shown),
+            'consolidated' => $consolidated,
+            'summary' => $summary,
             'facts' => $shown,
         ];
+    }
+
+    /**
+     * Collapses one trend-lab group's flat fact rows into one row per draw.
+     *
+     * {@see \OpenEMR\Modules\ClinicalCopilot\Lab\LabRowProcessor} resolves a
+     * single winner per (analyte, clinical_date), so a date uniquely identifies
+     * a draw within one analyte -- which lets us attach each `derived_delta`
+     * (change-from-prior, whose clinical_date is the later point's date) to the
+     * draw it lands on as a `change` column, rather than as its own row. The
+     * series-level `derived_span` and `derived_count` (one each) are lifted out
+     * into a one-line summary. A draw with no computed delta (the earliest, or
+     * a corrected/censored point that is not trend-eligible) simply has a null
+     * change.
+     *
+     * @param list<array<string, mixed>> $rows
+     * @return array{0: list<array<string, mixed>>, 1: array{count: ?string, count_citations: list<array{label: string, url: ?string}>, span: ?string, span_citations: list<array{label: string, url: ?string}>}|null}
+     */
+    private static function consolidateLabRows(array $rows): array
+    {
+        /** @var array<string, array<string, mixed>> $changeByDate */
+        $changeByDate = [];
+        $span = null;
+        $count = null;
+        $anchors = [];
+
+        foreach ($rows as $row) {
+            $kind = $row['kind'] ?? null;
+            $date = is_string($row['clinical_date'] ?? null) ? $row['clinical_date'] : '';
+
+            if ($kind === FactKind::DerivedDelta->value) {
+                if ($date !== '') {
+                    $changeByDate[$date] = $row;
+                }
+            } elseif ($kind === FactKind::DerivedSpan->value) {
+                $span ??= $row;
+            } elseif ($kind === FactKind::DerivedCount->value) {
+                $count ??= $row;
+            } else {
+                $anchors[] = $row;
+            }
+        }
+
+        foreach ($anchors as $index => $anchor) {
+            $date = is_string($anchor['clinical_date'] ?? null) ? $anchor['clinical_date'] : '';
+            $change = $date !== '' ? ($changeByDate[$date] ?? null) : null;
+            $anchors[$index]['change_display'] = $change !== null ? self::derivedDisplay($change) : null;
+            /** @var list<array{label: string, url: ?string}> $changeCitations */
+            $changeCitations = is_array($change['citations'] ?? null) ? $change['citations'] : [];
+            $anchors[$index]['change_citations'] = $changeCitations;
+        }
+
+        $summary = null;
+        if ($span !== null || $count !== null) {
+            /** @var list<array{label: string, url: ?string}> $countCitations */
+            $countCitations = $count !== null && is_array($count['citations'] ?? null) ? $count['citations'] : [];
+            /** @var list<array{label: string, url: ?string}> $spanCitations */
+            $spanCitations = $span !== null && is_array($span['citations'] ?? null) ? $span['citations'] : [];
+            $summary = [
+                'count' => $count !== null ? self::derivedDisplay($count) : null,
+                'count_citations' => $countCitations,
+                'span' => $span !== null ? self::derivedDisplay($span) : null,
+                'span_citations' => $spanCitations,
+            ];
+        }
+
+        return [array_values($anchors), $summary];
+    }
+
+    /**
+     * The human value of a derived fact (change / span / count) with its unit.
+     * Uses `raw` -- not `parsed` -- because a delta's raw string carries its
+     * sign ("+0.30", "-14"), which a physician reading a change column needs and
+     * which the bare parsed number would drop.
+     *
+     * @param array<string, mixed> $row
+     */
+    private static function derivedDisplay(array $row): string
+    {
+        $raw = is_string($row['raw'] ?? null) ? $row['raw'] : '';
+        $unit = is_string($row['unit'] ?? null) && $row['unit'] !== '' ? ' ' . $row['unit'] : '';
+
+        return $raw . $unit;
     }
 
     /**
