@@ -119,14 +119,14 @@ final class SeedEndoCohort
     private const DEFAULT_PATIENT_COUNT = 20;
 
     /**
-     * Appointment window: each patient's single upcoming appointment is spread
-     * across this window (round-robin by patient index) so the pre-visit list --
-     * which shows CURDATE() appointments -- has patients on every day of the demo
-     * week, not all on one day. Absolute calendar dates (NOT relative to today),
-     * so the demo shows the right patients on each day. Override with
+     * Appointment window span (days): each patient's single upcoming appointment
+     * is spread round-robin by index across this many days starting from the
+     * window start, so the pre-visit list -- which shows CURDATE() appointments
+     * -- has patients on every day of the window rather than all on one day. The
+     * window START defaults to the server's own today (see appointmentWindowStart),
+     * so the cohort appears starting now; both are overridable via
      * CLINICAL_COPILOT_COHORT_APPT_START (Y-m-d) and CLINICAL_COPILOT_COHORT_APPT_DAYS.
      */
-    private const DEFAULT_APPT_START = '2026-07-13';
     private const DEFAULT_APPT_DAYS = 7;
 
     private const LOINC_A1C = '4548-4';
@@ -244,7 +244,13 @@ final class SeedEndoCohort
             }
         }
 
-        return new \DateTimeImmutable(self::DEFAULT_APPT_START);
+        // Default: the DATABASE's own today ({@see resolveToday}). The pre-visit
+        // list only shows pc_eventDate = CURDATE(), so anchoring the window to
+        // the server's today guarantees the cohort appears starting now, instead
+        // of on an absolute date that may not match the server clock (the cause
+        // of "seeded but nothing shows in the UI"). Override with
+        // CLINICAL_COPILOT_COHORT_APPT_START for a specific demo date.
+        return $this->today;
     }
 
     /** Number of days the appointment window spans, overridable (clamped 1..60). */
