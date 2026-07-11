@@ -206,8 +206,18 @@ final class SeedEndoCohort
             $start->modify('+' . ($days - 1) . ' days')->format('Y-m-d'),
         ));
 
+        // Each patient is dozens of inserts; on a memory-constrained MySQL
+        // seeding 20 back-to-back can spike it into the instability we saw
+        // ("MySQL server has gone away"). Pause between patients to let it
+        // breathe. Tunable via CLINICAL_COPILOT_SEED_THROTTLE_SECONDS (default 1;
+        // 0 disables on a roomy box).
+        $rawThrottle = getenv('CLINICAL_COPILOT_SEED_THROTTLE_SECONDS');
+        $throttle = is_string($rawThrottle) && is_numeric($rawThrottle) ? max(0, (int) $rawThrottle) : 1;
         for ($i = 1; $i <= $count; $i++) {
             $this->seedPatient($i);
+            if ($i < $count && $throttle > 0) {
+                sleep($throttle);
+            }
         }
 
         $this->writeSummary();
