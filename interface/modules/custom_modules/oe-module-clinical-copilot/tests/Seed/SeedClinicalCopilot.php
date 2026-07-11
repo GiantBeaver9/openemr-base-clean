@@ -700,8 +700,18 @@ final class SeedClinicalCopilot
     // ------------------------------------------------------------------
     private function writeFixtures(): void
     {
+        // Fixture JSON files are dev-only test artifacts (consumed by the U4/U5
+        // contract evals); a running deployment never reads them. On Railway the
+        // module directory is root-owned while this seeder runs as apache, so it
+        // cannot write here -- that is expected and harmless, the patients are
+        // already committed to the DB. Skip quietly with a single note instead of
+        // emitting a "Permission denied" warning per file.
         if (!is_dir(self::FIXTURE_DIR)) {
-            mkdir(self::FIXTURE_DIR, 0755, true);
+            @mkdir(self::FIXTURE_DIR, 0755, true);
+        }
+        if (!is_dir(self::FIXTURE_DIR) || !is_writable(self::FIXTURE_DIR)) {
+            fwrite(STDOUT, "Skipped fixture files (dev-only artifacts): " . self::FIXTURE_DIR . " is not writable. Patients were still seeded.\n");
+            return;
         }
 
         foreach ($this->patientFixtures as $pubpid => $data) {
