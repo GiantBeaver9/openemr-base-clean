@@ -3,15 +3,20 @@
 /**
  * Clinical Co-Pilot synthetic endocrinology *cohort* seeder.
  *
- * Idempotent, CLI-only seed script that inserts 50 synthetic endocrinology
- * patients (pubpid ENDO-001..ENDO-050) into CORE OpenEMR tables
- * (patient_data, procedure_order/report/result, prescriptions, lists,
- * form_vitals, openemr_postcalendar_events), each with a RANDOMIZED 0-20
- * year longitudinal history so the pre-visit synthesis and chat surfaces
- * have realistic volume/variety to render and page through -- not just the
- * four hand-authored edge-case "landmine" patients in SeedClinicalCopilot.php,
+ * Idempotent, CLI-only seed script that inserts N synthetic endocrinology
+ * patients (pubpid ENDO-0NN; N = CLINICAL_COPILOT_COHORT_COUNT, default 20)
+ * into CORE OpenEMR tables (patient_data, procedure_order/report/result,
+ * prescriptions, lists, form_vitals, openemr_postcalendar_events), each with a
+ * RANDOMIZED 0-20 year longitudinal history so the pre-visit synthesis and chat
+ * surfaces have realistic volume/variety to render and page through -- not just
+ * the four hand-authored edge-case "landmine" patients in SeedClinicalCopilot.php,
  * which this script complements rather than replaces (run both; this one
  * does not touch CCP-001..CCP-004).
+ *
+ * Each patient's upcoming appointment is spread across a demo window
+ * (CLINICAL_COPILOT_COHORT_APPT_START, default 2026-07-13, for
+ * CLINICAL_COPILOT_COHORT_APPT_DAYS days, default 7) so the pre-visit list --
+ * which shows CURDATE() appointments -- has patients on each day of the window.
  *
  * Distribution: years-of-history is `mt_rand(0, 20)` per patient (seeded
  * deterministically -- see below), so re-running produces the exact same
@@ -107,10 +112,22 @@ final class SeedEndoCohort
 {
     use SeedCoreTableHelpers;
 
-    /** Fixed seed: re-running this script always produces the same 50 patients. */
+    /** Fixed seed: re-running this script always produces the same cohort. */
     private const RNG_SEED = 20260708;
 
-    private const PATIENT_COUNT = 50;
+    /** Default cohort size; override with CLINICAL_COPILOT_COHORT_COUNT. */
+    private const DEFAULT_PATIENT_COUNT = 20;
+
+    /**
+     * Appointment window: each patient's single upcoming appointment is spread
+     * across this window (round-robin by patient index) so the pre-visit list --
+     * which shows CURDATE() appointments -- has patients on every day of the demo
+     * week, not all on one day. Absolute calendar dates (NOT relative to today),
+     * so the demo shows the right patients on each day. Override with
+     * CLINICAL_COPILOT_COHORT_APPT_START (Y-m-d) and CLINICAL_COPILOT_COHORT_APPT_DAYS.
+     */
+    private const DEFAULT_APPT_START = '2026-07-13';
+    private const DEFAULT_APPT_DAYS = 7;
 
     private const LOINC_A1C = '4548-4';
     private const LOINC_TSH = '3016-3';
@@ -179,13 +196,66 @@ final class SeedEndoCohort
     {
         mt_srand(self::RNG_SEED);
 
-        for ($i = 1; $i <= self::PATIENT_COUNT; $i++) {
+        $count = $this->cohortCount();
+        $start = $this->appointmentWindowStart();
+        $days = $this->appointmentWindowDays();
+        fwrite(STDOUT, sprintf(
+            "Clinical Co-Pilot endo cohort seed: %d patients, appointments spread across %s .. %s.\n",
+            $count,
+            $start->format('Y-m-d'),
+            $start->modify('+' . ($days - 1) . ' days')->format('Y-m-d'),
+        ));
+
+        for ($i = 1; $i <= $count; $i++) {
             $this->seedPatient($i);
         }
 
         $this->writeSummary();
 
-        fwrite(STDOUT, "Clinical Co-Pilot endo cohort seed complete: " . count($this->cohortSummary) . " patients, summary written to " . self::FIXTURE_DIR . "/endo_cohort_summary.json\n");
+        fwrite(STDOUT, "Clinical Co-Pilot endo cohort seed complete: " . count($this->cohortSummary) . " patients.\n");
+    }
+
+    /** Cohort size, overridable via CLINICAL_COPILOT_COHORT_COUNT (clamped 1..500). */
+    private function cohortCount(): int
+    {
+        $raw = getenv('CLINICAL_COPILOT_COHORT_COUNT');
+        $n = is_string($raw) && is_numeric($raw) ? (int) $raw : self::DEFAULT_PATIENT_COUNT;
+
+        return max(1, min(500, $n));
+    }
+
+    private function appointmentWindowStart(): \DateTimeImmutable
+    {
+        $raw = getenv('CLINICAL_COPILOT_COHORT_APPT_START');
+        if (is_string($raw) && $raw !== '') {
+            $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $raw);
+            if ($parsed !== false) {
+                return $parsed;
+            }
+        }
+
+        return new \DateTimeImmutable(self::DEFAULT_APPT_START);
+    }
+
+    /** Number of days the appointment window spans, overridable (clamped 1..60). */
+    private function appointmentWindowDays(): int
+    {
+        $raw = getenv('CLINICAL_COPILOT_COHORT_APPT_DAYS');
+        $n = is_string($raw) && is_numeric($raw) ? (int) $raw : self::DEFAULT_APPT_DAYS;
+
+        return max(1, min(60, $n));
+    }
+
+    /**
+     * The upcoming-appointment date for patient #$index: round-robin across the
+     * window so each day gets a roughly even share (20 patients over 7 days =>
+     * 3,3,3,3,3,3,2), interspersed rather than clumped on one day.
+     */
+    private function appointmentDate(int $index): \DateTimeImmutable
+    {
+        $offset = ($index - 1) % $this->appointmentWindowDays();
+
+        return $this->appointmentWindowStart()->modify("+{$offset} days");
     }
 
     private function seedPatient(int $index): int
@@ -312,7 +382,12 @@ final class SeedEndoCohort
         }
 
         $eventTitle = $yearsOfHistory === 0 ? 'New Patient Intake - Endocrinology' : 'Endocrinology Follow-up';
-        $this->insertScheduleEvent($pid, $this->today, $eventTitle);
+        // Upcoming appointment in the demo window (July 13-19 by default), spread
+        // by index across the days, at a varied clinic-hours time so a day's list
+        // reads like a real schedule rather than every patient at 08:50.
+        $apptDate = $this->appointmentDate($index);
+        $apptTime = sprintf('%02d:%02d:00', mt_rand(8, 15), mt_rand(0, 3) * 15);
+        $this->insertScheduleEvent($pid, $apptDate, $eventTitle, $apptTime);
 
         $this->cohortSummary[] = [
             'pubpid' => $pubpid,
@@ -444,13 +519,20 @@ final class SeedEndoCohort
 
     private function writeSummary(): void
     {
+        // Dev-only summary artifact; a deployment never reads it. On Railway the
+        // module dir is root-owned and this runs as apache, so skip quietly when
+        // it is not writable rather than warning per file (patients are seeded).
         if (!is_dir(self::FIXTURE_DIR)) {
-            mkdir(self::FIXTURE_DIR, 0755, true);
+            @mkdir(self::FIXTURE_DIR, 0755, true);
+        }
+        if (!is_dir(self::FIXTURE_DIR) || !is_writable(self::FIXTURE_DIR)) {
+            fwrite(STDOUT, "Skipped cohort summary file (dev-only artifact): " . self::FIXTURE_DIR . " is not writable. Patients were still seeded.\n");
+            return;
         }
 
         $path = self::FIXTURE_DIR . '/endo_cohort_summary.json';
         file_put_contents($path, json_encode([
-            'note' => 'Index of the 50-patient synthetic endocrinology cohort (ENDO-001..ENDO-050) seeded by SeedEndoCohort.php. Complements, does not replace, the 4 landmine patients (CCP-001..CCP-004) in SeedClinicalCopilot.php. years_of_history is mt_rand(0,20), fixed RNG seed ' . self::RNG_SEED . ' -- re-running reproduces the same cohort.',
+            'note' => 'Index of the synthetic endocrinology cohort (ENDO-0NN) seeded by SeedEndoCohort.php. Complements, does not replace, the 4 landmine patients (CCP-001..CCP-004) in SeedClinicalCopilot.php. years_of_history is mt_rand(0,20), fixed RNG seed ' . self::RNG_SEED . ' -- re-running reproduces the same cohort.',
             'patient_count' => count($this->cohortSummary),
             'years_of_history_distribution' => $this->summarizeYearsDistribution(),
             'patients' => $this->cohortSummary,

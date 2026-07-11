@@ -250,13 +250,15 @@ trait SeedCoreTableHelpers
         );
     }
 
-    private function insertScheduleEvent(int $pid, \DateTimeImmutable $eventDate, string $title): int
+    private function insertScheduleEvent(int $pid, \DateTimeImmutable $eventDate, string $title, string $startTime = '08:50:00'): int
     {
+        $start = \DateTimeImmutable::createFromFormat('!H:i:s', $startTime) ?: new \DateTimeImmutable('1970-01-01 08:50:00');
+        $end = $start->modify('+15 minutes');
         $uuid = (new UuidRegistry(['table_name' => 'openemr_postcalendar_events', 'table_id' => 'pc_eid']))->createUuid();
         return QueryUtils::sqlInsert(
             "INSERT INTO `openemr_postcalendar_events`
                 (`uuid`, `pc_catid`, `pc_multiple`, `pc_aid`, `pc_pid`, `pc_title`, `pc_time`, `pc_eventDate`, `pc_endDate`, `pc_duration`, `pc_startTime`, `pc_endTime`)
-             VALUES (?, 5, 0, ?, ?, ?, NOW(), ?, ?, 900, '08:50:00', '09:05:00')",
+             VALUES (?, 5, 0, ?, ?, ?, NOW(), ?, ?, 900, ?, ?)",
             [
                 $uuid,
                 (string)$this->providerId,
@@ -264,6 +266,8 @@ trait SeedCoreTableHelpers
                 $title,
                 $eventDate->format('Y-m-d'),
                 $eventDate->format('Y-m-d'),
+                $start->format('H:i:s'),
+                $end->format('H:i:s'),
             ]
         );
     }
