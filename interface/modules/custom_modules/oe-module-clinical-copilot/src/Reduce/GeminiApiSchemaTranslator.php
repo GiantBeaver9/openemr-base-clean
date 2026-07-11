@@ -18,7 +18,8 @@ namespace OpenEMR\Modules\ClinicalCopilot\Reduce;
  * {@see Claim::jsonSchema()} and other module schemas are authored as JSON
  * Schema for the verifier (V1) and for Vertex structured output. Google AI
  * Studio's `responseSchema` rejects several standard JSON Schema keywords
- * (`$schema`, `additionalProperties`, union `type` arrays). This translator
+ * (`$schema`, `$id`, `title`, `description`, `additionalProperties`,
+ * `minLength`, `minimum`, and union `type` arrays). This translator
  * is applied ONLY on the {@see GeminiApiLlmClient} /
  * {@see \OpenEMR\Modules\ClinicalCopilot\Chat\Llm\GeminiApiChatLlmClient}
  * path so Vertex keeps the full schema unchanged.

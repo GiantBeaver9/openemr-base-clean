@@ -3,7 +3,7 @@
 /**
  * Renders the fact set as a readable, per-checklist-item block for the reduce prompt.
  *
- * @package   OpenEMR
+ * @package   OpenEMR\Modules\ClinicalCopilot
  * @link      https://www.open-emr.org
  * @author    Clinical Co-Pilot Team
  * @copyright Copyright (c) 2026 OpenEMR Foundation

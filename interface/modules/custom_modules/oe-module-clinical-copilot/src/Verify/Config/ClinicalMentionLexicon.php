@@ -126,7 +126,7 @@ final class ClinicalMentionLexicon
      *
      * @return list<float>
      */
-    public static function extractNumbers(string $text): array
+    private static function extractNumbers(string $text): array
     {
         $withoutDates = preg_replace(self::DATE_PATTERN, ' ', $text) ?? $text;
         preg_match_all(self::NUMBER_PATTERN, $withoutDates, $matches);

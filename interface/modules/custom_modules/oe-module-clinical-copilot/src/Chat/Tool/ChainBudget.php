@@ -55,16 +55,6 @@ final class ChainBudget
         $this->callsUsed++;
     }
 
-    public function exhausted(): bool
-    {
-        return $this->callsUsed >= self::MAX_CALLS || $this->roundsUsed >= self::MAX_ROUNDS;
-    }
-
-    public function callsUsed(): int
-    {
-        return $this->callsUsed;
-    }
-
     public function roundsUsed(): int
     {
         return $this->roundsUsed;

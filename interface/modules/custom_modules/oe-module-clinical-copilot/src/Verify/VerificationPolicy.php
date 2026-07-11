@@ -3,7 +3,7 @@
 /**
  * Runtime toggle for the deterministic V1-V6 verifier GATE (temporary QA switch).
  *
- * @package   OpenEMR
+ * @package   OpenEMR\Modules\ClinicalCopilot
  * @link      https://www.open-emr.org
  * @author    Clinical Co-Pilot Team
  * @copyright Copyright (c) 2026 OpenEMR Foundation

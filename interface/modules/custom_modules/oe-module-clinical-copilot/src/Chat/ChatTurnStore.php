@@ -18,10 +18,9 @@ use OpenEMR\Common\Database\QueryUtils;
 use OpenEMR\Common\Logging\SystemLogger;
 
 /**
- * I3/E7-style append-only: exactly two public methods, {@see self::insert()}
- * and {@see self::forSession()} -- no update, no delete, mirroring
- * {@see \OpenEMR\Modules\ClinicalCopilot\DocStore}'s own "the method list IS
- * the audit" discipline.
+ * I3/E7-style append-only: inserts and reads only -- no update, no delete,
+ * mirroring {@see \OpenEMR\Modules\ClinicalCopilot\DocStore}'s own "the method
+ * list IS the audit" discipline.
  */
 final class ChatTurnStore
 {

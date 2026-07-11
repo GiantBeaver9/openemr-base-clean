@@ -87,9 +87,6 @@ final class LlmEnv
         }
 
         foreach ($lines as $line) {
-            if (!is_string($line)) {
-                continue;
-            }
             $line = trim($line);
             if ($line === '' || str_starts_with($line, '#')) {
                 continue;

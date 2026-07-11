@@ -224,7 +224,7 @@ final class Worker
                     continue;
                 }
 
-                if ($allowLlmOnMiss && !$result->servedFromCache) {
+                if ($allowLlmOnMiss) {
                     $warmed++;
                     $generations++;
                 }

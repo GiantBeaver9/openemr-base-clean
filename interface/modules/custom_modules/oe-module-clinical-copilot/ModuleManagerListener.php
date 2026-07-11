@@ -48,11 +48,6 @@ class ModuleManagerListener extends AbstractModuleActionListener
         'mod_copilot_ui_event',
     ];
 
-    public function __construct()
-    {
-        parent::__construct();
-    }
-
     /**
      * @param        $methodName
      * @param        $modId
@@ -267,17 +262,6 @@ class ModuleManagerListener extends AbstractModuleActionListener
             'clinicalCopilotWorkerRun',
             '/interface/modules/custom_modules/oe-module-clinical-copilot/src/worker_entry.php',
         ]);
-    }
-
-    /**
-     * @param      $flag
-     * @param      $serviceArray
-     * @param bool $reset
-     * @param bool $removeTask
-     * @return void
-     */
-    private static function setTaskState($flag, $serviceArray, bool $reset = false, bool $removeTask = false): void
-    {
     }
 
     /**

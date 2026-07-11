@@ -25,15 +25,6 @@ use OpenEMR\Common\Database\QueryUtils;
  * reads `mod_copilot_doc` directly for the doc page's history view: the
  * table is the shared source of truth (I12), and reading it plainly is not
  * a write-path concern that needs a seam.
- *
- * **Honest gap:** until U12 wires a real `TraceRecorderInterface`
- * implementation, {@see ChatController::createDefault()} uses
- * {@see \OpenEMR\Modules\ClinicalCopilot\ReadPath\NullTraceRecorder} (a
- * no-op), so no rows land in `mod_copilot_trace` for this class to read yet
- * -- `public/status.php`'s staged-progress list is empty until then, while
- * the turn-completion half of polling (reading `mod_copilot_chat_turn`
- * directly) works today regardless, since that ledger write does not depend
- * on the trace seam at all.
  */
 final class TracePoller
 {

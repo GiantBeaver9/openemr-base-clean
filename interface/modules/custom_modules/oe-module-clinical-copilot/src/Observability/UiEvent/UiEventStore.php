@@ -32,13 +32,4 @@ final class UiEventStore
             [$correlationId, $pid, $userId, $type->value],
         );
     }
-
-    public function count(UiEventType $type, \DateTimeImmutable $since): int
-    {
-        return (int)QueryUtils::fetchSingleValue(
-            'SELECT COUNT(*) AS c FROM `mod_copilot_ui_event` WHERE `event_type` = ? AND `created_at` > ?',
-            'c',
-            [$type->value, $since->format('Y-m-d H:i:s')],
-        );
-    }
 }

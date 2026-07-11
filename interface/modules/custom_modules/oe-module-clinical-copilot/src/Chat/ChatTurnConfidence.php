@@ -55,12 +55,4 @@ final readonly class ChatTurnConfidence
         // reduced when it took the one regeneration to clear the checks.
         return $answer->attempts >= 2 ? new self(0.7, 'medium') : new self(1.0, 'high');
     }
-
-    /**
-     * @return array{score: float, label: string}
-     */
-    public function toArray(): array
-    {
-        return ['score' => $this->score, 'label' => $this->label];
-    }
 }

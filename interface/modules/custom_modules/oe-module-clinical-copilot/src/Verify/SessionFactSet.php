@@ -54,7 +54,7 @@ final class SessionFactSet
     /**
      * @return list<Fact>
      */
-    public function all(): array
+    private function all(): array
     {
         return array_values($this->byId);
     }

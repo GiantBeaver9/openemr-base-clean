@@ -123,10 +123,8 @@ final class DbLabContractConfigProvider implements LabContractConfigProviderInte
             }
         }
 
-        $loincToAnalyte = self::UNIT_CONVERSION_LOINC_TO_ANALYTE;
-
         return new LabContractConfig(
-            $loincToAnalyte,
+            self::UNIT_CONVERSION_LOINC_TO_ANALYTE,
             $canonicalUnitByAnalyte,
             $conversionRulesByAnalyte,
             $conversionVersion,

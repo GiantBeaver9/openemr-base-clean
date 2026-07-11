@@ -498,11 +498,10 @@ final class ChatController
             "chat:{$session->id}",
             $identifiers,
             // Chat is interactive and answers over already-extracted facts, so
-            // it runs a deliberately small thinking budget -- speed over deep
-            // reasoning. The richer budget is reserved for the narrative.
-            // Chat answers are small and concise, so these are kept modest --
-            // thinkingBudget 2048, maxOutputTokens 8192. The earlier 10000/49152
-            // were re-spent EVERY turn and drove per-minute token usage into the
+            // it runs a deliberately small per-turn budget (thinkingBudget 2048,
+            // maxOutputTokens 8192) -- speed over deep reasoning, with the richer
+            // budget reserved for the narrative. The earlier 10000/49152 were
+            // re-spent EVERY turn and drove per-minute token usage into the
             // provider's rate/quota limit after a few messages; a tight per-turn
             // budget (plus the bounded transcript above) keeps a session's token
             // rate flat instead of climbing. Both valid for Flash.
@@ -519,9 +518,6 @@ final class ChatController
         return new ChatAgent($agentLoop, new Verifier(), $onStatus);
     }
 
-    /**
-     * @param list<ChatTurn> $priorTurns
-     */
     private function persistToolTurns(int $sessionId, int $pid, int $userId, ChatAnswer $answer, string $correlationId): void
     {
         foreach ($answer->toolCallLog as $entry) {

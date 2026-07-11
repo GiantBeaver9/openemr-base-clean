@@ -94,9 +94,9 @@ final class DocViewModel
      *
      * @return array{
      *     capability_crash: bool, crash_banner: ?string, verify_status: ?string,
-     *     regen_reason: ?string, degraded_message: ?string, served_from_cache: bool,
-     *     computed_at: ?string, correlation_id: string, qa_status: ?string,
-     *     qa_score: ?float, verdict_hover: string
+     *     regen_reason: ?string, degraded_message: ?string, degraded_reason: ?string,
+     *     served_from_cache: bool, computed_at: ?string, correlation_id: string,
+     *     qa_status: ?string, qa_score: ?float, verdict_hover: string
      * }
      */
     public static function summary(SynthesisReadResult $result): array

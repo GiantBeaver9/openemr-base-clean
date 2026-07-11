@@ -575,6 +575,13 @@ final class SynthesisReadPath
         );
     }
 
+    private function emitStatus(?\Closure $onStatus, string $message): void
+    {
+        if ($onStatus !== null) {
+            ($onStatus)($message);
+        }
+    }
+
     /**
      * TODO(U9 report): adopt {@see \OpenEMR\Modules\ClinicalCopilot\Observability\TracePayloadStore}
      * here to populate `TraceSpan::$payloadRef` on the `llm_reduce`/`verify`
@@ -588,13 +595,6 @@ final class SynthesisReadPath
      * drive-by. Left for whichever unit next touches this read path's
      * span-recording call sites.
      */
-    private function emitStatus(?\Closure $onStatus, string $message): void
-    {
-        if ($onStatus !== null) {
-            ($onStatus)($message);
-        }
-    }
-
     private function recordSpan(
         string $correlationId,
         string $kind,
