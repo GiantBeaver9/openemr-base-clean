@@ -92,6 +92,9 @@ if (!$forced) {
 
 $_GET['site'] = 'default';
 $ignoreAuth = true;
+// Match the module installer's bootstrap: this script writes to core tables, so
+// globals.php must keep the session writable rather than closing it read-only.
+$sessionAllowWrite = true;
 require_once($interfaceDir . '/globals.php');
 
 // globals.php boots the module's runtime autoloader for `src/` only, not the

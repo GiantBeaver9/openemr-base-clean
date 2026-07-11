@@ -29,7 +29,17 @@ AUTOLOAD="${OPENEMR_ROOT}/vendor/autoload.php"
 INSTALLER="${OPENEMR_ROOT}/${MODULE_REL}/ops/local/install-module.php"
 SEEDER="${OPENEMR_ROOT}/${MODULE_REL}/tests/Seed/SeedClinicalCopilot.php"
 
-log() { echo "Railway copilot install: $*"; }
+# Railway drops app logs under load ("rate limit ... Messages dropped"), which is
+# exactly when the install/seed output matters. Mirror everything to a file too,
+# so after a deploy you can read the full record with:
+#   cat /tmp/copilot-install.log
+COPILOT_LOG=/tmp/copilot-install.log
+: > "${COPILOT_LOG}" 2>/dev/null || true
+
+log() {
+    echo "Railway copilot install: $*"
+    echo "Railway copilot install: $*" >> "${COPILOT_LOG}" 2>/dev/null || true
+}
 
 log "waiting for the OpenEMR base install to finish (sqlconf config=1 + vendor + module present)..."
 
@@ -67,9 +77,16 @@ log "letting MySQL settle for ${SETTLE}s before touching it (avoids piling onto 
 sleep "${SETTLE}"
 
 # OpenEMR CLI scripts refuse UID 0 (RootCliGuard); run as the web user, exactly
-# as ops/local/setup.sh does inside the dev container.
+# as ops/local/setup.sh does inside the dev container. Capture the command's
+# combined output so it lands in BOTH the Railway log (may be dropped) and the
+# persistent ${COPILOT_LOG} file, while still returning the command's real exit
+# code (a plain pipe to tee would mask it in POSIX sh).
 run_as_apache() {
-    su -s /bin/sh apache -c "$1"
+    _out="$(su -s /bin/sh apache -c "$1" 2>&1)"
+    _rc=$?
+    printf '%s\n' "${_out}"
+    printf '%s\n' "${_out}" >> "${COPILOT_LOG}" 2>/dev/null || true
+    return ${_rc}
 }
 
 # Retry an idempotent step across transient MySQL disconnects (error 2006,
