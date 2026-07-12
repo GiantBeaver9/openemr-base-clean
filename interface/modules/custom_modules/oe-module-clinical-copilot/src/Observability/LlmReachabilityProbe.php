@@ -17,7 +17,6 @@ namespace OpenEMR\Modules\ClinicalCopilot\Observability;
 use Google\Auth\ApplicationDefaultCredentials;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
-use GuzzleHttp\Exception\GuzzleException;
 use OpenEMR\Modules\ClinicalCopilot\Config\LlmEnv;
 
 /**
@@ -100,7 +99,7 @@ final class LlmReachabilityProbe
             ]);
 
             return 'ok';
-        } catch (GuzzleException|\Throwable) {
+        } catch (\Throwable) {
             // Every failure mode here -- no ADC, unreachable endpoint,
             // provider error -- collapses to the same observable state a
             // physician-facing degradation already treats identically (I6):

@@ -125,16 +125,7 @@ final class VerifiedGeneration
         // degrading. The verifier still ran (verdicts recorded) and the sev-1
         // wrong-patient freeze above still applies. Re-enable via
         // VerificationPolicy (CLINICAL_COPILOT_VERIFY_ENFORCE=1 or flip default).
-        if (!VerificationPolicy::gateEnforced()) {
-            return AttemptOutcome::passed(
-                $verification->verdicts,
-                $verification->claims ?? [],
-                $reduceResult->redactionMap ?? throw new \LogicException('an available ReduceResult always carries a RedactionMap'),
-                $usage,
-            );
-        }
-
-        if ($verification->allPassed()) {
+        if (!VerificationPolicy::gateEnforced() || $verification->allPassed()) {
             return AttemptOutcome::passed(
                 $verification->verdicts,
                 $verification->claims ?? [],

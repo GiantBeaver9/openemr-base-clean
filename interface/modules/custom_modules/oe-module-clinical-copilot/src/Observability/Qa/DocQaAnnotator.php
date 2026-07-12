@@ -19,8 +19,7 @@ use OpenEMR\Modules\ClinicalCopilot\Doc\QaStatus;
 
 /**
  * {@see \OpenEMR\Modules\ClinicalCopilot\DocStore}'s own docblock states this
- * is deliberately out of ITS scope: "this class has exactly two public
- * methods, insert() and findBest() ... there is no update or delete method
+ * is deliberately out of ITS scope: "there is no update or delete method
  * anywhere in this class." {@see \OpenEMR\Modules\ClinicalCopilot\Doc\QaStatus}'s
  * docblock names the answer: "U12's async QA sweep is the only writer of
  * anything other than Pending."

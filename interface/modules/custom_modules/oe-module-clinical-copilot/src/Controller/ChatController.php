@@ -64,6 +64,7 @@ use OpenEMR\Modules\ClinicalCopilot\ReadPath\TraceSpan;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\PatientIdentifiers;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\PromptContext;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\Redactor;
+use OpenEMR\Modules\ClinicalCopilot\Verify\Verdict;
 use OpenEMR\Modules\ClinicalCopilot\Verify\Verifier;
 use OpenEMR\Services\PrescriptionService;
 use Ramsey\Uuid\Uuid;
@@ -637,6 +638,20 @@ final class ChatController
         }, $answer->claims);
     }
 
+    /**
+     * @param list<Verdict> $verdicts
+     * @return list<array{check: string, passed: bool, skipped: bool, findings: list<string>}>
+     */
+    private static function verdictsToArray(array $verdicts): array
+    {
+        return array_map(static fn (Verdict $v): array => [
+            'check' => $v->checkId->value,
+            'passed' => $v->passed,
+            'skipped' => $v->skipped,
+            'findings' => $v->findings,
+        ], $verdicts);
+    }
+
     private function persistAssistantTurn(ChatSession $session, ChatAnswer $answer, ChatTurnConfidence $confidence, string $correlationId): void
     {
         $content = [
@@ -649,20 +664,13 @@ final class ChatController
             'confidence_label' => $confidence->label,
         ];
 
-        $verdictOut = array_map(static fn ($v): array => [
-            'check' => $v->checkId->value,
-            'passed' => $v->passed,
-            'skipped' => $v->skipped,
-            'findings' => $v->findings,
-        ], $answer->verdicts);
-
         $this->turnStore->insert(new NewChatTurn(
             $session->id,
             $this->turnStore->nextSeq($session->id),
             ChatTurnRole::Assistant,
             $content,
             null,
-            $verdictOut,
+            self::verdictsToArray($answer->verdicts),
             $correlationId,
             $answer->usage->tokensIn,
             $answer->usage->tokensOut,
@@ -764,12 +772,7 @@ final class ChatController
             'confidence_label' => $confidence->label,
             'degraded_message' => $answer->degradedMessage,
             'claims' => self::rehydratedClaimsArray($answer),
-            'verdicts' => array_map(static fn ($v): array => [
-                'check' => $v->checkId->value,
-                'passed' => $v->passed,
-                'skipped' => $v->skipped,
-                'findings' => $v->findings,
-            ], $answer->verdicts),
+            'verdicts' => self::verdictsToArray($answer->verdicts),
             'tool_calls' => array_map(static fn ($entry): array => [
                 'tool' => $entry->request->name,
                 'ok' => $entry->outcome->ok,

@@ -22,9 +22,11 @@ use OpenEMR\Modules\ClinicalCopilot\Doc\RegenReason;
 use OpenEMR\Modules\ClinicalCopilot\Doc\VerifyStatus;
 
 /**
- * I3/E7 (append-only): this class has exactly two public methods,
- * {@see self::insert()} and {@see self::findBest()}. There is no update or
- * delete method anywhere in this class or its own call sites -- deliberately.
+ * I3/E7 (append-only): this class exposes a single writer,
+ * {@see self::insert()}, alongside read-only lookups ({@see self::findBest()},
+ * {@see self::findMostRecentForPid()}, {@see self::findByCorrelationId()}).
+ * There is no update or delete method anywhere in this class or its own call
+ * sites -- deliberately.
  * The one documented exception, module-wide, is
  * {@see \OpenEMR\Modules\ClinicalCopilot\Observability\Qa\DocQaAnnotator}'s
  * advisory `qa_status`/`qa_score` UPDATE (T22 carve-out, guarded by

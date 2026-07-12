@@ -240,6 +240,16 @@ final class SynthesisReadPath
             return null;
         }
 
+        return $this->computeDigest($extraction);
+    }
+
+    /**
+     * Fold an extraction's surviving facts, capability versions, lab-config
+     * snapshot, code-set/doc-type, and prompt version into the stable
+     * fact_digest shared by {@see self::currentDigest()} and {@see self::run()}.
+     */
+    private function computeDigest(ExtractionOutcome $extraction): string
+    {
         $labConfig = $this->labContractConfigProvider->load();
         $turnaroundConfig = $this->labTurnaroundConfigProvider->load();
         $configVersions = ConfigVersionSnapshot::build($labConfig, $turnaroundConfig);
@@ -273,18 +283,7 @@ final class SynthesisReadPath
 
         $digestT0 = microtime(true);
         $this->emitStatus($onStatus, 'computing digest…');
-        $labConfig = $this->labContractConfigProvider->load();
-        $turnaroundConfig = $this->labTurnaroundConfigProvider->load();
-        $configVersions = ConfigVersionSnapshot::build($labConfig, $turnaroundConfig);
-
-        $digest = Digest::compute(
-            $extraction->survivingFacts,
-            $extraction->capabilityVersions,
-            $configVersions,
-            self::CODE_SET_VERSION,
-            self::DOC_TYPE,
-            self::digestPromptVersion(),
-        );
+        $digest = $this->computeDigest($extraction);
         $this->recordSpan($correlationId, 'digest', $digestT0, 'ok', $pid, $userId);
 
         if (!$forceRegenerate) {
