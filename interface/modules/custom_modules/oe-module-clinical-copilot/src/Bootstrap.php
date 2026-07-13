@@ -147,6 +147,7 @@ class Bootstrap
                 if (($menuItem->menu_id ?? '') === 'external_data') {
                     $updated[] = $this->buildPatientCopilotMenuItem();
                     $updated[] = $this->buildPatientLabsMenuItem();
+                    $updated[] = $this->buildPatientEvidenceMenuItem();
                     $inserted = true;
                 }
             }
@@ -154,6 +155,7 @@ class Bootstrap
             if (!$inserted) {
                 $updated[] = $this->buildPatientCopilotMenuItem();
                 $updated[] = $this->buildPatientLabsMenuItem();
+                $updated[] = $this->buildPatientEvidenceMenuItem();
             }
 
             $event->setMenu($updated);
@@ -192,6 +194,26 @@ class Bootstrap
         $menuItem->menu_id = 'clinical_copilot_labs';
         $menuItem->label = xlt('Labs (Co-Pilot)');
         $menuItem->url = self::MODULE_INSTALLATION_PATH . '/public/lab_upload.php?pid=';
+        $menuItem->pid = 'true';
+        $menuItem->on_click = 'top.restoreSession()';
+        $menuItem->children = [];
+
+        return $menuItem;
+    }
+
+    /**
+     * Week 2: the "Guideline Evidence" tab — cited clinical-guideline evidence
+     * (RAG over the committed corpus) that augments the co-pilot's answers,
+     * shown separately from the patient's own chart facts.
+     */
+    private function buildPatientEvidenceMenuItem(): stdClass
+    {
+        $menuItem = new stdClass();
+        $menuItem->requirement = 0;
+        $menuItem->target = 'main';
+        $menuItem->menu_id = 'clinical_copilot_evidence';
+        $menuItem->label = xlt('Guideline Evidence');
+        $menuItem->url = self::MODULE_INSTALLATION_PATH . '/public/evidence.php?pid=';
         $menuItem->pid = 'true';
         $menuItem->on_click = 'top.restoreSession()';
         $menuItem->children = [];
