@@ -135,16 +135,20 @@ one source of truth per artifact, lineage columns link staging→core (see
 - **M1 Vision seam + endpoints + review UI + Labs tab** — *done, pushed.*
 - **M2 RAG foundation (corpus, sparse+hybrid, rerank seam)** — *done, pushed.*
 - **M3 Deterministic supervisor + 2 workers** — *done, pushed.*
-- **M4 Eval gate** — 50-case golden set, boolean-rubric runner (exit-code
-  pattern), PR-blocking, >5% regression fails; integration tests with fixtures +
-  stubbed LLM; PHI-detection check. **← next, buildable without the stack.**
-- **M5 Week 1 augmentation + observability finish** — `get_guideline_evidence`
-  chat tool; summarizer guideline-evidence section; dashboard Week 2 panel;
-  `/ready` document-storage/retriever checks; ingestion SLO/alerts.
-- **M6 PDF canvas bbox overlay** — PDF.js render + normalized-box overlay on the
-  review page.
-- **M7 API surface + submission** — OpenAPI 3.0 spec + Bruno collection + contract
-  tests; cost/latency report; demo. DB-backed tests run in the dev stack.
+- **M4 Eval gate** — 50-case golden set, boolean-rubric runner, PR-blocking,
+  >5% regression fails (verified). *done, pushed.*
+- **M5 Guideline-evidence surface** — `PatientEvidenceService` + `evidence.php` +
+  "Guideline Evidence" tab: cited, topic-grouped evidence as a SEPARATE surface
+  (kept off the verified chat/`Fact` pipeline by design). *done, pushed.*
+- **M6 Bounding-box overlay** — interactive per-page citation map (inline SVG,
+  no external renderer) on the review page. *done, pushed.*
+- **M7 API surface + engineering docs** — OpenAPI 3.0 spec, Bruno collection,
+  Week 2 cost/latency addendum, DB-backed staging-store test. *done, pushed.*
+- **M8 Observability finish (still owed)** — dashboard Week 2 panel (documents
+  ingested, per-doc-type accuracy, edit rate); `/ready` document-storage +
+  retriever checks; ingestion p95 SLO + alerts. Plus full PHPUnit/PHPStan/PSR-12
+  and the DB-backed core-write e2e (`AttachAndExtract`/`ChartWriter`) run in the
+  dev stack, and the demo video/deployed link.
 
 ## 10. Testing strategy
 
