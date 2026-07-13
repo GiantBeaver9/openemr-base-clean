@@ -226,3 +226,59 @@ smaller and, per lever 4 above, has the most headroom left on the table.
   every tier at public list rates so the *shape* of the model (where the
   money goes, which levers dominate) stays legible, rather than guessing at
   a discount schedule no one has actually negotiated.
+
+---
+
+# Week 2 addendum — ingestion, retrieval, and eval cost/latency
+
+Week 2 adds a document-ingestion path, hybrid retrieval, and an eval gate. As
+with the model above, these are **estimates** — no production ingestion traffic
+exists yet (synthetic data only). Every figure is a named, adjustable lever.
+
+## Where the money goes (Week 2)
+
+- **Vision extraction (the only new per-request LLM cost).** One multimodal
+  `generateContent` call per uploaded document. Cost is dominated by the input
+  image/PDF tokens, not output (extraction JSON is small). A 1–2 page lab/intake
+  scan is order ~1–3K input tokens + a few hundred output tokens on
+  `gemini-2.5-pro`. At list rates that is roughly **$0.005–0.02 per document** —
+  and it happens **once per document**, not per view (the extraction is persisted
+  and verified, never re-run on read).
+- **Retrieval + rerank.** The default path is **$0** — sparse TF-IDF over the
+  committed corpus runs in-process, no embeddings API, no vector DB. Dense
+  retrieval + a Cohere-style reranker are optional upgrades; when enabled, cost
+  is one embedding call per query (~hundreds of tokens) plus a rerank call over a
+  handful of candidates — negligible next to the vision call.
+- **Eval gate.** **$0 at CI time** — the 50-case gate feeds recorded model
+  outputs through the real deterministic code; no live model or DB is called.
+- **Chart write-back, review, and the guideline surface.** Deterministic PHP and
+  local retrieval — no LLM cost.
+
+So Week 2's marginal AI spend is essentially **one bounded vision call per
+document ingested**, gated behind a human upload — a naturally low-frequency,
+high-value event, unlike per-view synthesis.
+
+## Latency profile (targets to confirm against the dev stack)
+
+| Flow | Dominant cost | Target |
+|---|---|---|
+| Document ingestion (upload→draft) | one vision call (non-streaming) | p95 < ~8 s |
+| Guideline retrieval (sparse) | in-process TF-IDF over the corpus | p95 < ~50 ms |
+| Verify/edit (per field) | one indexed UPDATE | p95 < ~150 ms |
+| Lock → chart commit | a few indexed INSERTs + accuracy calc | p95 < ~300 ms |
+| Eval gate (50 cases, CI) | deterministic, no I/O to models/DB | < ~2 s total |
+
+The vision call is the only step whose latency depends on an external provider;
+it carries the Week 1 LLM client's timeout + retry behavior. The ingestion SLO
+and its alert (extraction failure rate, retrieval latency) are tracked as an
+M5 observability item; the numbers above are the targets those SLOs assert
+against once `ops/load/` is extended to the Week 2 endpoints.
+
+## Levers
+
+- **Model choice for extraction** — `gemini-2.5-pro` (accuracy) vs `flash`
+  (cheaper/faster). Extraction accuracy is measured for free (vlm vs verified),
+  so this is an evidence-based tuning knob, not a guess.
+- **Documents per patient per visit** — the ingestion frequency; low by nature.
+- **Dense/rerank on or off** — off is free and offline; on trades a small cost
+  for retrieval quality on a larger corpus.
