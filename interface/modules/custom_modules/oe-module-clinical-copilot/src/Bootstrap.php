@@ -97,6 +97,20 @@ class Bootstrap
                     $copilotMenuItem->global_req = [];
 
                     $menuItem->children[] = $copilotMenuItem;
+
+                    // Week 2: intake upload — create a patient from a scanned
+                    // intake form. Sits beside the synthesis page under Reports.
+                    $intakeMenuItem = new stdClass();
+                    $intakeMenuItem->requirement = 0;
+                    $intakeMenuItem->target = 'copilot_intake';
+                    $intakeMenuItem->menu_id = 'copilot_intake';
+                    $intakeMenuItem->label = xlt('Co-Pilot Intake Upload');
+                    $intakeMenuItem->url = self::MODULE_INSTALLATION_PATH . '/public/intake_upload.php';
+                    $intakeMenuItem->children = [];
+                    $intakeMenuItem->acl_req = ['patients', 'med'];
+                    $intakeMenuItem->global_req = [];
+
+                    $menuItem->children[] = $intakeMenuItem;
                     break;
                 }
             }
@@ -132,12 +146,14 @@ class Bootstrap
                 $updated[] = $menuItem;
                 if (($menuItem->menu_id ?? '') === 'external_data') {
                     $updated[] = $this->buildPatientCopilotMenuItem();
+                    $updated[] = $this->buildPatientLabsMenuItem();
                     $inserted = true;
                 }
             }
 
             if (!$inserted) {
                 $updated[] = $this->buildPatientCopilotMenuItem();
+                $updated[] = $this->buildPatientLabsMenuItem();
             }
 
             $event->setMenu($updated);
@@ -156,6 +172,26 @@ class Bootstrap
         $menuItem->menu_id = 'clinical_copilot';
         $menuItem->label = xlt('Appointment Copilot');
         $menuItem->url = self::MODULE_INSTALLATION_PATH . '/public/doc.php?pid=';
+        $menuItem->pid = 'true';
+        $menuItem->on_click = 'top.restoreSession()';
+        $menuItem->children = [];
+
+        return $menuItem;
+    }
+
+    /**
+     * Week 2: the "Labs" tab, immediately after the Appointment Copilot tab.
+     * Opens the Labs upload / manual-entry page for the current patient — the
+     * entry point for the lab-PDF -> extract -> verify -> lock round-trip.
+     */
+    private function buildPatientLabsMenuItem(): stdClass
+    {
+        $menuItem = new stdClass();
+        $menuItem->requirement = 0;
+        $menuItem->target = 'main';
+        $menuItem->menu_id = 'clinical_copilot_labs';
+        $menuItem->label = xlt('Labs (Co-Pilot)');
+        $menuItem->url = self::MODULE_INSTALLATION_PATH . '/public/lab_upload.php?pid=';
         $menuItem->pid = 'true';
         $menuItem->on_click = 'top.restoreSession()';
         $menuItem->children = [];

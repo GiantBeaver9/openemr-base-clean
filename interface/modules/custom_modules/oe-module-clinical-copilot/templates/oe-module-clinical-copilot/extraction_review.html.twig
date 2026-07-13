@@ -1,0 +1,170 @@
+{#
+# Clinical Co-Pilot -- Week 2 extraction review (verify -> edit -> lock).
+#
+# The human half of Week 2: every extracted value is shown beside what the
+# model proposed, editable until the extraction is locked. Locking commits the
+# verified values to the chart and records extraction accuracy (accepted vs
+# edited). Autoescape is globally OFF (build-notes.md) -- explicit escaping.
+#
+# @package   OpenEMR
+# @link      https://www.open-emr.org
+# @author    Clinical Co-Pilot Team
+# @copyright Copyright (c) 2026 OpenEMR Foundation
+# @license   https://github.com/openemr/openemr/blob/master/LICENSE GNU General Public License 3
+#}
+<html>
+<head>
+    <title>{{ "Verify Extraction — Clinical Co-Pilot"|xlt }}</title>
+    {{ setupHeader() }}
+    <style>
+        .ccp-edited { color: #b8860b; }
+        .ccp-model-said { font-size: 0.85em; color: #6c757d; }
+        .ccp-cite { font-size: 0.85em; }
+        .ccp-source-frame { width: 100%; height: 420px; border: 1px solid #ced4da; border-radius: .25rem; }
+        .ccp-accuracy { font-variant-numeric: tabular-nums; }
+    </style>
+</head>
+<body class="body_top">
+<div class="container-fluid mt-3" style="max-width: 1040px;">
+
+    {% if not found %}
+        <div class="alert alert-danger" role="alert">{{ "That extraction could not be found."|xlt }}</div>
+    {% else %}
+
+    {% if error %}
+        <div class="alert alert-warning" role="alert">{{ "That action could not be completed. Please try again."|xlt }}</div>
+    {% endif %}
+
+    <div class="d-flex align-items-center justify-content-between mb-2">
+        <div>
+            <h3 class="mb-0">{{ "Verify"|xlt }} — {{ doc_type_label|text }}</h3>
+            <div class="ccp-model-said">
+                {% if model %}{{ "Extracted by"|xlt }} {{ model|text }}{% else %}{{ "Manual entry"|xlt }}{% endif %}
+            </div>
+        </div>
+        <div class="text-right">
+            {% if locked %}
+                <span class="badge badge-success p-2">{{ "Locked — in chart"|xlt }}</span>
+            {% else %}
+                <span class="badge badge-warning p-2">{{ "Draft — verifying"|xlt }}</span>
+            {% endif %}
+            {% if field_accuracy is not null %}
+                <div class="ccp-model-said ccp-accuracy mt-1">
+                    {{ "Extraction accuracy"|xlt }}: {{ (field_accuracy * 100)|round(1) }}%
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if source_view_url %}
+        <details class="mb-3">
+            <summary class="text-primary" style="cursor: pointer;">{{ "Show source document"|xlt }}</summary>
+            <iframe class="ccp-source-frame mt-2" src="{{ source_view_url|attr }}" title="{{ "Source document"|xlt }}"></iframe>
+        </details>
+    {% endif %}
+
+    <table class="table table-sm table-bordered">
+        <thead class="thead-light">
+            <tr>
+                <th>{{ "Field"|xlt }}</th>
+                <th>{{ "Verified value"|xlt }}</th>
+                {% if is_lab %}<th>{{ "Unit"|xlt }}</th><th>{{ "Range"|xlt }}</th><th>{{ "Flag"|xlt }}</th>{% endif %}
+                <th>{{ "Model proposed"|xlt }}</th>
+                <th>{{ "Source"|xlt }}</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for f in fields %}
+            <tr>
+                <td class="align-middle"><strong>{{ f.field_key|text }}</strong></td>
+                <td>
+                    {% if locked and not is_elevated %}
+                        {{ f.value|text }}
+                    {% else %}
+                        <form method="POST" action="{{ post_url|attr }}" class="form-inline">
+                            {{ csrfToken('default', 'csrf_token_form') }}
+                            <input type="hidden" name="action" value="edit">
+                            <input type="hidden" name="extraction_id" value="{{ extraction_id|attr }}">
+                            <input type="hidden" name="field_id" value="{{ f.id|attr }}">
+                            <input type="text" class="form-control form-control-sm mr-1" name="value"
+                                   value="{{ f.value|attr }}" style="min-width: 8rem;">
+                            <button type="submit" class="btn btn-sm btn-outline-secondary">{{ "Save"|xlt }}</button>
+                        </form>
+                    {% endif %}
+                    {% if f.edited_by_user %}<span class="badge badge-light ccp-edited">{{ "edited"|xlt }}</span>{% endif %}
+                </td>
+                {% if is_lab %}
+                    <td class="align-middle">{{ f.unit|text }}</td>
+                    <td class="align-middle">{{ f.ref_range|text }}</td>
+                    <td class="align-middle">{{ f.abnormal_flag|text }}</td>
+                {% endif %}
+                <td class="align-middle ccp-model-said">
+                    {% if f.vlm_value is not null %}{{ f.vlm_value|text }}{% else %}—{% endif %}
+                </td>
+                <td class="align-middle ccp-cite">
+                    {% if f.page is not null %}
+                        <span title="{{ f.quote|attr }}" data-bbox="{{ f.bbox ? f.bbox|join(',') : '' }}">
+                            <i class="fa fa-file-text-o"></i> {{ "p."|xlt }}{{ f.page|text }}
+                        </span>
+                    {% else %}
+                        <span class="text-muted">{{ "manual"|xlt }}</span>
+                    {% endif %}
+                </td>
+            </tr>
+        {% else %}
+            <tr><td colspan="{{ is_lab ? 6 : 4 }}" class="text-muted">{{ "No fields yet."|xlt }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    {% if is_lab and (not locked or is_elevated) %}
+        <div class="card mb-3">
+            <div class="card-body py-2">
+                <form method="POST" action="{{ post_url|attr }}" class="form-row align-items-end">
+                    {{ csrfToken('default', 'csrf_token_form') }}
+                    <input type="hidden" name="action" value="add_field">
+                    <input type="hidden" name="extraction_id" value="{{ extraction_id|attr }}">
+                    <div class="col"><label class="small mb-0">{{ "Test"|xlt }}</label><input type="text" class="form-control form-control-sm" name="field_key" required></div>
+                    <div class="col"><label class="small mb-0">{{ "Value"|xlt }}</label><input type="text" class="form-control form-control-sm" name="value"></div>
+                    <div class="col"><label class="small mb-0">{{ "Unit"|xlt }}</label><input type="text" class="form-control form-control-sm" name="unit"></div>
+                    <div class="col"><label class="small mb-0">{{ "Range"|xlt }}</label><input type="text" class="form-control form-control-sm" name="ref_range"></div>
+                    <div class="col"><label class="small mb-0">{{ "Flag"|xlt }}</label><input type="text" class="form-control form-control-sm" name="abnormal_flag"></div>
+                    <div class="col-auto"><button type="submit" class="btn btn-sm btn-outline-primary">{{ "Add row"|xlt }}</button></div>
+                </form>
+            </div>
+        </div>
+    {% endif %}
+
+    <div class="d-flex align-items-center justify-content-between">
+        <a href="{{ patient_url|attr }}" class="btn btn-outline-secondary">
+            <i class="fa fa-user mr-1"></i>{{ "Go to patient"|xlt }}
+        </a>
+        <div>
+            {% if not locked %}
+                <form method="POST" action="{{ post_url|attr }}" style="display:inline;"
+                      onsubmit="return confirm('{{ "Lock these values and write them into the chart?"|xlj }}');">
+                    {{ csrfToken('default', 'csrf_token_form') }}
+                    <input type="hidden" name="action" value="lock">
+                    <input type="hidden" name="extraction_id" value="{{ extraction_id|attr }}">
+                    <button type="submit" class="btn btn-success">
+                        <i class="fa fa-lock mr-1"></i>{{ "Verify & lock"|xlt }}
+                    </button>
+                </form>
+            {% elseif is_elevated %}
+                <form method="POST" action="{{ post_url|attr }}" style="display:inline;"
+                      onsubmit="return confirm('{{ "Unlock this extraction for correction?"|xlj }}');">
+                    {{ csrfToken('default', 'csrf_token_form') }}
+                    <input type="hidden" name="action" value="unlock">
+                    <input type="hidden" name="extraction_id" value="{{ extraction_id|attr }}">
+                    <button type="submit" class="btn btn-outline-warning">
+                        <i class="fa fa-unlock mr-1"></i>{{ "Unlock to correct"|xlt }}
+                    </button>
+                </form>
+            {% endif %}
+        </div>
+    </div>
+
+    {% endif %}
+</div>
+</body>
+</html>
