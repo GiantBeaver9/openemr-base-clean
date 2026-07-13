@@ -10,6 +10,53 @@ so a reader can swap in real numbers once `ops/load/RESULTS.md` and live
 usage replace the estimates. Treat the dollar figures as **order-of-magnitude
 and directionally honest**, not a quote.
 
+> **Update — the prompt-size inputs are now MEASURED, not guessed.** The
+> `TokIn_synth` / `TokCached` / `TokIncr` figures below were originally
+> order-of-magnitude estimates. They are now measured by
+> `ops/load/bench/measure-tokens.php`, which assembles the **real** production
+> prompts (`PromptAssembler` / `ChatPromptAssembler`) over the committed
+> synthetic-patient fixtures and counts characters exactly, converting to
+> tokens with Gemini's published ~4-chars/token ratio (it does not call the
+> network `countTokens`). See "Measured token counts" immediately below; the
+> per-tier table still prices at the conservative `TokIn_synth = 8000`, which
+> the measurement confirms is a safe **upper bound** (measured heavy-patient
+> ceiling ≈ 6,458; typical ≈ 2,155), so the table over-states rather than
+> under-states synthesis cost.
+
+## Measured token counts (production-tied — `ops/load/bench/measure-tokens.php`)
+
+Measured over the four committed synthetic endo patients (`ccp_001..004`,
+4–6 canonical facts each — a representative mid-complexity follow-up visit),
+plus one synthetic long-history patient as an upper bound:
+
+| Lever | Prior estimate | **Measured (median, real fixtures)** | Heavy-patient upper bound | How measured |
+|---|---:|---:|---:|---|
+| `TokIn_synth` (synthesis reduce input) | 8,000 | **2,155** | 6,458 | exact chars of assembled system+user+responseSchema ÷ 4 |
+| `TokCached` (chat preloaded fact block) | 8,000 | **1,270** | — | exact chars of the identical-every-turn PATIENT+FACTS prefix ÷ 4 |
+| `TokIncr` (chat turn delta) | 700 | **18** (turn-1, empty transcript) | grows with transcript | exact chars of the QUESTION/CONVERSATION tail ÷ 4 |
+| `TokOut_synth` / `TokOut_turn` | 800 / 300 | _unchanged — output needs a live generation to measure_ | | flagged estimate |
+
+Per-call cost, computed by the module's own `LlmCostEstimate` (Gemini 2.5 Pro
+list rates) from the measured inputs:
+
+| Call | Measured cost |
+|---|---:|
+| Synthesis reduce (one cache-miss narrative), measured `TokIn_synth`=2,155 + est. 800 out | **$0.01069** |
+| Chat turn 1 (cache write), measured `TokCached`+`TokIncr`=1,288 + est. 300 out | **$0.00461** |
+| Vision extraction / document (1–2 pg scan, ~2,000 in + 400 out) | **$0.00650** |
+
+**Finding:** the real synthesis prompt for these representative patients is
+~2.1K tokens — about **4× smaller** than the original 8,000 estimate — because
+the fixtures carry 4–6 facts, not the 5-capability multi-visit set the estimate
+assumed. A long-history patient (windowed by `PromptFactWindow`) tops out around
+6.5K, still under 8K. So the per-tier dollar figures below (which keep 8,000)
+are a deliberate conservative ceiling; a deployment measuring
+`mod_copilot_doc.tokens_in` from real traffic would likely see the synthesis
+line come in lower. Re-run `measure-tokens.php` against real seeded data (or
+wire in `countTokens`) to replace the ÷4 derivation with exact provider counts.
+
+---
+
 "Users" here = **clinicians** (physicians using the copilot), matching the
 module's actual unit of scaling — each clinician generates their own
 schedule of patient syntheses and chat turns. 100K clinician-users is a
@@ -198,16 +245,18 @@ smaller and, per lever 4 above, has the most headroom left on the table.
 
 ## Honest gaps in this model
 
-- **Token counts are estimates, not measurements.** `TokIn_synth`,
-  `TokCached`, `TokIncr`, and the two output figures are order-of-magnitude
-  reads of `PromptAssembler`'s system-instruction block plus a plausible
-  5-capability fact set for one synthetic patient — not counted with
-  Vertex's own `countTokens` API against real seeded data. `ready.php`
-  already calls a Vertex `countTokens` probe for reachability
-  (`LlmReachabilityProbe`); the natural next step is instrumenting
+- **Input token counts are now MEASURED (see "Measured token counts" near the
+  top); output counts remain estimates.** `TokIn_synth`, `TokCached`, and
+  `TokIncr` are measured by `ops/load/bench/measure-tokens.php` — the real
+  `PromptAssembler` / `ChatPromptAssembler` output over the committed fixtures,
+  counted exactly and converted at Gemini's ~4-chars/token ratio (not the
+  network `countTokens`). Two residual gaps remain: (1) the ÷4 ratio is a
+  derivation, not a provider count — replace it with Vertex `countTokens` (the
+  `LlmReachabilityProbe` already reaches that endpoint) or with instrumented
   `mod_copilot_doc.tokens_in`/`tokens_out` and `mod_copilot_chat_turn.tokens_in`/
-  `tokens_out` (both columns already exist in the schema) from real traffic
-  and replacing every estimate above with a measured percentile.
+  `tokens_out` (both columns already exist) from real traffic; (2) **output**
+  token counts (`TokOut_synth`/`TokOut_turn`) still cannot be measured without a
+  live generation, so they stay flagged estimates.
 - **`M`, `S`, `T` are clinical-usage guesses.** There is no production
   traffic (synthetic patients only, OPEN-1) to derive them from yet. The
   dashboard (U12) already tracks `cache hit rate` and `chat_drilldown_rate`

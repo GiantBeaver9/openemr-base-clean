@@ -1,13 +1,105 @@
 # Clinical Co-Pilot — Baseline + Load Results (R8, R9)
 
-**Status: harness + runbook complete; numbers not yet captured.** The k6
-scripts (`k6/`) and the baseline harness (`baseline/capture-baseline.sh`) are
-finished and verified. What remains is a single ~20-minute capture run
-against a reachable, seeded stack — the exact commands are the runbook
-below. Fill every `TBD` from that run, then commit this file; it is the
-tracked baseline future changes get diffed against (ARCHITECTURE.md §3.6).
+There are **two layers** of performance measurement here, and they answer
+different questions:
 
-> **Why the numbers are still blank.** These must be captured from a host
+- **Part A — in-process hot-path baseline + load (CAPTURED, below).** Real
+  CPU / memory / latency / throughput of the module's own compute
+  (retrieval, strict-schema extraction, V1–V6 verification, canonicalization,
+  prompt assembly), at concurrency **1 (baseline), 10, and 50**, measured with
+  `ops/load/bench/` — no DB, no LLM, no web stack, so it runs anywhere PHP
+  does and the numbers below were captured directly in the build environment.
+  This is what isolates *the module's* CPU cost and how it scales with worker
+  count on a given machine.
+- **Part B — full-stack HTTP baseline + load (dev-stack runbook).** The
+  end-to-end round trip (Apache + PHP-FPM + MySQL + session/ACL + the real
+  LLM), measured with `baseline/capture-baseline.sh` + `k6/*.js`. This
+  requires a *reachable, seeded* stack; the runbook is below and the tables
+  are filled from that run. It answers "how many PHP-FPM workers / how much
+  RAM does a deployment need for N concurrent physicians."
+
+They are complementary: Part A says the module's logic is sub-millisecond and
+CPU-bound (so concurrency is a worker-count/core question, exactly the T20
+vertical-first stance); Part B puts that under a real web stack and the real
+LLM latency that dominates a chat turn.
+
+---
+
+## Part A — in-process hot-path results (CAPTURED)
+
+Re-capture at any time with a single command (≈4 min on a 4-core box):
+
+```bash
+php ops/load/bench/capture.php --duration=8      # baseline + 10 + 50, every workload
+php ops/load/bench/bench.php --list              # the individual workloads
+php ops/load/bench/bench.php verify_chat --concurrency=1,10,50 --duration=10   # one workload
+```
+
+Latency percentiles are computed with the module's **own** `RateMath`
+(`src/Observability/Metrics/RateMath.php`) — the same function the
+observability dashboard uses — so the harness and the production metric agree
+by construction. Full method map in `ops/load/bench/README.md`.
+
+### In-process hot-path results (module compute only — no web stack / DB / LLM)
+
+_Captured 2026-07-13T22:03:58+00:00 · commit `899c583` · host x86_64 · PHP 8.4.19 · 4 cores · 16075 MB RAM · 8s/cell · warmup 300/worker._
+
+| Workload | Conc | Throughput (ops/s) | p50 (ms) | p95 (ms) | p99 (ms) | CPU (% all cores) | RSS/worker (MB) | Aggregate RSS (MB) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `guideline_retrieval_sparse` | 1 | 4,193.6 | 0.226 | 0.284 | 0.351 | 25% | 14.980 | 14.980 |
+| `guideline_retrieval_sparse` | 10 | 16,716.0 | 0.221 | 4.258 | 8.279 | 99% | 14.760 | 147.290 |
+| `guideline_retrieval_sparse` | 50 | 15,406.5 | 0.221 | 31.351 | 52.283 | 98% | 14.860 | 742.490 |
+| `guideline_retrieval_hybrid` | 1 | 4,292.7 | 0.224 | 0.263 | 0.295 | 25% | 15.250 | 15.250 |
+| `guideline_retrieval_hybrid` | 10 | 16,741.4 | 0.223 | 4.257 | 8.279 | 99% | 15.090 | 150.840 |
+| `guideline_retrieval_hybrid` | 50 | 14,831.1 | 0.225 | 36.294 | 52.301 | 97% | 14.880 | 743.550 |
+| `extraction_validate_parse` | 1 | 95,221.8 | 0.014 | 0.018 | 0.029 | 24% | 29.430 | 29.430 |
+| `extraction_validate_parse` | 10 | 368,870.1 | 0.014 | 0.019 | 0.031 | 96% | 21.510 | 213.270 |
+| `extraction_validate_parse` | 50 | 358,073.0 | 0.014 | 0.020 | 0.032 | 95% | 14.750 | 679.170 |
+| `extraction_client_full` | 1 | 42,965.0 | 0.021 | 0.032 | 0.047 | 25% | 21.330 | 21.330 |
+| `extraction_client_full` | 10 | 166,711.6 | 0.021 | 0.033 | 0.050 | 98% | 15.840 | 156.090 |
+| `extraction_client_full` | 50 | 159,070.6 | 0.021 | 0.033 | 0.055 | 97% | 13.000 | 645.280 |
+| `verify_chat` | 1 | 58,872.7 | 0.015 | 0.023 | 0.036 | 25% | 23.510 | 23.510 |
+| `verify_chat` | 10 | 225,814.4 | 0.016 | 0.024 | 0.039 | 97% | 19.060 | 186.580 |
+| `verify_chat` | 50 | 227,453.0 | 0.015 | 0.023 | 0.037 | 97% | 15.410 | 765.610 |
+| `verify_synthesis` | 1 | 56,097.9 | 0.016 | 0.024 | 0.038 | 25% | 23.480 | 23.480 |
+| `verify_synthesis` | 10 | 218,094.3 | 0.016 | 0.025 | 0.039 | 96% | 18.930 | 184.210 |
+| `verify_synthesis` | 50 | 209,816.5 | 0.016 | 0.025 | 0.041 | 95% | 15.460 | 765.780 |
+| `canonical_serialize_digest` | 1 | 10,543.6 | 0.087 | 0.134 | 0.160 | 25% | 15.490 | 15.490 |
+| `canonical_serialize_digest` | 10 | 41,667.7 | 0.087 | 0.129 | 8.124 | 97% | 13.690 | 136.250 |
+| `canonical_serialize_digest` | 50 | 39,995.1 | 0.086 | 0.121 | 48.137 | 96% | 13.360 | 666.710 |
+| `prompt_assemble_reduce` | 1 | 38,643.0 | 0.024 | 0.037 | 0.052 | 25% | 21.950 | 21.950 |
+| `prompt_assemble_reduce` | 10 | 155,343.3 | 0.023 | 0.035 | 0.052 | 98% | 16.340 | 161.770 |
+| `prompt_assemble_reduce` | 50 | 152,254.9 | 0.023 | 0.035 | 0.051 | 97% | 13.710 | 682.120 |
+
+_(Machine-readable copy: `ops/load/bench/results/inprocess-latest.json` and the
+append-only `inprocess-results.ndjson`.)_
+
+### Reading Part A
+
+- **Baseline (conc=1).** Every hot path is **sub-millisecond at p50** and CPU
+  utilization sits at ~25% (one of four cores). Extraction validate/parse and
+  verification are the cheapest (~0.014–0.016 ms); guideline retrieval and
+  canonicalization are the heaviest (TF-IDF over the corpus; per-fact sort +
+  SHA-256), and even those are ~0.09–0.23 ms. The module's own logic is not the
+  bottleneck — the LLM call (Part B) is.
+- **Scaling 1 → 10 (a 4-core box).** Throughput rises ~3.6–4× and CPU climbs
+  to ~96–99% of all four cores: healthy **core saturation**, i.e. throughput is
+  bounded by cores, not by lock contention. p50 stays flat; only the tail (p95/
+  p99) starts to show scheduler queueing once workers outnumber cores.
+- **Scaling 10 → 50 (12.5× cores).** Throughput **plateaus** (the cores are
+  already full) and the tail latency of the CPU-heavier paths inflates sharply
+  (sparse retrieval p99 0.35 ms → 52 ms; canonical p99 0.16 ms → 48 ms) — the
+  textbook oversubscription curve. The cheap paths (verify, extraction) barely
+  move because each op is so short it clears before it can queue.
+- **Memory — the real sizing signal.** Per-worker RSS high-water is a steady
+  **~13–29 MB**; aggregate RSS grows **linearly** with worker count (~15 MB/worker
+  → 50 workers ≈ **740 MB**). So a deployment sizing decision is essentially
+  "cores for throughput, ~15–30 MB RAM per concurrent worker" — which is exactly
+  the vertical-first (bigger machine type) stance in T20 below, now backed by a
+  measured per-worker footprint rather than an assertion.
+
+> **Why the numbers below (Part B) require a reachable stack.** These must be
+> captured from a host
 > that can reach the target stack over the network. The CI/agent sandbox
 > this module was built in cannot reach the live Railway deployment
 > (`abundant-art-production-d560.up.railway.app`) — the environment's
@@ -20,6 +112,13 @@ tracked baseline future changes get diffed against (ARCHITECTURE.md §3.6).
 > access to the deployment — not something to fake from the build box.
 
 ---
+
+## Part B — full-stack HTTP baseline + load (dev-stack runbook)
+
+Part A above measures the module's compute in isolation. Part B puts the same
+code under a real Apache + PHP-FPM + MySQL stack and the real LLM, which is
+where the chat-turn latency budget actually lives. It needs a reachable,
+seeded target; the `TBD` cells are filled from that ~20-minute run.
 
 ## Runbook — how to capture these numbers (~20 min)
 

@@ -291,16 +291,23 @@ Everything else checked out clean:
 
 ## Honest gaps — what's still owed for a truly production build
 
-- **No numbers in `ops/load/RESULTS.md` yet.** The baseline + k6 harness is
-  correct and runnable but has not been executed against a real deployed
-  stack (no such stack exists in this build environment) — R8/R9 are
-  structurally satisfied, not yet empirically satisfied.
-- **`ops/cost-analysis.md`'s levers (warm hit-rate, sessions/turns per
-  patient, token counts) are estimates**, not measurements — there is no
-  production chat/synthesis traffic to derive them from yet (synthetic
-  patients only, OPEN-1). Re-run the model once `mod_copilot_doc`/
-  `mod_copilot_chat_turn`'s own `tokens_in`/`tokens_out` columns have real
-  data.
+- **In-process baseline + load numbers are CAPTURED** (`ops/load/RESULTS.md`
+  Part A, via `ops/load/bench/`): real CPU/memory/latency/throughput of the
+  module's compute at concurrency 1/10/50, plus a live dashboard + alert-firing
+  demonstration (`ops/load/bench/dashboard-demo.php`) and an end-to-end demo
+  (`ops/demo/run-demo.php`). What is **still owed** is the **full-stack HTTP**
+  capture (`ops/load/RESULTS.md` Part B — `baseline/capture-baseline.sh` +
+  `k6/*.js`): it needs a reachable, seeded Apache+PHP-FPM+MySQL+LLM stack, which
+  does not exist in this build environment. R8/R9 are empirically satisfied at
+  the module-compute layer; the end-to-end web-stack layer remains a dev-stack
+  runbook step.
+- **`ops/cost-analysis.md`'s prompt-size inputs are now MEASURED**
+  (`ops/load/bench/measure-tokens.php` — real prompt assembly over the fixtures;
+  see "Measured token counts" there). The **usage levers** (warm hit-rate,
+  sessions/turns per patient) and **output** token counts remain estimates —
+  no production chat/synthesis traffic exists yet (synthetic patients only,
+  OPEN-1). Re-run once `mod_copilot_doc`/`mod_copilot_chat_turn`'s `tokens_in`/
+  `tokens_out` columns have real data.
 - **Vertex context-cache storage pricing is an assumption** in the cost
   model (flagged inline there), not confirmed against current Vertex
   documentation.
