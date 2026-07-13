@@ -234,6 +234,78 @@ CREATE TABLE IF NOT EXISTS `mod_copilot_ui_event` (
 #EndIf
 
 -- ============================================================================
+-- mod_copilot_extraction — Week 2 document-ingestion header. One row per
+-- uploaded document (intake_form | lab_pdf) run through the vision extractor.
+-- This is the INVERSE of the read-only Week 1 path: it is the staging record
+-- for facts that will be WRITTEN into the chart. Lifecycle: `draft` (editable,
+-- under human review) -> `locked` (committed to core via the single sanctioned
+-- ChartWriter; immutable except to elevated ACL). `source_document_id` links
+-- the stored source PDF (core `documents`); `field_accuracy` is computed on
+-- lock (accepted-unchanged / total) as the extraction-accuracy metric — PHI
+-- free (a rate, not a value). Module-owned/writable via ExtractionStore only.
+-- ============================================================================
+#IfNotTable mod_copilot_extraction
+CREATE TABLE IF NOT EXISTS `mod_copilot_extraction` (
+    `id` BIGINT(20) NOT NULL AUTO_INCREMENT,
+    `pid` BIGINT(20) NOT NULL COMMENT 'references patient_data.pid; for intake this is the patient created from the upload',
+    `doc_type` VARCHAR(32) NOT NULL COMMENT 'intake_form | lab_pdf',
+    `source_document_id` BIGINT(20) DEFAULT NULL COMMENT 'references documents.id (the stored source PDF); NULL for pure manual entry',
+    `status` VARCHAR(16) NOT NULL DEFAULT 'draft' COMMENT 'draft (under review, editable) | locked (committed to chart, elevated-only edit)',
+    `model` VARCHAR(64) DEFAULT NULL COMMENT 'VLM model version string; NULL when the row was hand-entered (LLM unavailable / manual path)',
+    `prompt_version` VARCHAR(64) DEFAULT NULL COMMENT 'extraction prompt+schema version',
+    `correlation_id` VARCHAR(64) NOT NULL COMMENT 'propagates through document store, extraction, and the chart commit (single reconstructable trace)',
+    `latency_ms` INT(11) DEFAULT NULL,
+    `tokens_in` INT(11) DEFAULT NULL,
+    `tokens_out` INT(11) DEFAULT NULL,
+    `cost_usd` DECIMAL(10,6) DEFAULT NULL,
+    `field_accuracy` DECIMAL(5,4) DEFAULT NULL COMMENT 'observability: accepted-unchanged / total fields, computed on lock; a rate, never a clinical value (no PHI)',
+    `created_by` BIGINT(20) DEFAULT NULL COMMENT 'references users.id; the uploader',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `locked_at` DATETIME DEFAULT NULL,
+    `locked_by` BIGINT(20) DEFAULT NULL COMMENT 'references users.id; who verified and locked',
+    PRIMARY KEY (`id`),
+    KEY `idx_pid` (`pid`),
+    KEY `idx_status` (`status`),
+    KEY `idx_correlation_id` (`correlation_id`)
+) ENGINE=InnoDB COMMENT='Clinical Co-Pilot Week 2: document-ingestion extraction header (draft->locked lifecycle)';
+#EndIf
+
+-- ============================================================================
+-- mod_copilot_extracted_fact — one row per extracted field of an extraction.
+-- `vlm_value` (what the model extracted) and `value` (what the human verified
+-- and locked in) together are the ground-truth signal for extraction accuracy:
+-- edited_by_user flips to 1 when the human changed the model's value. Every
+-- fact carries a document-native citation (page + normalized bbox + quote) for
+-- the click-to-source overlay. `committed_core_table`/`committed_core_pk` are
+-- the write-back lineage (which core row this fact became), and the
+-- UNIQUE(extraction_id, field_key) key makes the commit idempotent — one field,
+-- one staging row, one core row. Module-owned/writable via ExtractionStore only.
+-- ============================================================================
+#IfNotTable mod_copilot_extracted_fact
+CREATE TABLE IF NOT EXISTS `mod_copilot_extracted_fact` (
+    `id` BIGINT(20) NOT NULL AUTO_INCREMENT,
+    `extraction_id` BIGINT(20) NOT NULL COMMENT 'references mod_copilot_extraction.id',
+    `field_key` VARCHAR(64) NOT NULL COMMENT 'strict-schema field name, e.g. a1c, chief_concern, last_name',
+    `vlm_value` TEXT DEFAULT NULL COMMENT 'the model''s original extraction; NULL for hand-entered rows',
+    `value` TEXT DEFAULT NULL COMMENT 'the human-verified/edited final value (what gets committed)',
+    `unit` VARCHAR(32) DEFAULT NULL,
+    `ref_range` VARCHAR(64) DEFAULT NULL,
+    `abnormal_flag` VARCHAR(16) DEFAULT NULL COMMENT 'H | L | HH | LL | N | A, lab fields only',
+    `page` INT(11) DEFAULT NULL COMMENT 'source page, 1-based, for the bbox overlay',
+    `bbox_json` VARCHAR(128) DEFAULT NULL COMMENT 'JSON [x0,y0,x1,y1] normalized 0-1000 (VLM bounding box)',
+    `quote` TEXT DEFAULT NULL COMMENT 'the source snippet the value was read from (citation quote_or_value)',
+    `confidence` DECIMAL(4,3) DEFAULT NULL COMMENT 'model self-reported confidence in [0,1]; advisory only, never a gate',
+    `edited_by_user` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = human changed vlm_value during review (an extraction miss); the accuracy signal',
+    `committed_core_table` VARCHAR(64) DEFAULT NULL COMMENT 'write-back lineage: which core table this fact committed to (patient_data | procedure_result | ...)',
+    `committed_core_pk` BIGINT(20) DEFAULT NULL COMMENT 'write-back lineage: the committed core row id',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_extraction_id` (`extraction_id`),
+    UNIQUE KEY `idx_extraction_field` (`extraction_id`, `field_key`)
+) ENGINE=InnoDB COMMENT='Clinical Co-Pilot Week 2: per-field extraction (vlm_value vs human value = accuracy; page+bbox = citation)';
+#EndIf
+
+-- ============================================================================
 -- background_services row — the warm worker (I7: warmer only, failure
 -- degrades latency, never correctness). Inserted inactive; ModuleManagerListener
 -- activates it on enable() and deactivates on disable(), so the tick only ever

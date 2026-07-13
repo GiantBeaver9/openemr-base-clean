@@ -50,10 +50,19 @@ trait GeminiGenerateContentContract
             $generationConfig['thinkingConfig'] = ['thinkingBudget' => $req->thinkingBudget];
         }
 
+        // Text first, then any inline document parts (Week 2 vision). The text
+        // instruction precedes the document so the model reads "extract per this
+        // schema" before it sees the page. Week 1 calls pass no parts, so this
+        // is exactly the original single text part for them.
+        $userParts = [['text' => $req->userContent]];
+        foreach ($req->parts as $part) {
+            $userParts[] = ['inlineData' => ['mimeType' => $part->mimeType, 'data' => $part->base64Data]];
+        }
+
         return [
             'systemInstruction' => ['parts' => [['text' => $req->systemInstructions]]],
             'contents' => [
-                ['role' => 'user', 'parts' => [['text' => $req->userContent]]],
+                ['role' => 'user', 'parts' => $userParts],
             ],
             'generationConfig' => $generationConfig,
         ];

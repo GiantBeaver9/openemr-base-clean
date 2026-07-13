@@ -1,0 +1,63 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://www.open-emr.org/clinical-copilot/intake_form.schema.json",
+    "title": "Intake form extraction",
+    "description": "Strict contract for facts extracted from a patient intake form. The schema is the source of truth: raw VLM output that does not validate against this shape is rejected before anything is persisted.",
+    "type": "object",
+    "properties": {
+        "fields": {
+            "type": "array",
+            "description": "One entry per extracted intake field. Only field_key values from the enum are accepted.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "field_key": {
+                        "type": "string",
+                        "description": "Which intake fact this is.",
+                        "enum": [
+                            "first_name",
+                            "last_name",
+                            "date_of_birth",
+                            "sex",
+                            "phone",
+                            "email",
+                            "address_street",
+                            "address_city",
+                            "address_state",
+                            "address_postal",
+                            "chief_concern",
+                            "current_medications",
+                            "allergies",
+                            "family_history"
+                        ]
+                    },
+                    "value": {
+                        "type": ["string", "null"],
+                        "description": "The extracted value, or null if the field is blank/illegible on the form. Never invent a value."
+                    },
+                    "confidence": {
+                        "type": "number",
+                        "description": "Model self-reported confidence in [0,1]. Advisory only."
+                    },
+                    "page": {
+                        "type": "integer",
+                        "description": "1-based page number the value was read from."
+                    },
+                    "quote": {
+                        "type": "string",
+                        "description": "The exact text span on the page the value was read from (the citation quote)."
+                    },
+                    "bbox": {
+                        "type": "array",
+                        "description": "Bounding box [x0,y0,x1,y1] normalized to 0-1000 on each axis.",
+                        "items": { "type": "integer" },
+                        "minItems": 4,
+                        "maxItems": 4
+                    }
+                },
+                "required": ["field_key", "value", "page", "quote"]
+            }
+        }
+    },
+    "required": ["fields"]
+}

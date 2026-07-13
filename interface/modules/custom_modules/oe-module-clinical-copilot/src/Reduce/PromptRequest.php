@@ -29,6 +29,15 @@ final readonly class PromptRequest
      * @param non-empty-string $model the pinned model version string (e.g.
      *        `gemini-2.5-pro`) -- folds into `prompt_version`, a digest input
      */
+    /**
+     * @param list<InlineDataPart> $parts optional inline binary document parts
+     *        (Week 2 multimodal vision extraction). Empty for the text-only
+     *        Week 1 reduce/chat calls, so every existing caller is unchanged.
+     *        When non-empty, the Gemini mapping appends each as an `inlineData`
+     *        content part alongside the text — the seam that lets a lab PDF /
+     *        intake form be read by the model under the same strict-schema
+     *        constrained decoding as text.
+     */
     public function __construct(
         public string $systemInstructions,
         public string $userContent,
@@ -44,6 +53,7 @@ final readonly class PromptRequest
         // the provider default (dynamic); a positive int caps it. See
         // {@see PromptContext::$thinkingBudget}.
         public ?int $thinkingBudget = null,
+        public array $parts = [],
     ) {
         if ($this->systemInstructions === '') {
             throw new \DomainException('PromptRequest.systemInstructions must not be empty');

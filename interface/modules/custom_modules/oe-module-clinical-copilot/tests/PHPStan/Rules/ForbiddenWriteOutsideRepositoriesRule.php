@@ -91,6 +91,31 @@ final class ForbiddenWriteOutsideRepositoriesRule implements Rule
         'OpenEMR\\Modules\\ClinicalCopilot\\Observability\\Qa\\DocQaAnnotator',
         'OpenEMR\\Modules\\ClinicalCopilot\\Observability\\RateLimit\\CadenceConfigStore',
         'OpenEMR\\Modules\\ClinicalCopilot\\Observability\\UiEvent\\UiEventStore',
+        // Week 2: repository for the two document-ingestion staging tables
+        // (mod_copilot_extraction, mod_copilot_extracted_fact). Module-owned
+        // tables, same posture as every other repository above.
+        'OpenEMR\\Modules\\ClinicalCopilot\\Ingest\\ExtractionStore',
+    ];
+
+    /**
+     * Week 2 deliberately relaxes the Week 1 read-only invariant in EXACTLY ONE
+     * place: {@see \OpenEMR\Modules\ClinicalCopilot\Ingest\ChartWriter} is the
+     * single sanctioned seam that writes CORE OpenEMR tables (patient_data via
+     * PatientService, the procedure_order->..->procedure_result chain, the
+     * documents row). It is the "insert -> verify -> lock" lifecycle's commit
+     * step, ACL-gated and idempotent. Confining core writes to this one class is
+     * the whole point: a reviewer auditing "what can this module write to the
+     * real chart" reads exactly this class. From inside a sanctioned core writer,
+     * both raw QueryUtils writes AND host-service insert/update calls (e.g.
+     * `$patientService->insert(...)`) are permitted; from anywhere else they are
+     * not. This is the enforcement mechanism, not an assertion (ARCHITECTURE.md
+     * §4): the same rule that proved Week 1 never writes now proves Week 2 writes
+     * only here.
+     *
+     * @var list<class-string>
+     */
+    private const SANCTIONED_CORE_WRITERS = [
+        'OpenEMR\\Modules\\ClinicalCopilot\\Ingest\\ChartWriter',
     ];
 
     private const FORBIDDEN_QUERY_UTILS_METHODS = ['sqlInsert', 'sqlStatementThrowException'];
@@ -135,7 +160,7 @@ final class ForbiddenWriteOutsideRepositoriesRule implements Rule
             return [];
         }
 
-        if ($this->callingClassIsWhitelisted($scope)) {
+        if ($this->callingClassIsWhitelisted($scope) || $this->callingClassIsSanctionedCoreWriter($scope)) {
             return [];
         }
 
@@ -161,6 +186,14 @@ final class ForbiddenWriteOutsideRepositoriesRule implements Rule
 
         $methodName = $node->name->name;
         if (!in_array($methodName, self::FORBIDDEN_METHOD_NAMES, true)) {
+            return [];
+        }
+
+        // A sanctioned core writer (ChartWriter) is the one place allowed to call
+        // a host service's write method (e.g. PatientService::insert) — the
+        // deliberate Week 2 write seam. Gated by the CALLING class, so the
+        // allowance does not leak to any other call site.
+        if ($this->callingClassIsSanctionedCoreWriter($scope)) {
             return [];
         }
 
@@ -199,5 +232,15 @@ final class ForbiddenWriteOutsideRepositoriesRule implements Rule
         }
 
         return in_array(ltrim($classReflection->getName(), '\\'), self::WHITELISTED_REPOSITORIES, true);
+    }
+
+    private function callingClassIsSanctionedCoreWriter(Scope $scope): bool
+    {
+        $classReflection = $scope->getClassReflection();
+        if ($classReflection === null) {
+            return false;
+        }
+
+        return in_array(ltrim($classReflection->getName(), '\\'), self::SANCTIONED_CORE_WRITERS, true);
     }
 }
