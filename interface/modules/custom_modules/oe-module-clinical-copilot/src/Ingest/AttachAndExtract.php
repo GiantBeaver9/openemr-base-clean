@@ -72,7 +72,7 @@ final class AttachAndExtract
         $extractionId = $this->persistDraft($pid, DocType::IntakeForm, $outcome, $visionUsed, $correlationId, $userId);
         $this->storeSource($pid, $filename, $mimeType, $bytes, $extractionId);
 
-        $this->closeSpan($span, $pid, $visionUsed, $outcome);
+        $this->tracer->record($span);
 
         return new IngestResult($pid, $extractionId, DocType::IntakeForm, $visionUsed, $schemaRejected);
     }
@@ -102,7 +102,7 @@ final class AttachAndExtract
         $extractionId = $this->persistDraft($pid, DocType::LabPdf, $outcome, $visionUsed, $correlationId, $userId);
         $this->storeSource($pid, $filename, $mimeType, $bytes, $extractionId);
 
-        $this->closeSpan($span, $pid, $visionUsed, $outcome);
+        $this->tracer->record($span);
 
         return new IngestResult($pid, $extractionId, DocType::LabPdf, $visionUsed, $schemaRejected);
     }
@@ -198,9 +198,7 @@ final class AttachAndExtract
     }
 
     /**
-     * @param array<string, string|null> $unused
-     *
-     * @return array<string, string|null>
+     * @return array<string, string|null> field_key => verified value
      */
     private function demographicsFrom(ExtractionOutcome $outcome): array
     {
@@ -229,11 +227,6 @@ final class AttachAndExtract
             'ok',
             $pid,
         );
-    }
-
-    private function closeSpan(TraceSpan $span, int $pid, bool $visionUsed, ExtractionOutcome $outcome): void
-    {
-        $this->tracer->record($span);
     }
 
     private function recordChild(
