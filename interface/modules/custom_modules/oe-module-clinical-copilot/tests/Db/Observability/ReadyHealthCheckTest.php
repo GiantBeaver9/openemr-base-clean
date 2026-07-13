@@ -94,12 +94,17 @@ final class ReadyHealthCheckTest extends TestCase
 
         // ARCHITECTURE.md §3.4: "status enums only ... no latencies, no
         // config values, no PHI." Asserted structurally: the response is
-        // exactly these six string-valued keys, nothing else.
+        // exactly a boolean `ready` plus these string-valued status keys,
+        // nothing else (no latencies/config/PHI).
         self::assertEqualsCanonicalizing(
-            ['status', 'db', 'tables_writable', 'llm', 'worker_heartbeat', 'breaker'],
+            ['ready', 'status', 'db', 'tables_writable', 'llm', 'worker_heartbeat', 'breaker'],
             array_keys($result),
         );
-        foreach ($result as $value) {
+        self::assertIsBool($result['ready']);
+        foreach ($result as $key => $value) {
+            if ($key === 'ready') {
+                continue;
+            }
             self::assertIsString($value);
         }
     }
