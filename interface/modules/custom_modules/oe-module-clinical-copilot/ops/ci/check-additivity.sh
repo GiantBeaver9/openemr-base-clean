@@ -52,9 +52,10 @@ ALLOWED_SPEC_DOCS=(
   "USER.md"
   "ARCHITECTURE.md"
   "ARCHITECTURE_COMPLETE.md"
-  # Week 2 submission deliverable: the multimodal-ingestion / worker-graph /
-  # RAG / eval-gate / risks-and-tradeoffs architecture doc the spec requires
-  # at the repo root.
+  # Week 2 submission deliverables: the product requirements (blueprint) and the
+  # multimodal-ingestion / worker-graph / RAG / eval-gate / risks-and-tradeoffs
+  # architecture doc, both at the repo root.
+  "W2_PRD.md"
   "W2_ARCHITECTURE.md"
   "docs/clinical-copilot-tradeoffs.md"
   # Plain-text copies of the root deliverables, for upload/review tools that
