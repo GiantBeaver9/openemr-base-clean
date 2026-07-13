@@ -43,6 +43,10 @@ final class TraceRecorder implements TraceRecorderInterface
         // `vision_extract` is the VLM call child span; `chart_commit` is the
         // ChartWriter write (and carries the extraction-accuracy summary).
         'ingest', 'vision_extract', 'chart_commit',
+        // Week 2 deterministic orchestration. `supervisor` is the router span;
+        // each `worker` is a child span (an inspectable handoff); `retrieve` is
+        // the evidence-retrieval sub-call inside the evidence worker.
+        'supervisor', 'worker', 'retrieve',
     ];
 
     private const ALLOWED_STATUSES = ['ok', 'error', 'retried', 'degraded'];
