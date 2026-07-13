@@ -66,6 +66,7 @@
     <table class="table table-sm table-bordered">
         <thead class="thead-light">
             <tr>
+                <th style="width:2rem">#</th>
                 <th>{{ "Field"|xlt }}</th>
                 <th>{{ "Verified value"|xlt }}</th>
                 {% if is_lab %}<th>{{ "Unit"|xlt }}</th><th>{{ "Range"|xlt }}</th><th>{{ "Flag"|xlt }}</th>{% endif %}
@@ -75,7 +76,10 @@
         </thead>
         <tbody>
         {% for f in fields %}
-            <tr>
+            <tr id="ccp-row-{{ f.id|attr }}" data-field-id="{{ f.id|attr }}"
+                data-page="{{ f.page is not null ? f.page : '' }}"
+                data-bbox="{{ f.bbox ? f.bbox|join(',') : '' }}">
+                <td class="align-middle text-muted">{{ loop.index }}</td>
                 <td class="align-middle"><strong>{{ f.field_key|text }}</strong></td>
                 <td>
                     {% if locked and not is_elevated %}
@@ -112,10 +116,94 @@
                 </td>
             </tr>
         {% else %}
-            <tr><td colspan="{{ is_lab ? 6 : 4 }}" class="text-muted">{{ "No fields yet."|xlt }}</td></tr>
+            <tr><td colspan="{{ is_lab ? 7 : 5 }}" class="text-muted">{{ "No fields yet."|xlt }}</td></tr>
         {% endfor %}
         </tbody>
     </table>
+
+    {# Visual bounding-box overlay: an interactive per-page "citation map". The
+       VLM's normalized 0-1000 boxes are drawn on a proportional page, numbered
+       to the field rows above. Hover a box or row to link them; click a box to
+       jump to its field. Built from the rows' data-page/data-bbox with inline
+       SVG + vanilla JS — no external renderer, so it works for any source type. #}
+    <div class="mb-3" id="ccp-source-map"></div>
+    <script>
+    (function () {
+        var rows = Array.prototype.slice.call(document.querySelectorAll('tr[data-field-id]'));
+        var byPage = {};
+        rows.forEach(function (tr) {
+            var page = tr.getAttribute('data-page');
+            var bbox = tr.getAttribute('data-bbox');
+            if (!page || !bbox) { return; }
+            var c = bbox.split(',').map(Number);
+            if (c.length !== 4 || c.some(isNaN)) { return; }
+            var num = tr.querySelector('td') ? tr.querySelector('td').textContent.trim() : '';
+            (byPage[page] = byPage[page] || []).push({ num: num, box: c, tr: tr });
+        });
+        var pages = Object.keys(byPage).sort(function (a, b) { return a - b; });
+        var container = document.getElementById('ccp-source-map');
+        if (!container || pages.length === 0) { return; }
+        var NS = 'http://www.w3.org/2000/svg';
+        var heading = document.createElement('div');
+        heading.className = 'font-weight-bold mb-1';
+        heading.textContent = 'Source map';
+        container.appendChild(heading);
+
+        function paint(item, on) {
+            if (item.rect) {
+                item.rect.setAttribute('fill', on ? 'rgba(193,125,26,0.35)' : 'rgba(13,148,136,0.15)');
+                item.rect.setAttribute('stroke', on ? '#c17d1a' : '#0d9488');
+            }
+            item.tr.style.backgroundColor = on ? '#f6ecd7' : '';
+        }
+
+        pages.forEach(function (p) {
+            var wrap = document.createElement('div');
+            wrap.style.cssText = 'display:inline-block;margin:0 14px 12px 0;vertical-align:top;';
+            var label = document.createElement('div');
+            label.className = 'ccp-model-said';
+            label.textContent = 'Page ' + p;
+            wrap.appendChild(label);
+            var svg = document.createElementNS(NS, 'svg');
+            svg.setAttribute('width', '220');
+            svg.setAttribute('height', '285');
+            svg.setAttribute('viewBox', '0 0 1000 1294');
+            svg.style.cssText = 'border:1px solid #ced4da;border-radius:4px;background:#fff;';
+            byPage[p].forEach(function (item) {
+                var b = item.box;
+                var rect = document.createElementNS(NS, 'rect');
+                rect.setAttribute('x', b[0]);
+                rect.setAttribute('y', b[1]);
+                rect.setAttribute('width', Math.max(8, b[2] - b[0]));
+                rect.setAttribute('height', Math.max(8, b[3] - b[1]));
+                rect.setAttribute('fill', 'rgba(13,148,136,0.15)');
+                rect.setAttribute('stroke', '#0d9488');
+                rect.setAttribute('stroke-width', '3');
+                rect.style.cursor = 'pointer';
+                rect.addEventListener('mouseenter', function () { paint(item, true); });
+                rect.addEventListener('mouseleave', function () { paint(item, false); });
+                rect.addEventListener('click', function () {
+                    item.tr.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    paint(item, true);
+                    setTimeout(function () { paint(item, false); }, 1000);
+                });
+                svg.appendChild(rect);
+                var text = document.createElementNS(NS, 'text');
+                text.setAttribute('x', b[0] + 8);
+                text.setAttribute('y', b[1] + 44);
+                text.setAttribute('font-size', '44');
+                text.setAttribute('fill', '#0d9488');
+                text.textContent = item.num;
+                svg.appendChild(text);
+                item.rect = rect;
+                item.tr.addEventListener('mouseenter', function () { paint(item, true); });
+                item.tr.addEventListener('mouseleave', function () { paint(item, false); });
+            });
+            wrap.appendChild(svg);
+            container.appendChild(wrap);
+        });
+    })();
+    </script>
 
     {% if is_lab and (not locked or is_elevated) %}
         <div class="card mb-3">
