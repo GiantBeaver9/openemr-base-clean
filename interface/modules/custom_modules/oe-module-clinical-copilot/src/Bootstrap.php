@@ -85,6 +85,7 @@ class Bootstrap
             foreach ($menu as $menuItem) {
                 $menuId = $menuItem->menu_id ?? '';
                 $label = $menuItem->label ?? '';
+
                 if ($menuId === 'repimg' || $label === 'Reports') {
                     $copilotMenuItem = new stdClass();
                     $copilotMenuItem->requirement = 0;
@@ -100,18 +101,19 @@ class Bootstrap
 
                     // Week 2: intake upload — create a patient from a scanned
                     // intake form. Sits beside the synthesis page under Reports.
-                    $intakeMenuItem = new stdClass();
-                    $intakeMenuItem->requirement = 0;
-                    $intakeMenuItem->target = 'copilot_intake';
-                    $intakeMenuItem->menu_id = 'copilot_intake';
-                    $intakeMenuItem->label = xlt('Co-Pilot Intake Upload');
-                    $intakeMenuItem->url = self::MODULE_INSTALLATION_PATH . '/public/intake_upload.php';
-                    $intakeMenuItem->children = [];
-                    $intakeMenuItem->acl_req = ['patients', 'med'];
-                    $intakeMenuItem->global_req = [];
+                    $menuItem->children[] = $this->buildIntakeMenuItem('copilot_intake', xlt('Co-Pilot Intake Upload'));
+                }
 
-                    $menuItem->children[] = $intakeMenuItem;
-                    break;
+                // The intake flow CREATES a patient from a scanned form, so it
+                // also belongs in the New-patient area (the "Patient" top menu,
+                // beside New/Search) where a user goes to add a patient. Added
+                // here additively via the same MenuEvent, never by editing the
+                // core menu JSON.
+                if ($menuId === 'patimg' || $label === 'Patient') {
+                    $menuItem->children[] = $this->buildIntakeMenuItem(
+                        'copilot_intake_new',
+                        xlt('New Patient from Intake PDF'),
+                    );
                 }
             }
 
@@ -121,6 +123,27 @@ class Bootstrap
         }
 
         return $event;
+    }
+
+    /**
+     * One intake-upload menu item (create a patient from a scanned intake
+     * form → {@see \OpenEMR\Modules\ClinicalCopilot\public\intake_upload.php}).
+     * Built here so the same item can be surfaced from more than one menu
+     * (Reports and the New-patient area) without duplicating the field wiring.
+     */
+    private function buildIntakeMenuItem(string $menuId, string $label): stdClass
+    {
+        $item = new stdClass();
+        $item->requirement = 0;
+        $item->target = $menuId;
+        $item->menu_id = $menuId;
+        $item->label = $label;
+        $item->url = self::MODULE_INSTALLATION_PATH . '/public/intake_upload.php';
+        $item->children = [];
+        $item->acl_req = ['patients', 'med'];
+        $item->global_req = [];
+
+        return $item;
     }
 
     /**
