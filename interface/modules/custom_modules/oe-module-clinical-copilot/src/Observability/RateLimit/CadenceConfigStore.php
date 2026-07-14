@@ -15,6 +15,7 @@ declare(strict_types=1);
 namespace OpenEMR\Modules\ClinicalCopilot\Observability\RateLimit;
 
 use OpenEMR\Common\Database\QueryUtils;
+use OpenEMR\Modules\ClinicalCopilot\Config\LlmEnv;
 
 /**
  * `mod_copilot_cadence` is the one module ledger where UPDATE is permitted in
@@ -40,19 +41,73 @@ final class CadenceConfigStore
      */
     public function limits(): array
     {
-        $config = $this->loadConfigJson(self::LIMITS_CODE_SET);
+        return self::resolveLimits($this->loadConfigJson(self::LIMITS_CODE_SET));
+    }
 
+    /**
+     * Resolve the effective limits from a config row, applying the precedence
+     * **env var > DB config row > hard-coded default** for the four
+     * operator-facing caps (the ones the dashboard shows). Deployment-level
+     * caps belong in deployment config, so a site tunes cost/abuse limits in
+     * its Railway/Apache/PHP-FPM environment rather than editing a seeded DB
+     * row — while the seeded row (and these defaults) remain the fallback when
+     * no env var is set. Pure over its input (env read aside) so it is unit
+     * testable with no DB.
+     *
+     * @param array<string, mixed> $config
+     * @return array{
+     *     max_requests_per_minute: int, breaker_error_threshold: int,
+     *     breaker_window_seconds: int, breaker_cooldown_seconds: int,
+     *     max_active_sessions_per_user: int, max_turns_per_user_per_hour: int,
+     *     daily_llm_spend_cap_usd: float, hourly_llm_burn_cap_usd: float,
+     *     per_tick_worker_llm_budget_usd: float
+     * }
+     */
+    public static function resolveLimits(array $config): array
+    {
         return [
             'max_requests_per_minute' => (int)($config['max_requests_per_minute'] ?? 30),
             'breaker_error_threshold' => (int)($config['breaker_error_threshold'] ?? 5),
             'breaker_window_seconds' => (int)($config['breaker_window_seconds'] ?? 60),
             'breaker_cooldown_seconds' => (int)($config['breaker_cooldown_seconds'] ?? 120),
-            'max_active_sessions_per_user' => (int)($config['max_active_sessions_per_user'] ?? 3),
-            'max_turns_per_user_per_hour' => (int)($config['max_turns_per_user_per_hour'] ?? 60),
-            'daily_llm_spend_cap_usd' => (float)($config['daily_llm_spend_cap_usd'] ?? 50.0),
-            'hourly_llm_burn_cap_usd' => (float)($config['hourly_llm_burn_cap_usd'] ?? 10.0),
+            'max_active_sessions_per_user' => self::envInt(
+                'CLINICAL_COPILOT_MAX_ACTIVE_SESSIONS_PER_USER',
+                (int)($config['max_active_sessions_per_user'] ?? 3),
+            ),
+            'max_turns_per_user_per_hour' => self::envInt(
+                'CLINICAL_COPILOT_MAX_TURNS_PER_USER_PER_HOUR',
+                (int)($config['max_turns_per_user_per_hour'] ?? 60),
+            ),
+            'daily_llm_spend_cap_usd' => self::envFloat(
+                'CLINICAL_COPILOT_DAILY_LLM_SPEND_CAP_USD',
+                (float)($config['daily_llm_spend_cap_usd'] ?? 50.0),
+            ),
+            'hourly_llm_burn_cap_usd' => self::envFloat(
+                'CLINICAL_COPILOT_HOURLY_LLM_BURN_CAP_USD',
+                (float)($config['hourly_llm_burn_cap_usd'] ?? 10.0),
+            ),
             'per_tick_worker_llm_budget_usd' => (float)($config['per_tick_worker_llm_budget_usd'] ?? 2.0),
         ];
+    }
+
+    /**
+     * A positive whole-number env override, else the fallback. A blank, non-
+     * numeric, zero, or negative value falls back — a cap can never be silently
+     * disabled by a mis-set variable.
+     */
+    private static function envInt(string $env, int $fallback): int
+    {
+        $raw = trim(LlmEnv::getString($env));
+
+        return ($raw !== '' && ctype_digit($raw) && (int)$raw >= 1) ? (int)$raw : $fallback;
+    }
+
+    /** A positive numeric env override (dollars), else the fallback. */
+    private static function envFloat(string $env, float $fallback): float
+    {
+        $raw = trim(LlmEnv::getString($env));
+
+        return ($raw !== '' && is_numeric($raw) && (float)$raw > 0.0) ? (float)$raw : $fallback;
     }
 
     /**

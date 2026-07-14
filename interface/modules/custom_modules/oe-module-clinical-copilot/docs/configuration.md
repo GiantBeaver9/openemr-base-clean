@@ -58,6 +58,16 @@ a mystery, check that file before anything else.
 | `CLINICAL_COPILOT_GEMINI_API_KEY_BACKUP` | Gemini API key (optional backup) | A **second** Google AI Studio key, used only when a call on the primary key fails (bad/expired key, quota exhaustion, transient provider/transport error). On failure the request fails over to this key before degrading to the facts-only path; if it also fails, degradation proceeds as normal. Only the API-key path uses it (Vertex is unaffected); a value equal to the primary is ignored. Applies to both synthesis and chat. See {@see \OpenEMR\Modules\ClinicalCopilot\Reduce\FailoverLlmClient}. | `CLINICAL_COPILOT_GEMINI_API_KEY_BACKUP=AIza...second-key...` |
 | `CLINICAL_COPILOT_WORKER_LLM_ENABLED` | Background worker (optional) | When `true`, the `clinical_copilot_worker` cron may call Gemini for pre-visit warm, QA sweep, and QA-driven reruns. **Defaults to off** — narration runs on user-facing doc/chat/regenerate only. Set `true` only when you want headless pre-warm in production. | `CLINICAL_COPILOT_WORKER_LLM_ENABLED=true` |
 | `CLINICAL_COPILOT_TELEMETRY_RETENTION_DAYS` | Telemetry retention (optional) | Age (whole days) past which the `clinical_copilot_worker` cron prunes observability telemetry — `mod_copilot_trace`, its payload sidecar, UI-event pings, and QA verdicts (never chart, config, chat, or ingestion tables). **Defaults to `3`.** Clamped to a minimum of 1 day; blank/garbage/negative values fall back to the default, so it can never delete just-written rows. See {@see \OpenEMR\Modules\ClinicalCopilot\Observability\TelemetryRetention}. | `CLINICAL_COPILOT_TELEMETRY_RETENTION_DAYS=7` |
+| `CLINICAL_COPILOT_MAX_ACTIVE_SESSIONS_PER_USER` | Rate limit (optional) | Max concurrent chat sessions one clinician may hold. **Default `3`.** | `CLINICAL_COPILOT_MAX_ACTIVE_SESSIONS_PER_USER=10` |
+| `CLINICAL_COPILOT_MAX_TURNS_PER_USER_PER_HOUR` | Rate limit (optional) | Max chat turns per clinician per rolling hour. **Default `60`.** | `CLINICAL_COPILOT_MAX_TURNS_PER_USER_PER_HOUR=120` |
+| `CLINICAL_COPILOT_DAILY_LLM_SPEND_CAP_USD` | Cost cap (optional) | Per-site daily LLM spend cap (USD); tripping it opens the circuit breaker. **Default `50`.** | `CLINICAL_COPILOT_DAILY_LLM_SPEND_CAP_USD=100` |
+| `CLINICAL_COPILOT_HOURLY_LLM_BURN_CAP_USD` | Cost cap (optional) | Per-site hourly LLM burn cap (USD). **Default `10`.** | `CLINICAL_COPILOT_HOURLY_LLM_BURN_CAP_USD=25` |
+
+> The four caps above follow the precedence **env var → seeded DB config row
+> (`mod_copilot_cadence`) → built-in default**. A blank, zero, negative, or
+> non-numeric value is ignored (falls back), so a mis-set variable can never
+> silently disable a cap. The finer breaker knobs (error threshold, window,
+> cooldown, requests/min, per-tick worker budget) remain in the DB config row.
 
 None of these are set in this environment by default — the module ships
 configured to degrade cleanly (see below).
