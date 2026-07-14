@@ -43,18 +43,34 @@ use OpenEMR\Services\PatientService;
  */
 final class ChartWriter
 {
-    /** intake field_key => patient_data column. */
+    /**
+     * intake field_key => patient_data column. Only the demographics that map
+     * to a real patient_data column and are safe to write verbatim are here;
+     * PatientValidator (DATABASE_INSERT_CONTEXT) validates only fname/lname/sex/
+     * DOB/email, so every column below is an unvalidated free-text field and a
+     * messy handwritten value can never break patient creation. The richer
+     * intake facts (chief_concern, current_medications, allergies,
+     * family_history) stay in staging (Phase-B), as documented above.
+     */
     private const DEMOGRAPHIC_COLUMNS = [
+        'title' => 'title',
         'first_name' => 'fname',
+        'middle_name' => 'mname',
         'last_name' => 'lname',
+        'name_suffix' => 'suffix',
         'date_of_birth' => 'DOB',
         'sex' => 'sex',
+        'ssn' => 'ss',
         'phone' => 'phone_home',
+        'phone_mobile' => 'phone_cell',
+        'phone_work' => 'phone_biz',
         'email' => 'email',
         'address_street' => 'street',
+        'address_line2' => 'street_line_2',
         'address_city' => 'city',
         'address_state' => 'state',
         'address_postal' => 'postal_code',
+        'country' => 'country_code',
     ];
 
     public function __construct(private readonly PatientService $patientService)

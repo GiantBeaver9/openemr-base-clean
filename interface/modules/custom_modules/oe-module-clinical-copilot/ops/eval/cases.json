@@ -36,7 +36,7 @@
   {"id":"ref-02","category":"refusal","doc_type":"lab_pdf","raw":"","expect":{"refuse":true},"note":"empty output"},
   {"id":"ref-03","category":"refusal","doc_type":"lab_pdf","raw":"{\"foo\":1}","expect":{"refuse":true},"note":"JSON but no fields array"},
   {"id":"ref-04","category":"refusal","doc_type":"lab_pdf","raw":"{\"fields\":[{\"field_key\":\"A1c\",\"value\":\"7.8\"}]}","expect":{"refuse":true},"note":"JSON but missing citation (page/quote)"},
-  {"id":"ref-05","category":"refusal","doc_type":"intake_form","raw":"{\"fields\":[{\"field_key\":\"ssn\",\"value\":\"x\",\"page\":1,\"quote\":\"q\"}]}","expect":{"refuse":true},"note":"field_key outside intake enum"},
+  {"id":"ref-05","category":"refusal","doc_type":"intake_form","raw":"{\"fields\":[{\"field_key\":\"blood_type\",\"value\":\"x\",\"page\":1,\"quote\":\"q\"}]}","expect":{"refuse":true},"note":"field_key outside intake enum (ssn is now a collected field; blood_type is not)"},
   {"id":"ref-06","category":"refusal","doc_type":"lab_pdf","raw":"```json\n{ truncated","expect":{"refuse":true},"note":"truncated / malformed JSON"},
   {"id":"ref-07","category":"refusal","doc_type":"intake_form","raw":"{\"fields\":[{\"field_key\":\"first_name\",\"value\":\"Ada\",\"page\":\"one\",\"quote\":\"q\"}]}","expect":{"refuse":true},"note":"page not an integer"},
   {"id":"ref-08","category":"refusal","doc_type":"lab_pdf","raw":"[]","expect":{"refuse":true},"note":"array, not the object contract"},

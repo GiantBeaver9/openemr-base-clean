@@ -65,6 +65,7 @@ function renderIntakeForm(string $moduleBase, string $webRoot, string $error = '
     $twig = (new TwigContainer(dirname(__DIR__) . '/templates', OEGlobalsBag::getInstance()->getKernel()))->getTwig();
     echo $twig->render('oe-module-clinical-copilot/intake_upload.html.twig', [
         'post_url' => $moduleBase . '/intake_upload.php',
+        'pdf_url' => $moduleBase . '/intake_form_pdf.php',
         'web_root' => $webRoot,
         'error' => $error,
         'llm_configured' => LlmRuntimeConfig::llmConfigured(),
