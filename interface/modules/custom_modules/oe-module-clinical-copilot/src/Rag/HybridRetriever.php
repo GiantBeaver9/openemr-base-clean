@@ -18,17 +18,22 @@ namespace OpenEMR\Modules\ClinicalCopilot\Rag;
  * The Week 2 "keyword + dense retrieval, rerank the candidates" requirement,
  * built to degrade one layer at a time rather than all-or-nothing:
  *
- *  - Always: sparse retrieval ({@see SparseRetriever}, offline).
- *  - When a dense retriever is configured (embeddings behind credentials): fuse
- *    sparse + dense with Reciprocal Rank Fusion — order-based, so it needs no
- *    score calibration between two very different scoring schemes.
- *  - Then rerank ({@see RerankerInterface}); {@see PassthroughReranker} is the
- *    no-credentials default.
+ *  - Always: sparse keyword retrieval ({@see SparseRetriever}, offline).
+ *  - Dense retrieval fused with Reciprocal Rank Fusion — order-based, so it
+ *    needs no score calibration between two very different scoring schemes. The
+ *    DEFAULT dense retriever is {@see LocalDenseRetriever} (an offline hashing
+ *    embedding), so the fusion runs with zero credentials; a hosted embeddings
+ *    provider drops in behind the same {@see RetrieverInterface} seam.
+ *  - Then rerank ({@see RerankerInterface}). The DEFAULT is
+ *    {@see HeuristicReranker} (an offline cross-pair relevance pass — the
+ *    "Cohere rerank or equivalent"); {@see PassthroughReranker} remains the
+ *    no-op floor, and a hosted reranker swaps in behind the same seam.
  *
- * So with nothing configured this is sparse-only with a passthrough rerank —
- * real, cited evidence, no network — and each capability (dense, then rerank)
- * lights up independently as credentials are added. That is what keeps the
- * summarizer/chat augmentation working in every environment.
+ * So {@see self::createDefault()} is a full keyword + dense + rerank pipeline
+ * that runs entirely offline — real, cited evidence, no network — which is what
+ * grounds the summarizer's guideline-evidence section (the sole RAG consumer).
+ * Passing `dense: null` / a {@see PassthroughReranker} explicitly degrades a
+ * layer at a time for testing or constrained environments.
  */
 final class HybridRetriever implements RetrieverInterface
 {
@@ -44,10 +49,13 @@ final class HybridRetriever implements RetrieverInterface
 
     public static function createDefault(): self
     {
+        $corpus = GuidelineCorpus::createDefault();
+
+        // Full offline pipeline: keyword (sparse) + dense fused, then reranked.
         return new self(
-            new SparseRetriever(GuidelineCorpus::createDefault()),
-            new PassthroughReranker(),
-            null,
+            new SparseRetriever($corpus),
+            new HeuristicReranker(),
+            new LocalDenseRetriever($corpus),
         );
     }
 
