@@ -51,7 +51,10 @@
         <a href="{{ pdf_url|attr }}" target="_blank" rel="noopener" class="btn btn-outline-secondary btn-sm">
             <i class="fa fa-file-pdf-o mr-1"></i>{{ "Download blank intake form (PDF)"|xlt }}
         </a>
-        <span class="text-muted small ml-2">{{ "Print it, have the patient fill it in, then scan and upload it above."|xlt }}</span>
+        <a href="{{ pdf_url|attr }}?sample=1" target="_blank" rel="noopener" class="btn btn-outline-info btn-sm ml-2">
+            <i class="fa fa-flask mr-1"></i>{{ "Download filled SAMPLE (for testing)"|xlt }}
+        </a>
+        <div class="text-muted small mt-1">{{ "Blank: print, have the patient fill it in, then scan and upload above. Sample: synthetic test data — upload it to try extraction end-to-end without scanning."|xlt }}</div>
     </div>
 </div>
 </body>

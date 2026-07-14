@@ -90,18 +90,71 @@ final class IntakeFormTemplate
     }
 
     /**
-     * The full printable HTML document (single self-contained string, inline
-     * CSS only — mPDF renders no external assets).
+     * A fully-filled SAMPLE intake (synthetic data only, OPEN-1 — never real
+     * PHI). Rendering this and re-uploading it exercises the whole intake loop
+     * (vision extraction → review → create patient) end-to-end without anyone
+     * hand-scanning a form; because the values are typed, not handwritten,
+     * extraction is near-perfect, which makes it a clean demo. Every schema enum
+     * key has a value here (guarded by IntakeFormTemplateTest).
+     *
+     * @return array<string, string> field_key => value
      */
-    public static function html(): string
+    public static function sample(): array
     {
+        return [
+            'title' => 'Ms.',
+            'first_name' => 'Jordan',
+            'middle_name' => 'A.',
+            'last_name' => 'Rivera',
+            'name_suffix' => '',
+            'date_of_birth' => '1968-04-11',
+            'sex' => 'Female',
+            'ssn' => '521-83-0047',
+            'phone' => '(415) 555-0182',
+            'phone_mobile' => '(415) 555-0147',
+            'phone_work' => '',
+            'email' => 'jordan.rivera@example.com',
+            'address_street' => '19 Birchwood Lane',
+            'address_line2' => 'Apt 4',
+            'address_city' => 'Springfield',
+            'address_state' => 'CA',
+            'address_postal' => '94062',
+            'country' => 'USA',
+            'chief_concern' => 'Follow-up for type 2 diabetes; rising home glucose readings.',
+            'current_medications' => 'Metformin 1000mg twice daily; Lisinopril 10mg daily; Atorvastatin 20mg nightly.',
+            'allergies' => 'Penicillin (rash).',
+            'family_history' => 'Mother: type 2 diabetes. Father: hypertension, myocardial infarction at 61.',
+        ];
+    }
+
+    /**
+     * The full printable HTML document (single self-contained string, inline
+     * CSS only — mPDF renders no external assets). Pass a `field_key => value`
+     * map to render a FILLED form (e.g. {@see self::sample()}); omit it for the
+     * blank form patients hand-fill.
+     *
+     * @param array<string, string> $values
+     */
+    public static function html(array $values = []): string
+    {
+        $filled = $values !== [];
         $rows = '';
         foreach (self::sections() as $section) {
             $rows .= '<h2 class="sec">' . self::esc($section['section']) . '</h2>';
             foreach ($section['fields'] as $field) {
-                $rows .= self::fieldBlock($field['label'], $field['key'], $field['lines']);
+                $rows .= self::fieldBlock($field['label'], $field['key'], $field['lines'], $values[$field['key']] ?? null);
             }
         }
+
+        $subtitle = $filled
+            ? 'SAMPLE — synthetic data for testing the intake pipeline (not a real patient). Upload this to exercise extraction → review → create-patient end-to-end.'
+            : 'Please print clearly. Staff will scan this form; the clinical co-pilot reads it, and a staff member verifies every field before anything is saved to the chart.';
+        $foot = $filled
+            ? 'SAMPLE intake — synthetic test data only (OPEN-1). No real PHI.'
+            : 'Patient signature: _______________________________&nbsp;&nbsp;&nbsp;Date: ____________&nbsp;&nbsp;|&nbsp;&nbsp;For office use — scan &amp; upload via Patient &rarr; New Patient from Intake PDF.';
+
+        $subtitleHtml = self::esc($subtitle);
+        $footHtml = $filled ? self::esc($foot) : $foot;
 
         return <<<HTML
 <!doctype html>
@@ -114,23 +167,30 @@ final class IntakeFormTemplate
   .flabel { font-weight: bold; font-size: 10.5pt; }
   .fkey { color: #8a94a0; font-size: 8pt; }
   .line { border-bottom: 1px solid #333; height: 16px; margin-top: 3px; }
+  .answer { border-bottom: 1px solid #333; min-height: 16px; margin-top: 3px; font-size: 11pt; }
   .foot { margin-top: 16px; color: #666; font-size: 8pt; border-top: 1px solid #ccc; padding-top: 6px; }
 </style></head><body>
   <p class="title">Patient Intake Form</p>
-  <p class="subtitle">Please print clearly. Staff will scan this form; the clinical co-pilot reads it, and a staff member verifies every field before anything is saved to the chart.</p>
+  <p class="subtitle">{$subtitleHtml}</p>
   {$rows}
-  <p class="foot">Patient signature: _______________________________&nbsp;&nbsp;&nbsp;Date: ____________&nbsp;&nbsp;|&nbsp;&nbsp;For office use — scan &amp; upload via Patient &rarr; New Patient from Intake PDF.</p>
+  <p class="foot">{$footHtml}</p>
 </body></html>
 HTML;
     }
 
-    /** @return string one label + write-lines block */
-    private static function fieldBlock(string $label, string $key, int $lines): string
+    /**
+     * One label + either the printed value (filled form) or blank write-lines.
+     */
+    private static function fieldBlock(string $label, string $key, int $lines, ?string $value): string
     {
-        $linesHtml = str_repeat('<div class="line"></div>', max(1, $lines));
+        if ($value !== null && $value !== '') {
+            $body = '<div class="answer">' . self::esc($value) . '</div>';
+        } else {
+            $body = str_repeat('<div class="line"></div>', max(1, $lines));
+        }
 
         return '<div class="field"><span class="flabel">' . self::esc($label) . '</span> '
-            . '<span class="fkey">[' . self::esc($key) . ']</span>' . $linesHtml . '</div>';
+            . '<span class="fkey">[' . self::esc($key) . ']</span>' . $body . '</div>';
     }
 
     private static function esc(string $s): string

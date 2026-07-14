@@ -76,4 +76,21 @@ final class IntakeFormTemplateTest extends TestCase
             }
         }
     }
+
+    public function testSampleCoversEverySchemaKeyAndRendersAFilledForm(): void
+    {
+        $sample = IntakeFormTemplate::sample();
+
+        // Every enum key must have an entry (a realistic blank is allowed, e.g.
+        // a patient with no suffix), so a filled render never omits a field.
+        foreach ($this->schemaEnum() as $key) {
+            self::assertArrayHasKey($key, $sample, "sample is missing field {$key}");
+        }
+        // Synthetic only (OPEN-1): the sample must not carry a real-looking key
+        // outside the schema, and the filled HTML must print the sample values.
+        $html = IntakeFormTemplate::html($sample);
+        self::assertStringContainsString('Rivera', $html);
+        self::assertStringContainsString('1968-04-11', $html);
+        self::assertStringContainsString('SAMPLE', $html, 'a filled form must be marked as a sample');
+    }
 }

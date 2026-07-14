@@ -34,16 +34,22 @@ if (!AclMain::aclCheckCore('patients', 'med') || !AclMain::aclCheckCore('clinica
     exit;
 }
 
+// ?sample=1 renders a FILLED synthetic form (OPEN-1, no real PHI) so staff can
+// download it and re-upload it to exercise the whole intake pipeline end-to-end
+// without hand-scanning a form. Default is the blank form patients fill in.
+$sample = ($_GET['sample'] ?? '') !== '';
+$filename = $sample ? 'sample-intake-form.pdf' : 'patient-intake-form.pdf';
+
 try {
     $mpdf = new \Mpdf\Mpdf(Config_Mpdf::getConfigMpdf());
-    $mpdf->SetTitle('Patient Intake Form');
-    $mpdf->WriteHTML(IntakeFormTemplate::html());
+    $mpdf->SetTitle($sample ? 'Sample Patient Intake Form' : 'Patient Intake Form');
+    $mpdf->WriteHTML(IntakeFormTemplate::html($sample ? IntakeFormTemplate::sample() : []));
 
     header('Content-Type: application/pdf');
     // "inline" so it opens in the browser's PDF viewer to print; the filename is
     // used if the user chooses Save.
-    header('Content-Disposition: inline; filename="patient-intake-form.pdf"');
-    echo $mpdf->Output('patient-intake-form.pdf', \Mpdf\Output\Destination::STRING_RETURN);
+    header('Content-Disposition: inline; filename="' . $filename . '"');
+    echo $mpdf->Output($filename, \Mpdf\Output\Destination::STRING_RETURN);
 } catch (\Throwable $e) {
     (new SystemLogger())->error('ClinicalCopilot: intake form PDF generation failed', ['exception' => $e]);
     http_response_code(500);
