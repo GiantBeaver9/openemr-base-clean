@@ -19,6 +19,7 @@ use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
 use OpenEMR\Modules\ClinicalCopilot\Config\LlmEnv;
+use OpenEMR\Modules\ClinicalCopilot\Config\LlmRuntimeConfig;
 
 /**
  * "LLM provider reachable via a Vertex countTokens call (exercises
@@ -37,11 +38,15 @@ use OpenEMR\Modules\ClinicalCopilot\Config\LlmEnv;
  * only landed in `$_SERVER`/`$_ENV` or the local env file, making `/ready`
  * report `unreachable` while chat/synthesis were actually serving.)
  *
- * Scope note: this probe is deliberately Vertex-only -- it reports the health
- * of the production path. On the dev API-key fast-path
- * ({@see \OpenEMR\Modules\ClinicalCopilot\Reduce\GeminiApiLlmClient}) it
- * reports `unreachable` even though generation works; `/ready` answers "is the
- * real (Vertex) provider reachable", not "can any client generate".
+ * Scope note: this probe reports the reachability of the ACTIVE provider,
+ * whichever one {@see \OpenEMR\Modules\ClinicalCopilot\Config\LlmRuntimeConfig}
+ * would select — the Gemini API-key path (AI Studio,
+ * {@see \OpenEMR\Modules\ClinicalCopilot\Reduce\GeminiApiLlmClient}) when a key
+ * is set, else Vertex ({@see \OpenEMR\Modules\ClinicalCopilot\Reduce\VertexLlmClient})
+ * when a project is set. It previously probed Vertex only, so an API-key-only
+ * deployment (the common dev/self-host case) always read `unreachable` on
+ * `/ready` and the dashboard even while it was generating fine — now the probe
+ * hits the same provider surface the real client uses.
  *
  * No credentials configured (the honest dev/test default, per build-notes.md)
  * reports `unreachable` -- never an exception, never a 5xx on `/ready` itself
@@ -60,9 +65,61 @@ final class LlmReachabilityProbe
     }
 
     /**
+     * Reachability of the ACTIVE provider, resolved the same way the real
+     * client is ({@see LlmRuntimeConfig}): the Gemini API-key path
+     * (AI Studio) when a key is set, else Vertex when a GCP project is set,
+     * else 'unreachable' (nothing configured -> degraded-by-design). This
+     * matters because `/ready` used to probe Vertex only, so an API-key-only
+     * deployment always read 'unreachable' even while it was generating fine.
+     *
      * @return 'ok'|'unreachable'
      */
     public function probe(): string
+    {
+        if (LlmRuntimeConfig::usesGeminiApiKey()) {
+            return $this->probeGeminiApi();
+        }
+        if (LlmRuntimeConfig::usesVertex()) {
+            return $this->probeVertex();
+        }
+
+        // Nothing configured: the honest dev/test default. Degraded-by-design
+        // (facts-only), reported as 'unreachable', never an exception.
+        return 'unreachable';
+    }
+
+    /**
+     * Gemini API (AI Studio) reachability: a cheap authenticated GET of the
+     * models list with the configured key. 200 => reachable + key valid.
+     *
+     * @return 'ok'|'unreachable'
+     */
+    private function probeGeminiApi(): string
+    {
+        $apiKey = LlmEnv::geminiApiKey();
+        if ($apiKey === '') {
+            return 'unreachable';
+        }
+
+        try {
+            $client = $this->httpClient ?? new Client(['verify' => true]);
+            $client->request('GET', 'https://generativelanguage.googleapis.com/v1beta/models', [
+                'headers' => ['x-goog-api-key' => $apiKey],
+                'timeout' => self::TIMEOUT_SECONDS,
+            ]);
+
+            return 'ok';
+        } catch (GuzzleException|\Throwable) {
+            // Bad key, unreachable endpoint, or provider error all collapse to
+            // the same observable state (I6): the LLM cannot be used right now.
+            return 'unreachable';
+        }
+    }
+
+    /**
+     * @return 'ok'|'unreachable'
+     */
+    private function probeVertex(): string
     {
         // Resolve through LlmEnv (getenv -> $_SERVER -> $_ENV -> local env
         // file), identically to LlmClientFactory, so /ready's verdict matches

@@ -59,9 +59,11 @@ final class ReadyHealthCheckTest extends TestCase
     public function testReadyReportsLlmUnreachableWithNoAdcConfiguredAndDegradesTheOverallStatusWithoutFailingHardDependencies(): void
     {
         // Guard the test's own assumption: this eval only proves what it
-        // claims to prove if no GCP project is actually configured in this
-        // environment (the honest dev/test default, build-notes.md).
+        // claims to prove if NO provider is actually configured in this
+        // environment (the honest dev/test default, build-notes.md) — neither a
+        // Vertex project nor a Gemini API key, since the probe now covers both.
         self::assertSame('', trim((string)getenv('CLINICAL_COPILOT_GCP_PROJECT_ID')), 'this eval assumes no Vertex project is configured in this environment');
+        self::assertSame('', trim((string)getenv('CLINICAL_COPILOT_GEMINI_API_KEY')), 'this eval assumes no Gemini API key is configured in this environment');
 
         $result = (new ReadyCheck())->check();
 
