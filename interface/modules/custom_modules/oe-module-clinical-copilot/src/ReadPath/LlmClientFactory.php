@@ -14,7 +14,9 @@ declare(strict_types=1);
 
 namespace OpenEMR\Modules\ClinicalCopilot\ReadPath;
 
+use OpenEMR\Common\Logging\SystemLogger;
 use OpenEMR\Modules\ClinicalCopilot\Config\LlmEnv;
+use OpenEMR\Modules\ClinicalCopilot\Reduce\FailoverLlmClient;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\GeminiApiLlmClient;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\LlmClientInterface;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\VertexLlmClient;
@@ -65,7 +67,16 @@ final class LlmClientFactory
 
         $apiKey = LlmEnv::geminiApiKey();
         if ($apiKey !== '') {
-            return new GeminiApiLlmClient($apiKey);
+            $primary = new GeminiApiLlmClient($apiKey);
+            $backupKey = LlmEnv::geminiApiKeyBackup();
+            if ($backupKey !== '' && $backupKey !== $apiKey) {
+                // Optional second key: on the primary's failure (bad key, quota,
+                // transient provider/transport error) fall over to the backup
+                // before degrading to facts-only.
+                return new FailoverLlmClient([$primary, new GeminiApiLlmClient($backupKey)], new SystemLogger());
+            }
+
+            return $primary;
         }
 
         return new UnavailableLlmClient();

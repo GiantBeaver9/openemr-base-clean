@@ -57,6 +57,18 @@ final class LlmEnv
         return self::getString('CLINICAL_COPILOT_GEMINI_API_KEY');
     }
 
+    /**
+     * An OPTIONAL second Gemini API key, tried only when the primary key's call
+     * fails (bad key, quota exhaustion, transient provider/transport error).
+     * Empty/unset means "no backup" — the primary is used alone. See the
+     * failover clients ({@see \OpenEMR\Modules\ClinicalCopilot\Reduce\FailoverLlmClient},
+     * {@see \OpenEMR\Modules\ClinicalCopilot\Chat\Llm\FailoverChatLlmClient}).
+     */
+    public static function geminiApiKeyBackup(): string
+    {
+        return self::getString('CLINICAL_COPILOT_GEMINI_API_KEY_BACKUP');
+    }
+
     public static function gcpProjectId(): string
     {
         return self::getString('CLINICAL_COPILOT_GCP_PROJECT_ID');

@@ -14,6 +14,7 @@ declare(strict_types=1);
 
 namespace OpenEMR\Modules\ClinicalCopilot\Chat\Llm;
 
+use OpenEMR\Common\Logging\SystemLogger;
 use OpenEMR\Modules\ClinicalCopilot\Config\LlmEnv;
 
 /**
@@ -53,7 +54,15 @@ final class ChatLlmClientFactory
 
         $apiKey = LlmEnv::geminiApiKey();
         if ($apiKey !== '') {
-            return new GeminiApiChatLlmClient($apiKey);
+            $primary = new GeminiApiChatLlmClient($apiKey);
+            $backupKey = LlmEnv::geminiApiKeyBackup();
+            if ($backupKey !== '' && $backupKey !== $apiKey) {
+                // Optional second key: fall over to the backup on the primary's
+                // failure before degrading chat to the facts browser.
+                return new FailoverChatLlmClient([$primary, new GeminiApiChatLlmClient($backupKey)], new SystemLogger());
+            }
+
+            return $primary;
         }
 
         return new UnavailableChatLlmClient();
