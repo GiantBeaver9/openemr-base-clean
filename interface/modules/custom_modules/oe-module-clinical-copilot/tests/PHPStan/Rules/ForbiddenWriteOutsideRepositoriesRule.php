@@ -86,6 +86,10 @@ final class ForbiddenWriteOutsideRepositoriesRule implements Rule
         'OpenEMR\\Modules\\ClinicalCopilot\\Observability\\WorkerTick',
         'OpenEMR\\Modules\\ClinicalCopilot\\Observability\\TraceRecorder',
         'OpenEMR\\Modules\\ClinicalCopilot\\Observability\\TracePayloadStore',
+        // Retention pruner for the observability tables (trace, trace_payload,
+        // ui_event, qa). Module-owned telemetry; its DELETEs live behind this
+        // one typed repository, same posture as every other writer here.
+        'OpenEMR\\Modules\\ClinicalCopilot\\Observability\\TelemetryRetention',
         'OpenEMR\\Modules\\ClinicalCopilot\\Observability\\ReadyCheck',
         'OpenEMR\\Modules\\ClinicalCopilot\\Observability\\Qa\\QaStore',
         'OpenEMR\\Modules\\ClinicalCopilot\\Observability\\Qa\\DocQaAnnotator',

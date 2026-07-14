@@ -47,6 +47,7 @@ final class WorkerTick
     public function __construct(
         private readonly QaReviewer $qaReviewer,
         private readonly AlertEvaluator $alertEvaluator,
+        private readonly TelemetryRetention $telemetryRetention = new TelemetryRetention(),
     ) {
     }
 
@@ -57,7 +58,22 @@ final class WorkerTick
         return new self(
             QaReviewer::createDefault(),
             new AlertEvaluator($tracer, new LogAlertNotifier()),
+            new TelemetryRetention(),
         );
+    }
+
+    /**
+     * Housekeeping: delete observability telemetry older than the retention
+     * horizon (default 3 days, {@see TelemetryRetention}). Runs on the worker
+     * cron tick so the trace/ui-event/qa tables stay bounded without a separate
+     * crontab entry. Best-effort — a prune failure never affects serving; the
+     * caller wraps it in its own `safely()` stage.
+     *
+     * @return array<string, int> table => rows deleted
+     */
+    public function pruneTelemetry(): array
+    {
+        return $this->telemetryRetention->prune();
     }
 
     /**

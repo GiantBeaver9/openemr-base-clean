@@ -152,6 +152,17 @@ self-recover (a dead worker cannot alert on its own death). An external
 uptime probe hitting `/copilot/ready` is the recommended dead-man switch on
 top of the cron entry itself. Full detail: `ops/README.md`.
 
+The tick also runs **telemetry retention** as a housekeeping step: it prunes
+observability rows older than a retention horizon (`mod_copilot_trace`, its
+payload sidecar, UI-event pings, and QA verdicts — never chart, config, chat,
+or ingestion data), so those tables stay bounded on disk. The horizon defaults
+to **3 days** and is set with `CLINICAL_COPILOT_TELEMETRY_RETENTION_DAYS` (see
+`docs/configuration.md`). This is the module's "cron SQL job" — a date-ranged,
+index-backed `DELETE` riding the cron the module already requires, so no
+separate crontab entry or MySQL event scheduler is needed. Implemented by
+`src/Observability/TelemetryRetention.php` (a whitelisted core-write
+repository); a prune failure degrades nothing on the serving path.
+
 ## Deploy-time recommendation: a SELECT-only MySQL user
 
 Defense-in-depth layer 2 of 3 for read-only enforcement (ARCHITECTURE.md

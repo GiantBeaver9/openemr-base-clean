@@ -148,7 +148,8 @@ CREATE TABLE IF NOT EXISTS `mod_copilot_trace` (
     `user_id` BIGINT(20) DEFAULT NULL,
     `payload_ref` VARCHAR(255) DEFAULT NULL COMMENT 'pointer to full request/response payload if persisted out-of-row',
     PRIMARY KEY (`id`),
-    KEY `idx_correlation_id` (`correlation_id`)
+    KEY `idx_correlation_id` (`correlation_id`),
+    KEY `idx_started_at` (`started_at`)
 ) ENGINE=InnoDB COMMENT='Clinical Co-Pilot: append-only trace/span ledger (observability source of truth)';
 #EndIf
 
@@ -186,7 +187,8 @@ CREATE TABLE IF NOT EXISTS `mod_copilot_qa` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `idx_target` (`target_type`, `target_id`) COMMENT 'idempotent sweep: one verdict per target, ever',
     KEY `idx_correlation_id` (`correlation_id`),
-    KEY `idx_pid` (`pid`)
+    KEY `idx_pid` (`pid`),
+    KEY `idx_created_at` (`created_at`)
 ) ENGINE=InnoDB COMMENT='Clinical Co-Pilot: append-only advisory post-mortem QA verdicts (U12, T22), never a serving gate';
 #EndIf
 
@@ -208,7 +210,8 @@ CREATE TABLE IF NOT EXISTS `mod_copilot_trace_payload` (
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     UNIQUE KEY `idx_payload_ref` (`payload_ref`),
-    KEY `idx_correlation_id` (`correlation_id`)
+    KEY `idx_correlation_id` (`correlation_id`),
+    KEY `idx_created_at` (`created_at`)
 ) ENGINE=InnoDB COMMENT='Clinical Co-Pilot: append-only out-of-row trace payload storage (PHI stays in module MySQL, T16)';
 #EndIf
 
@@ -229,7 +232,8 @@ CREATE TABLE IF NOT EXISTS `mod_copilot_ui_event` (
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     KEY `idx_correlation_id` (`correlation_id`),
-    KEY `idx_event_type` (`event_type`)
+    KEY `idx_event_type` (`event_type`),
+    KEY `idx_created_at` (`created_at`)
 ) ENGINE=InnoDB COMMENT='Clinical Co-Pilot: append-only UI engagement pings (over-reliance indicators, §2.5)';
 #EndIf
 
@@ -441,4 +445,28 @@ INSERT INTO `mod_copilot_cadence` (`code_set`, `interval`, `config_json`, `versi
 #IfNotRow mod_copilot_cadence code_set threshold:triglycerides
 INSERT INTO `mod_copilot_cadence` (`code_set`, `interval`, `config_json`, `version`, `updated_at`) VALUES
     ('threshold:triglycerides', NULL, '{"value":150,"direction":"high","description":"Normal fasting triglycerides upper bound: 150 mg/dL"}', 'v1', CURRENT_TIMESTAMP());
+#EndIf
+
+-- ============================================================================
+-- Telemetry retention indexes (added after initial release). The CREATE TABLE
+-- blocks above carry these for fresh installs; these #IfNotIndex guards add
+-- them to databases that were installed before the retention job existed, so
+-- TelemetryRetention's date-ranged DELETE (default: rows older than 3 days;
+-- src/Observability/TelemetryRetention.php) stays index-backed rather than
+-- full-scanning. Idempotent: skipped when the index already exists.
+-- ============================================================================
+#IfNotIndex mod_copilot_trace idx_started_at
+ALTER TABLE `mod_copilot_trace` ADD KEY `idx_started_at` (`started_at`);
+#EndIf
+
+#IfNotIndex mod_copilot_trace_payload idx_created_at
+ALTER TABLE `mod_copilot_trace_payload` ADD KEY `idx_created_at` (`created_at`);
+#EndIf
+
+#IfNotIndex mod_copilot_ui_event idx_created_at
+ALTER TABLE `mod_copilot_ui_event` ADD KEY `idx_created_at` (`created_at`);
+#EndIf
+
+#IfNotIndex mod_copilot_qa idx_created_at
+ALTER TABLE `mod_copilot_qa` ADD KEY `idx_created_at` (`created_at`);
 #EndIf

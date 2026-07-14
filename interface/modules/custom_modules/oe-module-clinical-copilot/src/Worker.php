@@ -170,6 +170,14 @@ final class Worker
             $alertFindings = $this->tick->runAlertEvaluation();
         });
 
+        // Housekeeping (last, best-effort): prune observability telemetry older
+        // than the retention horizon (default 3 days). Keeps the trace/ui-event/
+        // qa tables bounded; a failure here degrades nothing on the serving
+        // path, so it is not threaded into WorkerTickResult.
+        $this->safely('telemetry_prune', function (): void {
+            $this->tick->pruneTelemetry();
+        });
+
         return new WorkerTickResult(
             $heartbeatOk,
             $warmOk,
