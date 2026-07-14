@@ -84,6 +84,59 @@
         </div>
     </div>
 
+    <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <strong>{{ "Evals — 50-case boolean-rubric gate"|xlt }}</strong>
+            <form method="post" action="{{ dashboard_url|attr }}" class="form-inline mb-0">
+                {# Same pinned CSRF field name as the breaker form above. #}
+                {{ csrfToken('default', 'csrf_token_form') }}
+                <input type="hidden" name="action" value="run_evals">
+                <button type="submit" class="btn btn-sm btn-primary">{{ "Run evals"|xlt }}</button>
+            </form>
+        </div>
+        <div class="card-body">
+            {% if eval_error %}
+                <div class="alert alert-danger mb-0">{{ eval_error|text }}</div>
+            {% elseif eval_result %}
+                <p class="mb-2">
+                    <span class="badge {{ eval_result.passed ? 'badge-success' : 'badge-danger' }}">
+                        {{ eval_result.passed ? "GATE PASSED"|xlt : "GATE FAILED"|xlt }}
+                    </span>
+                    <span class="text-muted small">{{ eval_result.case_count }} {{ "cases · deterministic, no live model or DB"|xlt }}</span>
+                </p>
+                <table class="table table-sm mb-2">
+                    <thead><tr><th>{{ "Rubric"|xlt }}</th><th>{{ "Pass rate"|xlt }}</th><th>{{ "Pass/Total"|xlt }}</th><th>{{ "Baseline"|xlt }}</th></tr></thead>
+                    <tbody>
+                    {% for rubric, rate in eval_result.rates %}
+                        <tr>
+                            <td>{{ rubric|text }}</td>
+                            <td>
+                                <span class="badge {{ rate >= 0.9 ? 'badge-success' : 'badge-danger' }}">{{ (rate * 100)|round(1) }}%</span>
+                            </td>
+                            <td>{{ eval_result.tally[rubric].pass }}/{{ eval_result.tally[rubric].total }}</td>
+                            <td class="text-muted">{{ eval_result.baseline[rubric] is defined ? (eval_result.baseline[rubric] * 100)|round(1) ~ '%' : '—' }}</td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% if eval_result.regressions is not empty %}
+                    <div class="alert alert-danger py-2 mb-0">
+                        <strong>{{ "Regressions"|xlt }}:</strong>
+                        <ul class="mb-0">
+                            {% for r in eval_result.regressions %}<li class="small">{{ r|text }}</li>{% endfor %}
+                        </ul>
+                    </div>
+                {% else %}
+                    <p class="text-muted small mb-0">{{ "No regressions vs. baseline."|xlt }}
+                        {% if eval_result.failures is not empty %}{{ eval_result.failures|length }} {{ "individual case failure(s) — still within tolerance."|xlt }}{% endif %}
+                    </p>
+                {% endif %}
+            {% else %}
+                <p class="text-muted mb-0">{{ "Press \"Run evals\" to run the 50-case gate now — the same deterministic engine CI uses (ops/eval/run-evals.php). No live model or database is touched."|xlt }}</p>
+            {% endif %}
+        </div>
+    </div>
+
     <div class="row">
         <div class="col-md-3"><div class="ccp-tile">
             <h6>{{ "Requests (window)"|xlt }}</h6>

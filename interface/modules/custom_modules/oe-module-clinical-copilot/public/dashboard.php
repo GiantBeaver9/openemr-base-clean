@@ -55,6 +55,10 @@ $authUser = (string)($session->get('authUser') ?? '');
 $authProvider = (string)($session->get('authProvider') ?? '');
 $configStore = new CadenceConfigStore();
 
+// Populated only when the "Run evals" button is pressed (a POST action below).
+$evalResult = null;
+$evalError = null;
+
 if ($isPost) {
     $action = (string)($_POST['action'] ?? '');
     if ($action === 'breaker_force_open') {
@@ -63,6 +67,19 @@ if ($isPost) {
     } elseif ($action === 'breaker_reset') {
         $configStore->manualReset($authUser);
         EventAuditLogger::getInstance()->newEvent('security', $authUser, $authProvider, 1, 'Clinical Co-Pilot: circuit breaker manually reset');
+    } elseif ($action === 'run_evals') {
+        // The 50-case boolean-rubric gate, on demand from the UI — the SAME
+        // deterministic engine the CLI/CI gate uses (ops/eval/run-evals.php),
+        // with no live model or DB. EvalGate lives under ops/eval/ (not src/),
+        // so require it explicitly; its src/ collaborators autoload normally.
+        require_once dirname(__DIR__) . '/ops/eval/EvalGate.php';
+        try {
+            $evalResult = (new \OpenEMR\Modules\ClinicalCopilot\Ops\Eval\EvalGate(dirname(__DIR__) . '/ops/eval'))->run();
+        } catch (\Throwable $e) {
+            $evalError = 'Eval run failed to start (see server log).';
+            (new \OpenEMR\Common\Logging\SystemLogger())->error('ClinicalCopilot: dashboard eval run failed', ['exception' => $e]);
+        }
+        EventAuditLogger::getInstance()->newEvent('security', $authUser, $authProvider, 1, 'Clinical Co-Pilot: eval gate run from dashboard');
     }
 }
 
@@ -107,6 +124,8 @@ $templateVars = [
     'payload_ref' => $payloadRef,
     'payload' => $payload,
     'payload_json' => $payloadJson,
+    'eval_result' => $evalResult,
+    'eval_error' => $evalError,
     'dashboard_url' => OEGlobalsBag::getInstance()->getWebRoot() . '/interface/modules/custom_modules/oe-module-clinical-copilot/public/dashboard.php',
 ];
 
