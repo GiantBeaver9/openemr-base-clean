@@ -42,6 +42,17 @@ final class KnowledgeBaseConfigTest extends TestCase
         );
     }
 
+    public function testWriteRoleFallsBackToTheReadUserWhenUnset(): void
+    {
+        $noWriteRole = new KnowledgeBaseConfig('h', 5432, 'kb', 'reader', 'rpw', 'require', 'guideline_chunks');
+        self::assertSame('reader', $noWriteRole->effectiveWriteUser());
+        self::assertSame('rpw', $noWriteRole->effectiveWritePassword());
+
+        $withWriteRole = new KnowledgeBaseConfig('h', 5432, 'kb', 'reader', 'rpw', 'require', 'guideline_chunks', 'writer', 'wpw');
+        self::assertSame('writer', $withWriteRole->effectiveWriteUser());
+        self::assertSame('wpw', $withWriteRole->effectiveWritePassword());
+    }
+
     public function testDsnCarriesTargetButNeverThePassword(): void
     {
         $dsn = (new KnowledgeBaseConfig('db.host', 5433, 'kb', 'u', 'sup3r-secret', 'require', 'guideline_chunks'))->dsn();

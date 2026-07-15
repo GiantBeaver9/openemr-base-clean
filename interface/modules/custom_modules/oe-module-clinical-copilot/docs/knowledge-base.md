@@ -72,11 +72,43 @@ that can grow past what ships in the repo.
 The `pdo_pgsql` PHP extension is required on the app container for the live path;
 without it (or without config) the module falls back to the offline corpus.
 
-## Growing the knowledge base
+## Adding a document (chunk-and-store, no code change)
 
-To add knowledge, extend `src/Rag/corpus/*.json` (keeping it PHI-free and
-reproducible) and re-run the seed — or load your own rows into `guideline_chunks`
-following the same column shape. Re-running the seed is safe: rows upsert by `id`.
+When a new guideline or reference comes out, push it straight in — no deploy:
+
+**Maintenance → Knowledge Base (RAG)** (top-nav, admin-gated). Upload a
+Text / Markdown / HTML / PDF / image, or paste text; set a **source** label
+(the citation, and the key that a re-upload replaces), optional title / section /
+tags, and the **chunk size** for *this* document (dense tables want small chunks,
+prose wants large — it is chosen per upload, not a global constant). Preview the
+proposed chunks, then commit.
+
+Or in bulk from the container:
+
+```bash
+# one document
+openemr-cmd e 'php .../ops/knowledge/ingest_document.php \
+    --file=/path/ada-2027.pdf --source="ADA 2027 Addendum" --tags=a1c,lipids --chunk-size=1200'
+
+# a whole folder (source defaults to each file name)
+openemr-cmd e 'php .../ops/knowledge/ingest_document.php --dir=/path/guidelines'
+```
+
+How it works: **DocumentTextExtractor** gets plain text out (text/markdown/HTML
+used directly; PDF/image transcribed via the reused Gemini vision seam — no new
+PDF dependency), **DocumentChunker** splits it on heading/paragraph boundaries at
+the chosen size with overlap and auto-detects analyte tags, and
+**KnowledgeChunkWriter** upserts the chunks in one transaction — replacing the
+document's previous chunks by `source` so a corrected version supersedes the old
+one. Writes go through a dedicated write path/role; the retrieval path stays
+SELECT-only.
+
+## Growing the knowledge base (other paths)
+
+You can also extend the in-repo `src/Rag/corpus/*.json` (keeping it PHI-free and
+reproducible) and re-run `seed_from_corpus.php`, or load your own rows into
+`guideline_chunks` following the same column shape. Re-running the seed is safe:
+rows upsert by `id`.
 
 ## Verifying
 

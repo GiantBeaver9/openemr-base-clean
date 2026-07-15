@@ -48,6 +48,13 @@ final readonly class KnowledgeBaseConfig
         public string $password,
         public string $sslMode,
         public string $table,
+        // Optional dedicated write role. The retrieval path (the summarizer) uses
+        // the plain user above and only ever SELECTs; the ingestion path can use
+        // this insert-capable role instead, so a deployment can grant the read
+        // user SELECT-only and keep write privilege on a separate credential.
+        // Blank ⇒ ingestion reuses the read user/password.
+        public string $writeUser = '',
+        public string $writePassword = '',
     ) {
     }
 
@@ -57,8 +64,11 @@ final readonly class KnowledgeBaseConfig
         $table = LlmEnv::getString('CLINICAL_COPILOT_KNOWLEDGE_TABLE');
         $table = $table !== '' ? $table : 'guideline_chunks';
 
+        $writeUser = LlmEnv::getString('CLINICAL_COPILOT_KNOWLEDGE_DB_WRITE_USER');
+        $writePassword = LlmEnv::getString('CLINICAL_COPILOT_KNOWLEDGE_DB_WRITE_PASSWORD');
+
         if ($url !== '') {
-            return self::fromUrl($url, $table);
+            return self::fromUrl($url, $table, $writeUser, $writePassword);
         }
 
         $port = LlmEnv::getString('CLINICAL_COPILOT_KNOWLEDGE_DB_PORT');
@@ -72,7 +82,20 @@ final readonly class KnowledgeBaseConfig
             password: LlmEnv::getString('CLINICAL_COPILOT_KNOWLEDGE_DB_PASSWORD'),
             sslMode: $sslMode !== '' ? $sslMode : 'prefer',
             table: $table,
+            writeUser: $writeUser,
+            writePassword: $writePassword,
         );
+    }
+
+    /** The role ingestion writes with — the dedicated write user if set, else the read user. */
+    public function effectiveWriteUser(): string
+    {
+        return $this->writeUser !== '' ? $this->writeUser : $this->user;
+    }
+
+    public function effectiveWritePassword(): string
+    {
+        return $this->writeUser !== '' ? $this->writePassword : $this->password;
     }
 
     /**
@@ -81,7 +104,7 @@ final readonly class KnowledgeBaseConfig
      * settings. A malformed URL yields an unconfigured (blank-host) config, which
      * simply degrades to the offline corpus rather than throwing on a page load.
      */
-    private static function fromUrl(string $url, string $table): self
+    private static function fromUrl(string $url, string $table, string $writeUser = '', string $writePassword = ''): self
     {
         $parts = parse_url($url);
         if ($parts === false || !isset($parts['host'])) {
@@ -99,6 +122,8 @@ final readonly class KnowledgeBaseConfig
             password: isset($parts['pass']) ? rawurldecode($parts['pass']) : '',
             sslMode: $sslMode,
             table: $table,
+            writeUser: $writeUser,
+            writePassword: $writePassword,
         );
     }
 
