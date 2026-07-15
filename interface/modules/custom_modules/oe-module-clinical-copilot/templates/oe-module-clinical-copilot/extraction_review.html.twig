@@ -20,12 +20,17 @@
         .ccp-edited { color: #b8860b; }
         .ccp-model-said { font-size: 0.85em; color: #6c757d; }
         .ccp-cite { font-size: 0.85em; }
-        .ccp-source-frame { width: 100%; height: 420px; border: 1px solid #ced4da; border-radius: .25rem; }
+        .ccp-source-frame { width: 100%; height: 100%; min-height: 520px; border: 1px solid #ced4da; border-radius: .25rem; background: #fff; }
         .ccp-accuracy { font-variant-numeric: tabular-nums; }
+        @media (min-width: 992px) {
+            .ccp-review-wrap { height: calc(100vh - 220px); }
+            .ccp-pane { height: 100%; overflow-y: auto; }
+            .ccp-pdf-pane { position: sticky; top: 0; }
+        }
     </style>
 </head>
 <body class="body_top">
-<div class="container-fluid mt-3" style="max-width: 1040px;">
+<div class="container-fluid mt-3">
 
     {% if not found %}
         <div class="alert alert-danger" role="alert">{{ "That extraction could not be found."|xlt }}</div>
@@ -56,12 +61,19 @@
         </div>
     </div>
 
-    {% if source_view_url %}
-        <details class="mb-3">
-            <summary class="text-primary" style="cursor: pointer;">{{ "Show source document"|xlt }}</summary>
-            <iframe class="ccp-source-frame mt-2" src="{{ source_view_url|attr }}" title="{{ "Source document"|xlt }}"></iframe>
-        </details>
+    {# When extraction found nothing (degraded model, or a page it could not
+       read), the reviewer still gets the rows structure to hand-enter against
+       the document on the right — not a silent empty screen. #}
+    {% if is_lab and fields is empty %}
+        <div class="alert alert-info py-2">
+            <i class="fa fa-info-circle mr-1"></i>{{ "No lab values were extracted from this document. Enter the results manually below and verify them against the document on the right."|xlt }}
+        </div>
     {% endif %}
+
+    {# Two-pane review: extracted rows to verify (left) alongside the source
+       document (right), so each value is checked against the page it came from. #}
+    <div class="row ccp-review-wrap">
+    <div class="col-lg-7 ccp-pane">
 
     <table class="table table-sm table-bordered">
         <thead class="thead-light">
@@ -223,7 +235,22 @@
         </div>
     {% endif %}
 
-    <div class="d-flex align-items-center justify-content-between">
+    </div>{# /left pane #}
+
+    {# RIGHT: the source document, prominent and scrollable (native PDF viewer),
+       always shown so the reviewer reads each value off the page. #}
+    <div class="col-lg-5 ccp-pane ccp-pdf-pane">
+        <div class="font-weight-bold mb-1 small text-muted">{{ "Source document"|xlt }}</div>
+        {% if source_view_url %}
+            <iframe class="ccp-source-frame" src="{{ source_view_url|attr }}" title="{{ 'Source document'|attr }}"></iframe>
+        {% else %}
+            <div class="alert alert-secondary mb-0">{{ "The source document is not available for this extraction (it may not have been stored). Verify the values against your copy."|xlt }}</div>
+        {% endif %}
+    </div>
+
+    </div>{# /row #}
+
+    <div class="d-flex align-items-center justify-content-between mt-3">
         <a href="{{ patient_url|attr }}" class="btn btn-outline-secondary">
             <i class="fa fa-user mr-1"></i>{{ "Go to patient"|xlt }}
         </a>
