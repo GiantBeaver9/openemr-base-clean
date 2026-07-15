@@ -87,6 +87,26 @@ final readonly class GuidelineChunk
     }
 
     /**
+     * The inverse of {@see fromArray()} — a round-trippable representation used to
+     * carry a proposed chunk through the ingestion review step (hidden form field)
+     * without re-transcribing the source document on commit.
+     *
+     * @return array{id: string, title: string, source: string, section: string, text: string, tags: list<string>, url: string|null}
+     */
+    public function toArray(): array
+    {
+        return [
+            'id' => $this->id,
+            'title' => $this->title,
+            'source' => $this->source,
+            'section' => $this->section,
+            'text' => $this->text,
+            'tags' => $this->tags,
+            'url' => $this->url,
+        ];
+    }
+
+    /**
      * @param array<string, mixed> $data
      */
     private static function stringField(array $data, string $key): string

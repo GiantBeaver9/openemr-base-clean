@@ -1,0 +1,93 @@
+{#
+# Clinical Co-Pilot -- intake review (deferred-save): prefilled new-patient
+# fields on the left, the source PDF on the right, all sections expanded. The
+# human edits and clicks Save; only then is the patient created.
+#
+# Autoescape is globally OFF for this project -- every dynamic value is
+# explicitly escaped with |text/|attr/|xlt.
+#
+# @package   OpenEMR
+# @link      https://www.open-emr.org
+# @author    Clinical Co-Pilot Team
+# @copyright Copyright (c) 2026 OpenEMR Foundation
+# @license   https://github.com/openemr/openemr/blob/master/LICENSE GNU General Public License 3
+#}
+<html>
+<head>
+    <title>{{ "Clinical Co-Pilot -- New patient from intake"|xlt }}</title>
+    {{ setupHeader() }}
+    <style>
+        .ccp-intake-wrap { height: calc(100vh - 90px); }
+        .ccp-intake-col { height: 100%; overflow-y: auto; }
+        .ccp-pdf-frame { width: 100%; height: 100%; border: 1px solid #dee2e6; border-radius: 4px; }
+        .ccp-intake-form .form-group { margin-bottom: 0.5rem; }
+        .ccp-sec { border-bottom: 1px solid #dee2e6; margin: 1rem 0 0.5rem; padding-bottom: 0.25rem; color: #495057; }
+    </style>
+</head>
+<body class="body_top">
+<div class="container-fluid mt-2">
+    <h5 class="mb-2">
+        <i class="fa fa-user-plus mr-1"></i>{{ "New patient from intake -- review &amp; save"|xlt }}
+        <small class="text-muted">{{ "Verify the fields against the document on the right, then Save to create the patient."|xlt }}</small>
+    </h5>
+
+    {% if errors is not empty %}
+        <div class="alert alert-danger py-2">
+            <strong>{{ "The patient was not saved:"|xlt }}</strong>
+            <ul class="mb-0">{% for e in errors %}<li>{{ e|text }}</li>{% endfor %}</ul>
+        </div>
+    {% endif %}
+
+    <form method="POST" action="{{ post_url|attr }}" id="ccpIntakeForm">
+        {{ csrfToken('default', 'csrf_token_form') }}
+        <input type="hidden" name="action" value="save">
+        <input type="hidden" name="pdf_b64" value="{{ pdf_b64|attr }}">
+        <input type="hidden" name="pdf_mime" value="{{ pdf_mime|attr }}">
+        <input type="hidden" name="pdf_name" value="{{ pdf_name|attr }}">
+
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <span class="text-muted small">{{ "Nothing is saved until you click Save."|xlt }}</span>
+            <button type="submit" class="btn btn-success"><i class="fa fa-save mr-1"></i>{{ "Save new patient"|xlt }}</button>
+        </div>
+
+        <div class="row ccp-intake-wrap">
+            {# LEFT: reused new-patient fields, prefilled, all sections expanded. #}
+            <div class="col-md-6 ccp-intake-col ccp-intake-form">
+                {% for group in groups %}
+                    <div class="ccp-sec"><strong>{{ group.section|xlt }}</strong></div>
+                    {% for f in group.fields %}
+                        <div class="form-group">
+                            <label class="mb-0 small" for="ccp_{{ f.key|attr }}">{{ f.label|xlt }}</label>
+                            {% if f.key == 'sex' %}
+                                <select class="form-control form-control-sm" id="ccp_{{ f.key|attr }}" name="field[{{ f.key|attr }}]">
+                                    <option value=""></option>
+                                    {% for opt in sex_options %}
+                                        <option value="{{ opt|attr }}"{{ f.value == opt ? ' selected' : '' }}>{{ opt|text }}</option>
+                                    {% endfor %}
+                                </select>
+                            {% elseif not f.is_demographic and f.lines > 1 %}
+                                <textarea class="form-control form-control-sm" id="ccp_{{ f.key|attr }}" name="field[{{ f.key|attr }}]" rows="{{ f.lines }}">{{ f.value|text }}</textarea>
+                            {% else %}
+                                <input type="text" class="form-control form-control-sm" id="ccp_{{ f.key|attr }}" name="field[{{ f.key|attr }}]" value="{{ f.value|attr }}">
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                {% endfor %}
+                <div class="text-muted small mt-2">
+                    {{ "Allergies and medications are saved to the chart lists on Save. Chief concern and family history are shown here for your review but are not written to the chart."|xlt }}
+                </div>
+            </div>
+
+            {# RIGHT: the uploaded source document, scrollable. #}
+            <div class="col-md-6 ccp-intake-col">
+                <iframe class="ccp-pdf-frame" src="{{ pdf_data_uri|attr }}" title="{{ 'Uploaded intake document'|attr }}"></iframe>
+            </div>
+        </div>
+
+        <div class="text-right my-2">
+            <button type="submit" class="btn btn-success"><i class="fa fa-save mr-1"></i>{{ "Save new patient"|xlt }}</button>
+        </div>
+    </form>
+</div>
+</body>
+</html>

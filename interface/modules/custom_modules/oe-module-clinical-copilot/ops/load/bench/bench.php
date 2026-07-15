@@ -297,6 +297,16 @@ function run_matrix_cell(
  * latency until the time box (or iteration count) is hit; write its samples
  * and its own resource accounting to a JSON file for the parent to merge.
  *
+ * Latency samples are systematically downsampled to a fixed cap (default
+ * 10,000/worker). A hot path can turn out tens of millions of ops in a
+ * duration cell; storing every sample — then merging 50 workers' worth and
+ * sorting for percentiles in the parent — exhausts the container's 512 MB.
+ * We keep a bounded reservoir by uniform decimation: record every `stride`-th
+ * op, and whenever the buffer fills, halve it (drop every other sample) and
+ * double the stride. That preserves an even spread across the whole run, so
+ * the percentiles stay representative while the op COUNT (throughput) stays
+ * exact — it is incremented on every op regardless of sampling.
+ *
  * @param callable(): (callable(): void) $setup
  */
 function run_worker(callable $setup, float $duration, int $itersPerWorker, int $warmup, string $outFile): void
@@ -307,13 +317,34 @@ function run_worker(callable $setup, float $duration, int $itersPerWorker, int $
         $op();
     }
 
+    $maxSamples = 10000;
     $latencies = [];
+    $stride = 1;
+    $sinceKept = 0;
     $ops = 0;
+
+    $record = static function (float $latencyMs) use (&$latencies, &$stride, &$sinceKept, $maxSamples): void {
+        if (++$sinceKept < $stride) {
+            return;
+        }
+        $sinceKept = 0;
+        $latencies[] = $latencyMs;
+        if (count($latencies) >= $maxSamples) {
+            $halved = [];
+            $n = count($latencies);
+            for ($k = 0; $k < $n; $k += 2) {
+                $halved[] = $latencies[$k];
+            }
+            $latencies = $halved;
+            $stride *= 2;
+        }
+    };
+
     if ($itersPerWorker > 0) {
         for ($i = 0; $i < $itersPerWorker; $i++) {
             $t = hrtime(true);
             $op();
-            $latencies[] = (hrtime(true) - $t) / 1e6; // ns -> ms
+            $record((hrtime(true) - $t) / 1e6); // ns -> ms
             $ops++;
         }
     } else {
@@ -321,7 +352,7 @@ function run_worker(callable $setup, float $duration, int $itersPerWorker, int $
         while (hrtime(true) < $deadlineNs) {
             $t = hrtime(true);
             $op();
-            $latencies[] = (hrtime(true) - $t) / 1e6;
+            $record((hrtime(true) - $t) / 1e6);
             $ops++;
         }
     }

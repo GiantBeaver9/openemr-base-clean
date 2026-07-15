@@ -66,9 +66,6 @@ class Bootstrap
      * failure to locate the Reports menu or build the item is logged and
      * swallowed rather than breaking the host menu (I6/I7 style degradation
      * — this module must never take down core navigation).
-     *
-     * @param MenuEvent $event
-     * @return MenuEvent
      */
     public function addCustomMenuItem(MenuEvent $event): MenuEvent
     {
@@ -117,6 +114,15 @@ class Bootstrap
                 }
             }
 
+            // Week 2 Maintenance: knowledge-base curation (chunk a guideline into
+            // the RAG store) and observability are administrative tasks, so they
+            // get their own top-level menu, gated on the host admin section rather
+            // than the clinician ACL used above. Appended additively — the core
+            // menu JSON is never edited.
+            if (AclMain::aclCheckCore('admin', 'super') || AclMain::aclCheckCore('admin', 'users')) {
+                $menu[] = $this->buildMaintenanceMenu();
+            }
+
             $event->setMenu($menu);
         } catch (\Throwable $e) {
             $this->logger->error('ClinicalCopilot: failed to register menu item', ['error' => $e->getMessage()]);
@@ -141,6 +147,45 @@ class Bootstrap
         $item->url = self::MODULE_INSTALLATION_PATH . '/public/intake_upload.php';
         $item->children = [];
         $item->acl_req = ['patients', 'med'];
+        $item->global_req = [];
+
+        return $item;
+    }
+
+    /**
+     * The top-level "Co-Pilot Maintenance" menu: knowledge-base ingestion (chunk
+     * a guideline/reference into the RAG store) and the observability dashboard.
+     * Admin-gated, since these are curation/operations tasks rather than clinical
+     * ones. Built as its own top-level entry so it reads clearly in the nav.
+     */
+    private function buildMaintenanceMenu(): stdClass
+    {
+        $menu = new stdClass();
+        $menu->requirement = 0;
+        $menu->target = 'cpmaint';
+        $menu->menu_id = 'cpmaint';
+        $menu->label = xlt('Co-Pilot Maintenance');
+        $menu->url = '';
+        $menu->children = [
+            $this->buildMaintenanceItem('cpmaint_kb', xlt('Knowledge Base (RAG)'), '/public/knowledge_upload.php'),
+            $this->buildMaintenanceItem('cpmaint_obs', xlt('Observability Dashboard'), '/public/dashboard.php'),
+        ];
+        $menu->acl_req = ['admin', 'users'];
+        $menu->global_req = [];
+
+        return $menu;
+    }
+
+    private function buildMaintenanceItem(string $menuId, string $label, string $relativeUrl): stdClass
+    {
+        $item = new stdClass();
+        $item->requirement = 0;
+        $item->target = $menuId;
+        $item->menu_id = $menuId;
+        $item->label = $label;
+        $item->url = self::MODULE_INSTALLATION_PATH . $relativeUrl;
+        $item->children = [];
+        $item->acl_req = ['admin', 'users'];
         $item->global_req = [];
 
         return $item;

@@ -26,6 +26,7 @@ use OpenEMR\Common\Logging\EventAuditLogger;
 use OpenEMR\Common\Session\SessionWrapperFactory;
 use OpenEMR\Common\Twig\TwigContainer;
 use OpenEMR\Core\OEGlobalsBag;
+use OpenEMR\Modules\ClinicalCopilot\Knowledge\KnowledgeBaseStatus;
 use OpenEMR\Modules\ClinicalCopilot\Observability\Metrics\MetricsService;
 use OpenEMR\Modules\ClinicalCopilot\Observability\RateLimit\CadenceCircuitBreaker;
 use OpenEMR\Modules\ClinicalCopilot\Observability\RateLimit\CadenceConfigStore;
@@ -86,9 +87,10 @@ if ($isPost) {
         EventAuditLogger::getInstance()->newEvent('security', $authUser, $authProvider, 1, 'Clinical Co-Pilot: eval gate run from dashboard');
     } elseif ($action === 'run_load_test') {
         // In-process concurrency bench at 50 workers (real CPU/latency/throughput
-        // of the module's hot paths). Real OS-process concurrency needs pcntl,
-        // which is CLI-only — so shell out to the CLI bench and read its JSON.
-        // A short, bounded burst; the daily/hourly $ caps + breaker are untouched.
+        // of the module's hot paths). The CLI bench spawns its workers via
+        // proc_open (no pcntl needed — it runs in the OpenEMR/Railway container),
+        // so shell out to it and read its JSON. A short, bounded burst; the
+        // daily/hourly $ caps + breaker are untouched.
         $benchScript = dirname(__DIR__) . '/ops/load/bench/bench.php';
         $cmd = 'php ' . escapeshellarg($benchScript)
             . ' guideline_retrieval_sparse verify_chat --concurrency=50 --duration=4 --warmup=100 --json 2>/dev/null';
@@ -97,7 +99,7 @@ if ($isPost) {
         if (is_array($decoded) && $decoded !== []) {
             $loadTestResult = $decoded;
         } else {
-            $loadTestError = 'Load test could not run (needs CLI php with pcntl and shell_exec enabled). Run it from a shell: ops/load/bench/bench.php ... --concurrency=50.';
+            $loadTestError = 'Load test could not run (needs CLI php with shell_exec enabled). Run it from a shell: ops/load/bench/run-load-test.sh.';
         }
         EventAuditLogger::getInstance()->newEvent('security', $authUser, $authProvider, 1, 'Clinical Co-Pilot: in-process load test run from dashboard');
     } elseif ($action === 'enable_load_test') {
@@ -157,6 +159,23 @@ foreach (CheckId::cases() as $check) {
 
 $dashboardUrl = OEGlobalsBag::getInstance()->getWebRoot() . '/interface/modules/custom_modules/oe-module-clinical-copilot/public/dashboard.php';
 
+// Self-referential URL that carries THIS session's already-resolved site id.
+// Two 400-avoidance properties, both hinging on it being the session's OWN
+// site (never a hardcoded guess):
+//   1. It always equals $_SESSION['site_id'], so globals.php's multisite guard
+//      (interface/globals.php:305) can never clear the session on a mismatch —
+//      the earlier bug where a hardcoded ?site=default cleared a non-default
+//      session, cascading every later POST into a MissingSiteIdException (a
+//      BadRequestHttpException => HTTP 400).
+//   2. On the unattended auto-refresh, if the session HAS since expired, the
+//      site param lets globals resolve the site and redirect to the login
+//      screen (clean) instead of throwing that 400.
+$currentSite = (string)($session->get('site_id') ?? '');
+if ($currentSite === '' || preg_match('/[^A-Za-z0-9\-.]/', $currentSite) === 1) {
+    $currentSite = 'default';
+}
+$dashboardUrlSite = $dashboardUrl . '?site=' . rawurlencode($currentSite);
+
 $templateVars = [
     'window_hours' => $windowHours,
     'metrics' => $metrics,
@@ -166,6 +185,9 @@ $templateVars = [
     'breaker' => (new CadenceCircuitBreaker())->snapshot(),
     'limits' => $configStore->limits(),
     'ready' => (new ReadyCheck())->check(),
+    // The separate, PHI-free medical-knowledge store the summarizer's RAG pulls
+    // from (or 'not_configured' => running on the in-repo offline corpus).
+    'knowledge' => KnowledgeBaseStatus::createDefault()->snapshot(),
     'requests' => $metricsService->requestList($kindFilter, $statusFilter, 100),
     'kind_filter' => $kindFilter,
     'status_filter' => $statusFilter,
@@ -181,11 +203,12 @@ $templateVars = [
     'load_test_error' => $loadTestError,
     'load_test_mode' => $configStore->loadTestMode(),
     'dashboard_url' => $dashboardUrl,
-    // Auto-refresh cadence. Low-volume app, so 2 minutes (not 30s). The refresh
-    // targets the BARE dashboard URL (no ?site, no drill-down params) — the same
-    // thing the manual Refresh button loads and known to work — so it can never
-    // trip OpenEMR's site-id / multisite session guard the way the earlier
-    // ?site-carrying refresh did.
+    // Same URL plus this session's own resolved site id — used for the
+    // unattended auto-refresh and the POST forms so neither can 400 on an
+    // expired/mismatched session (see $dashboardUrlSite above). Drill-down GET
+    // links keep the bare URL: they only fire inside an active session.
+    'dashboard_url_site' => $dashboardUrlSite,
+    // Auto-refresh cadence. Low-volume app, so 2 minutes (not 30s).
     'refresh_seconds' => 120,
 ];
 
