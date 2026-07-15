@@ -172,7 +172,13 @@ final class ExtractionSchema
             );
         }
 
-        return new ParsedExtraction($docType, $fields);
+        // Top-level document-header identity (labs carry patient_name/patient_dob
+        // so the report can be matched to the chart it is uploaded onto). Intake
+        // schemas have no such keys, so these stay null there.
+        $patientName = is_string($payload['patient_name'] ?? null) ? $payload['patient_name'] : null;
+        $patientDob = is_string($payload['patient_dob'] ?? null) ? $payload['patient_dob'] : null;
+
+        return new ParsedExtraction($docType, $fields, $patientName, $patientDob);
     }
 
     /**

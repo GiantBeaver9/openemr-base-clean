@@ -5,6 +5,14 @@
     "description": "Strict contract for discrete results extracted from a scanned lab report. Every result is one field; field_key is the test name. The schema is the source of truth: raw VLM output that does not validate against this shape is rejected before anything is persisted.",
     "type": "object",
     "properties": {
+        "patient_name": {
+            "type": ["string", "null"],
+            "description": "The full patient name printed on the report header exactly as shown (e.g. \"Doe, Jane A.\"), or null if not printed. Used only to confirm the report belongs to the chart it is uploaded onto — never invent it."
+        },
+        "patient_dob": {
+            "type": ["string", "null"],
+            "description": "The patient date of birth printed on the report in YYYY-MM-DD, or null if not printed. Used only to confirm patient identity — never invent it."
+        },
         "collection_date": {
             "type": ["string", "null"],
             "description": "The specimen collection date for this report in YYYY-MM-DD, or null if not printed."

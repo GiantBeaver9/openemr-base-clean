@@ -61,6 +61,28 @@
         </div>
     </div>
 
+    {# PHI-mixing guard: a lab report is uploaded onto THIS chart, but the file
+       names a patient. If the document-header name/DOB disagree, this may be the
+       wrong person's results — a loud, persistent alert on every review load
+       (mismatch = danger; could-not-confirm = warning; confirmed = quiet
+       reassurance). identity_status is null for non-lab / no-vision drafts. #}
+    {% if is_lab and identity_status == 'mismatch' %}
+        <div class="alert alert-danger" role="alert">
+            <h5 class="alert-heading mb-1"><i class="fa fa-exclamation-triangle mr-1"></i>{{ "Patient identity does not match this chart"|xlt }}</h5>
+            <p class="mb-1">{{ "The patient named on this document does not match the chart it is being uploaded onto. These results may belong to a different patient — do NOT lock them until you have confirmed this report is for the correct patient."|xlt }}</p>
+            {% if identity_detail %}<div class="small">{{ identity_detail|text }}</div>{% endif %}
+        </div>
+    {% elseif is_lab and identity_status == 'unknown' %}
+        <div class="alert alert-warning" role="alert">
+            <i class="fa fa-question-circle mr-1"></i>{{ "The patient identity on this document could not be confirmed against this chart. Verify these results belong to this patient before locking."|xlt }}
+            {% if identity_detail %}<div class="small mt-1">{{ identity_detail|text }}</div>{% endif %}
+        </div>
+    {% elseif is_lab and identity_status == 'match' %}
+        <div class="alert alert-success py-2" role="alert">
+            <i class="fa fa-check-circle mr-1"></i>{{ "Patient name and date of birth on the document match this chart."|xlt }}
+        </div>
+    {% endif %}
+
     {# When extraction found nothing (degraded model, or a page it could not
        read), the reviewer still gets the rows structure to hand-enter against
        the document on the right — not a silent empty screen. #}

@@ -100,7 +100,10 @@ final class ExtractionClient
             DocType::LabPdf =>
                 'Extract every discrete lab result from this report. For each result capture the test '
                 . 'name (field_key), value, unit, reference range, and abnormal flag exactly as '
-                . 'printed. Also capture the specimen collection_date if present.',
+                . 'printed. Also capture the specimen collection_date if present. From the report '
+                . 'header capture the patient_name and patient_dob (YYYY-MM-DD) exactly as printed, or '
+                . 'null if absent — these identify whose results these are so the report can be '
+                . 'matched to the correct chart. Never invent an identity value.',
         };
     }
 }

@@ -148,6 +148,16 @@ final class AttachAndExtract
         $extractionId = $this->persistDraft($pid, DocType::LabPdf, $outcome, $visionUsed, $correlationId, $userId);
         $this->storeSource($pid, $filename, $mimeType, $bytes, $extractionId);
 
+        // PHI-mixing guard: a lab report is uploaded ONTO a chart, but the file
+        // itself names a patient. Match the document-header name/DOB to the chart
+        // and record the verdict so the review screen can alert the uploader if
+        // they disagree. Only when vision actually ran (a blank/degraded draft has
+        // no identity to check); never fatal — a failure here must not block the
+        // upload the reviewer still needs to verify by eye.
+        if ($visionUsed) {
+            $this->recordLabIdentity($pid, $extractionId, $outcome->extraction);
+        }
+
         $this->tracer->record($span);
 
         return new IngestResult($pid, $extractionId, DocType::LabPdf, $visionUsed, $schemaRejected);
@@ -221,6 +231,31 @@ final class AttachAndExtract
         }
 
         return $extractionId;
+    }
+
+    /**
+     * Computes and persists the lab-identity guard verdict for one extraction.
+     * Best-effort: any failure is logged and swallowed so a hiccup reading the
+     * chart never blocks an upload the reviewer must still verify by hand.
+     */
+    private function recordLabIdentity(int $pid, int $extractionId, ParsedExtraction $extraction): void
+    {
+        try {
+            $chart = $this->chartWriter->fetchPatientIdentity($pid) ?? ['first' => null, 'last' => null, 'dob' => null];
+            $match = LabIdentityMatcher::compare(
+                $chart['first'],
+                $chart['last'],
+                $chart['dob'],
+                $extraction->patientName,
+                $extraction->patientDob,
+            );
+            $this->store->setIdentity($extractionId, $match->status, $match->detail());
+        } catch (\Throwable $e) {
+            (new SystemLogger())->error('ClinicalCopilot: lab identity check failed', [
+                'extraction_id' => $extractionId,
+                'exception' => $e,
+            ]);
+        }
     }
 
     private function storeSource(int $pid, string $filename, string $mimeType, string $bytes, int $extractionId): void

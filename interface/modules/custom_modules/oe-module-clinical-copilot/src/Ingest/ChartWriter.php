@@ -128,6 +128,30 @@ final class ChartWriter
     }
 
     /**
+     * Reads the chart's identifying fields for the lab-upload identity guard: the
+     * first/last name and DOB the uploaded report is checked against. Read-only
+     * (never a write), scoped to one pid; returns null if the patient is missing.
+     *
+     * @return array{first: ?string, last: ?string, dob: ?string}|null
+     */
+    public function fetchPatientIdentity(int $pid): ?array
+    {
+        $row = QueryUtils::querySingleRow(
+            'SELECT `fname`, `lname`, `DOB` FROM `patient_data` WHERE `pid` = ?',
+            [$pid],
+        );
+        if (!is_array($row)) {
+            return null;
+        }
+
+        return [
+            'first' => isset($row['fname']) && $row['fname'] !== null ? (string)$row['fname'] : null,
+            'last' => isset($row['lname']) && $row['lname'] !== null ? (string)$row['lname'] : null,
+            'dob' => isset($row['DOB']) && $row['DOB'] !== null ? (string)$row['DOB'] : null,
+        ];
+    }
+
+    /**
      * Writes reviewed free-text clinical lines (one allergy / medication per
      * line) to the chart `lists` as active entries. Blank input is a no-op. Called
      * only from the human-confirmed intake save — the core Add-Patient form does

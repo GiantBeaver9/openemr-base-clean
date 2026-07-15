@@ -81,6 +81,13 @@ if ($action === 'upload') {
         $values = [];
     }
 
+    // The uploaded PDF rides through the review page as base64 (shown in the
+    // iframe, carried in a hidden field, stored on Save). We deliberately do NOT
+    // add a server-side temp-file stash for this: intake forms and lab reports
+    // are a few pages, nowhere near the hundreds of pages Gemini can ingest, so
+    // the round-trip is cheap and the oversize edge is already handled (the 413
+    // guard above). The priority for this module is extraction matching and
+    // human correction, not large-document scale — so the simpler path wins.
     renderReview($postUrl, $values, base64_encode($upload->bytes), $upload->mimeType, $upload->filename, []);
     exit;
 }

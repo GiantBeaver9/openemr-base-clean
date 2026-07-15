@@ -11,7 +11,7 @@ each path. Line citations are relative to the module root
 | Path | Entry | Health | Desired backup | Met? |
 |---|---|---|---|---|
 | **New Patient** (intake PDF → create patient) | `public/intake_upload.php` | **Broken on failure** | Show the source PDF beside the reused core "Add Patient" form for manual entry | **No — no backup exists; degraded paths 500** |
-| **Lab Upload** (lab PDF → existing patient) | `public/lab_upload.php` | Degrades cleanly | Show the extracted rows + the source PDF in a scrollable viewer | **Mostly — rows + PDF present, but PDF is collapsed/fixed-height and vanishes if doc-store failed** |
+| **Lab Upload** (lab PDF → existing patient) | `public/lab_upload.php` | Degrades cleanly | Show the extracted rows + the source PDF in a scrollable viewer; **alert on a patient name/DOB mismatch (PHI-mixing guard, L7)** | **Yes — two-pane rows + PDF, plus a persistent identity-match banner** |
 | **Knowledge** (doc → RAG store) | `public/knowledge_upload.php` | Degrades for caught paths | On failure just say "unable — try again later / contact admin," nothing special | **Partly — failure copy too specific; several uncaught paths 500** |
 
 **The single most important finding:** the New-Patient path calls
@@ -74,6 +74,7 @@ Today there is **no backup UI**, and the unconditional create both (a) crashes t
 `public/lab_upload.php` (numeric `pid>0` → CSRF → ACL → `UploadedDocument::fromFilesEntry`)
 → `IngestController::ingestLab` → `AttachAndExtract::ingestLab` → `tryExtract` → `ExtractionClient::extract` (lab schema; open `field_key`)
 → `ExtractionStore` (draft) → `ChartWriter::storeSourceDocument`
+→ `AttachAndExtract::recordLabIdentity` (**PHI-mixing guard**: `LabIdentityMatcher::compare` of the document-header `patient_name`/`patient_dob` against the chart's `fname`/`lname`/`DOB` → `ExtractionStore::setIdentity`)
 → `public/extraction_review.php` → lock (`ExtractionReview::lock` → `commitLabs` → `ChartWriter::commitLabResults`: `procedure_order`→`_code`→`_report`→one `procedure_result` per field, each bound to the source `document_id`).
 Manual path: `AttachAndExtract::startManualLab` (empty draft, add rows in review).
 
@@ -89,6 +90,9 @@ Upload → extract each discrete result (test/value/unit/range/flag + citation) 
 | L4 | Model misreads a value but row is schema-valid | verified value defaults to model value; if unedited, wrong result committed | incorrect lab in chart | **Med** |
 | L5 | `collection_date` never passed to commit | defaults to today (`ChartWriter.php:199`) | result dated today, not specimen date | **Low** |
 | L6 | `provider_id` = actor for all commits | verifying user recorded as ordering provider | attribution imprecise | **Low** |
+| L7 | Report uploaded onto the **wrong chart** (name/DOB differ) | `recordLabIdentity` records `mismatch`; review shows a red "identity does not match" banner and the reviewer must confirm before locking | **PHI mix-up caught before it reaches the chart** | **guarded** |
+
+**Identity guard (L7).** Because a lab PDF is uploaded *onto* a chart yet the file names its own patient, `AttachAndExtract::ingestLab` compares the document-header name/DOB to the target chart via `LabIdentityMatcher` and persists a verdict (`match` / `mismatch` / `unknown`) on the extraction header. `extraction_review.html.twig` turns it into a persistent banner: **red** on `mismatch` ("may belong to a different patient — do NOT lock"), **amber** on `unknown` ("could not confirm"), and a quiet **green** confirmation on `match`. The check is conservative (any concrete name/DOB conflict is a mismatch; nothing on the document to compare is `unknown`, never a silent pass) and best-effort (a failure reading the chart is logged and swallowed, never blocking the upload the reviewer must still verify by eye).
 
 ### Current vs desired backup
 Desired: show the rows that would upload **and** the source PDF in a scrollable viewer.
