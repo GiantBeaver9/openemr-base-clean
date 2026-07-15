@@ -23,12 +23,12 @@ use OpenEMR\Modules\ClinicalCopilot\Config\LlmEnv;
  * {@see GeminiEmbeddingClient}; otherwise {@see UnavailableEmbeddingClient}, in
  * which case the knowledge store runs on full-text search alone. Model and
  * dimensionality are env-tunable but MUST match the pgvector column width in
- * schema.sql (default: text-embedding-004 / 768).
+ * schema.sql (default: gemini-embedding-001 / 1536).
  */
 final class EmbeddingClientFactory
 {
-    public const DEFAULT_MODEL = 'text-embedding-004';
-    public const DEFAULT_DIMENSION = 768;
+    public const DEFAULT_MODEL = 'gemini-embedding-001';
+    public const DEFAULT_DIMENSION = 1536;
 
     public static function create(): EmbeddingClientInterface
     {

@@ -17,6 +17,7 @@ namespace OpenEMR\Modules\ClinicalCopilot\Tests\Isolated\Knowledge;
 use GuzzleHttp\Client;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Response;
 use OpenEMR\Modules\ClinicalCopilot\Knowledge\GeminiEmbeddingClient;
 use OpenEMR\Modules\ClinicalCopilot\Knowledge\UnavailableEmbeddingClient;
@@ -33,7 +34,7 @@ final class GeminiEmbeddingClientTest extends TestCase
 {
     private function client(MockHandler $mock, int $dim = 3): GeminiEmbeddingClient
     {
-        return new GeminiEmbeddingClient('key', 'text-embedding-004', $dim, new Client(['handler' => HandlerStack::create($mock)]));
+        return new GeminiEmbeddingClient('key', 'gemini-embedding-001', $dim, new Client(['handler' => HandlerStack::create($mock)]));
     }
 
     public function testUnavailableClientReturnsNoVectors(): void
@@ -70,6 +71,27 @@ final class GeminiEmbeddingClientTest extends TestCase
         $mock = new MockHandler([new Response(200, [], '{}')]);
         self::assertSame([], $this->client($mock)->embedBatch([]));
         self::assertCount(1, $mock, 'the queued response was not consumed — no HTTP call for an empty batch');
+    }
+
+    public function testRequestPinsOutputDimensionalityToTheColumnWidth(): void
+    {
+        // gemini-embedding-001 is Matryoshka: without this the API returns its
+        // native 3072, overflowing a vector(1536) column. Every request must ask
+        // for exactly the configured width.
+        $history = [];
+        $stack = HandlerStack::create(new MockHandler([
+            new Response(200, [], json_encode(['embeddings' => [['values' => array_fill(0, 4, 0.5)]]], JSON_THROW_ON_ERROR)),
+        ]));
+        $stack->push(Middleware::history($history));
+        $client = new GeminiEmbeddingClient('key', 'gemini-embedding-001', 4, new Client(['handler' => $stack]));
+
+        $client->embedBatch(['hello']);
+
+        self::assertCount(1, $history);
+        $body = json_decode((string)$history[0]['request']->getBody(), true);
+        self::assertIsArray($body);
+        self::assertSame(4, $body['requests'][0]['outputDimensionality'] ?? null);
+        self::assertSame('models/gemini-embedding-001', $body['requests'][0]['model'] ?? null);
     }
 
     public function testEmptyApiKeyIsRejected(): void
