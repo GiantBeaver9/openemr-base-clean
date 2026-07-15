@@ -62,15 +62,31 @@ export CLINICAL_COPILOT_KNOWLEDGE_DATABASE_URL="postgresql://user:pass@host:5432
 php ops/knowledge/seed_from_corpus.php
 ```
 
-`ops/knowledge/schema.sql` creates `guideline_chunks` with a Postgres full-text
-`search_vector` (GIN-indexed) and a GIN index over `tags`. Retrieval ranks by
-`ts_rank` over a `websearch_to_tsquery` (keywords OR-combined for recall) plus a
-fixed boost when a chunk's `tags` overlap the requested analytes — the same
-"ground THIS out-of-range fact" behaviour as the offline corpus, over a store
-that can grow past what ships in the repo.
+`ops/knowledge/schema.sql` creates `guideline_chunks` with a pgvector
+`embedding vector(768)` column (HNSW cosine index), a Postgres full-text
+`search_vector` (GIN-indexed), and a GIN index over `tags`.
 
-The `pdo_pgsql` PHP extension is required on the app container for the live path;
-without it (or without config) the module falls back to the offline corpus.
+**Retrieval is vector-first.** Each chunk is embedded on write (the Gemini
+embeddings API, same key as generation); the query is embedded too (after PHI
+scrubbing), and retrieval ranks by pgvector cosine similarity
+(`embedding <=> :query`) plus a fixed boost when a chunk's `tags` overlap the
+requested analytes. When no embedding key is configured — or a query embed fails,
+or no embedded rows match — it falls back to full-text (`ts_rank` over a
+`websearch_to_tsquery`, keywords OR-combined for recall). So vector search is an
+upgrade layered on top of full-text, never a hard dependency.
+
+Requirements for the live path:
+- **pgvector** on the knowledge Postgres (`CREATE EXTENSION vector` — managed
+  providers incl. Railway ship it; `schema.sql` runs it).
+- **`pdo_pgsql`** on the app container.
+- A **Gemini API key** for embeddings (`CLINICAL_COPILOT_GEMINI_API_KEY`); without
+  it the store runs on full-text alone.
+
+Without config the module falls back to the offline in-repo corpus.
+
+> Note: `seed_from_corpus.php` loads the in-repo corpus for full-text search but
+> does not embed (it runs without the OpenEMR/Gemini runtime). To vector-index the
+> corpus, ingest it through the CLI/UI instead, which embeds on write.
 
 ## Adding a document (chunk-and-store, no code change)
 

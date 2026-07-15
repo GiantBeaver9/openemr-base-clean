@@ -29,13 +29,19 @@ use OpenEMR\Modules\ClinicalCopilot\Rag\GuidelineChunk;
  */
 final class KnowledgeChunkWriter
 {
+    private readonly EmbeddingClientInterface $embedder;
+
     public function __construct(
         private readonly KnowledgeWriteRunner $runner,
         private readonly string $table = 'guideline_chunks',
+        ?EmbeddingClientInterface $embedder = null,
     ) {
         if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$/', $this->table) !== 1) {
             throw new \DomainException('Invalid knowledge base table name');
         }
+        // No embedder configured ⇒ store chunks with a NULL embedding; retrieval
+        // then uses full-text search until an embedding key is set.
+        $this->embedder = $embedder ?? new UnavailableEmbeddingClient();
     }
 
     public function isAvailable(): bool
@@ -59,12 +65,20 @@ final class KnowledgeChunkWriter
             throw new \RuntimeException('Knowledge store is not configured or its driver is unavailable');
         }
 
+        // Embed every chunk in one batch (the "store in the vector db" step). A
+        // null vector for any chunk simply leaves that row's embedding NULL.
+        $vectors = $this->embedder->embedBatch(array_map(
+            fn (GuidelineChunk $c): string => $this->embedText($c),
+            $chunks,
+        ));
+
         $upsert = sprintf(
-            'INSERT INTO %s (id, title, source, section, body, tags, url) '
-            . 'VALUES (:id, :title, :source, :section, :body, :tags::text[], :url) '
+            'INSERT INTO %s (id, title, source, section, body, tags, url, embedding) '
+            . 'VALUES (:id, :title, :source, :section, :body, :tags::text[], :url, :embedding::vector) '
             . 'ON CONFLICT (id) DO UPDATE SET '
             . 'title = EXCLUDED.title, source = EXCLUDED.source, section = EXCLUDED.section, '
-            . 'body = EXCLUDED.body, tags = EXCLUDED.tags, url = EXCLUDED.url, updated_at = now()',
+            . 'body = EXCLUDED.body, tags = EXCLUDED.tags, url = EXCLUDED.url, '
+            . 'embedding = EXCLUDED.embedding, updated_at = now()',
             $this->table,
         );
 
@@ -78,7 +92,7 @@ final class KnowledgeChunkWriter
             }
 
             $written = 0;
-            foreach ($chunks as $chunk) {
+            foreach ($chunks as $i => $chunk) {
                 $this->runner->execute($upsert, [
                     'id' => $chunk->id,
                     'title' => $chunk->title,
@@ -87,6 +101,7 @@ final class KnowledgeChunkWriter
                     'body' => $chunk->text,
                     'tags' => $this->pgTextArray($chunk->tags),
                     'url' => $chunk->url,
+                    'embedding' => $this->pgVectorLiteral($vectors[$i] ?? null),
                 ]);
                 $written++;
             }
@@ -99,6 +114,30 @@ final class KnowledgeChunkWriter
 
             throw $e;
         }
+    }
+
+    /**
+     * The text embedded for a chunk: title + section + body, so a topical query
+     * matches on the heading as well as the prose (mirrors the full-text weights).
+     */
+    private function embedText(GuidelineChunk $chunk): string
+    {
+        return trim(implode("\n", array_filter([$chunk->title, $chunk->section, $chunk->text])));
+    }
+
+    /**
+     * A pgvector literal (`[0.1,0.2,...]`) bound and cast with `:embedding::vector`,
+     * or null when the chunk was not embedded (leaving the column NULL).
+     *
+     * @param list<float>|null $vector
+     */
+    private function pgVectorLiteral(?array $vector): ?string
+    {
+        if ($vector === null || $vector === []) {
+            return null;
+        }
+
+        return '[' . implode(',', array_map(static fn (float $v): string => rtrim(rtrim(sprintf('%.7f', $v), '0'), '.'), $vector)) . ']';
     }
 
     /**

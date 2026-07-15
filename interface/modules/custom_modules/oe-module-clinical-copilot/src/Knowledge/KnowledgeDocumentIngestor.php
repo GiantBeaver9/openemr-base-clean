@@ -48,7 +48,7 @@ final class KnowledgeDocumentIngestor
         return new self(
             new DocumentTextExtractor($transcriber),
             new DocumentChunker(),
-            new KnowledgeChunkWriter(new KnowledgeWriteConnection($config), $config->table),
+            new KnowledgeChunkWriter(new KnowledgeWriteConnection($config), $config->table, EmbeddingClientFactory::create()),
         );
     }
 

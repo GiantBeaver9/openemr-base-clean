@@ -43,10 +43,13 @@ final class PostgresGuidelineRetriever implements RetrieverInterface
     /** Boost added to a chunk's text-rank when its tags overlap the query tags. */
     private const TAG_OVERLAP_BOOST = 0.5;
 
+    private readonly EmbeddingClientInterface $embedder;
+
     public function __construct(
         private readonly KnowledgeQueryRunner $runner,
         private readonly KnowledgeQueryScrubber $scrubber,
         private readonly string $table = 'guideline_chunks',
+        ?EmbeddingClientInterface $embedder = null,
     ) {
         if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$/', $this->table) !== 1) {
             // The table name comes from operator env, never a request — but it is
@@ -54,6 +57,8 @@ final class PostgresGuidelineRetriever implements RetrieverInterface
             // value that is not a bare (optionally schema-qualified) identifier.
             throw new \DomainException('Invalid knowledge base table name');
         }
+        // No embedder ⇒ full-text search only (the vector path is skipped).
+        $this->embedder = $embedder ?? new UnavailableEmbeddingClient();
     }
 
     /**
@@ -73,17 +78,73 @@ final class PostgresGuidelineRetriever implements RetrieverInterface
             return [];
         }
 
-        // OR the scrubbed keywords rather than AND-ing them. websearch_to_tsquery
-        // defaults to AND, which for a multi-word clinical question ("a1c high")
-        // demands a single chunk carrying every term and misses obviously
-        // relevant guidance. RAG wants recall: ts_rank + the tag boost order the
-        // matches and topK caps them, so OR is the right precision/recall trade.
-        // "or" is websearch_to_tsquery's OR operator; scrubbed terms are >=2
-        // chars of [a-z0-9-] and can never collide with it.
-        $tsQuery = $safeQuery === '' ? '' : implode(' or ', explode(' ', $safeQuery));
-
         $limit = max(1, min(50, $topK));
 
+        // VECTOR-FIRST: embed the scrubbed (non-PHI) query and rank by pgvector
+        // cosine similarity, boosted by tag overlap. If embeddings are not
+        // configured, or the query embed fails, or no embedded rows match, fall
+        // back to Postgres full-text so search always returns something.
+        $queryVector = $this->embedder->isAvailable() && $safeQuery !== '' ? $this->embedder->embed($safeQuery) : null;
+        if ($queryVector !== null) {
+            $rows = $this->vectorSearch($queryVector, $safeTags, $limit);
+            if ($rows !== []) {
+                return $this->mapRows($rows);
+            }
+        }
+
+        return $this->mapRows($this->fullTextSearch($safeQuery, $safeTags, $limit));
+    }
+
+    /**
+     * pgvector cosine-similarity search (`embedding <=> query`), plus the same
+     * tag-overlap boost. Only rows that have an embedding are candidates.
+     *
+     * @param list<float>  $queryVector
+     * @param list<string> $safeTags
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function vectorSearch(array $queryVector, array $safeTags, int $limit): array
+    {
+        [$tagsExpr, $tagParams] = $this->tagsArrayExpression($safeTags);
+        $vectorLiteral = '[' . implode(',', array_map(
+            static fn (float $v): string => rtrim(rtrim(sprintf('%.7f', $v), '0'), '.'),
+            $queryVector,
+        )) . ']';
+
+        // 1 - cosine distance = cosine similarity, in [0,1]; add the tag boost.
+        $sql = sprintf(
+            'SELECT id, title, source, section, body, tags, url,'
+            . ' (1 - (embedding <=> :qvec::vector))'
+            . ' + (CASE WHEN tags && %1$s THEN %2$s ELSE 0 END) AS score'
+            . ' FROM %3$s'
+            . ' WHERE embedding IS NOT NULL'
+            . ' ORDER BY score DESC, id ASC'
+            . ' LIMIT %4$d',
+            $tagsExpr,
+            self::TAG_OVERLAP_BOOST,
+            $this->table,
+            $limit,
+        );
+
+        return $this->runner->select($sql, ['qvec' => $vectorLiteral] + $tagParams);
+    }
+
+    /**
+     * Postgres full-text fallback: OR the scrubbed keywords rather than AND-ing
+     * them. websearch_to_tsquery defaults to AND, which for a multi-word clinical
+     * question ("a1c high") demands a single chunk carrying every term and misses
+     * obviously relevant guidance. RAG wants recall: ts_rank + the tag boost order
+     * the matches and topK caps them. "or" is websearch_to_tsquery's OR operator;
+     * scrubbed terms are >=2 chars of [a-z0-9-] and can never collide with it.
+     *
+     * @param list<string> $safeTags
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function fullTextSearch(string $safeQuery, array $safeTags, int $limit): array
+    {
+        $tsQuery = $safeQuery === '' ? '' : implode(' or ', explode(' ', $safeQuery));
         [$tagsExpr, $tagParams] = $this->tagsArrayExpression($safeTags);
         $sql = sprintf(
             'SELECT id, title, source, section, body, tags, url,'
@@ -99,8 +160,16 @@ final class PostgresGuidelineRetriever implements RetrieverInterface
             $limit,
         );
 
-        $rows = $this->runner->select($sql, ['q' => $tsQuery] + $tagParams);
+        return $this->runner->select($sql, ['q' => $tsQuery] + $tagParams);
+    }
 
+    /**
+     * @param list<array<string, mixed>> $rows
+     *
+     * @return list<EvidenceSnippet>
+     */
+    private function mapRows(array $rows): array
+    {
         $snippets = [];
         foreach ($rows as $row) {
             $chunk = $this->chunkFromRow($row);

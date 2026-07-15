@@ -15,6 +15,7 @@ declare(strict_types=1);
 namespace OpenEMR\Modules\ClinicalCopilot\Rag;
 
 use OpenEMR\Common\Logging\SystemLogger;
+use OpenEMR\Modules\ClinicalCopilot\Knowledge\EmbeddingClientFactory;
 use OpenEMR\Modules\ClinicalCopilot\Knowledge\KnowledgeBaseConfig;
 use OpenEMR\Modules\ClinicalCopilot\Knowledge\KnowledgeBaseConnection;
 use OpenEMR\Modules\ClinicalCopilot\Knowledge\KnowledgeQueryScrubber;
@@ -46,6 +47,11 @@ final class GuidelineRetrieverFactory
 
         $connection = new KnowledgeBaseConnection($config, new SystemLogger());
 
-        return new PostgresGuidelineRetriever($connection, new KnowledgeQueryScrubber(), $config->table);
+        return new PostgresGuidelineRetriever(
+            $connection,
+            new KnowledgeQueryScrubber(),
+            $config->table,
+            EmbeddingClientFactory::create(),
+        );
     }
 }

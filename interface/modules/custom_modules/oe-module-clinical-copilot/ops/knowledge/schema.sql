@@ -15,15 +15,28 @@
 --   psql "$CLINICAL_COPILOT_KNOWLEDGE_DATABASE_URL" -f schema.sql
 -- Then load the corpus:
 --   php ops/knowledge/seed_from_corpus.php
+--
+-- Retrieval is VECTOR-FIRST (pgvector cosine similarity over `embedding`) with
+-- Postgres full-text (`search_vector`) as the fallback when no embedding
+-- provider is configured. The vector column width (768) MUST match
+-- CLINICAL_COPILOT_KNOWLEDGE_EMBED_DIM / the embedding model (default
+-- text-embedding-004 = 768). Changing the dimension requires recreating the
+-- column.
+
+-- pgvector: the "vector db" extension. Managed Postgres (incl. Railway) ships it.
+CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE IF NOT EXISTS guideline_chunks (
-    id       text PRIMARY KEY,
-    title    text NOT NULL DEFAULT '',
-    source   text NOT NULL,
-    section  text NOT NULL DEFAULT '',
-    body     text NOT NULL,
-    tags     text[] NOT NULL DEFAULT '{}',
-    url      text,
+    id        text PRIMARY KEY,
+    title     text NOT NULL DEFAULT '',
+    source    text NOT NULL,
+    section   text NOT NULL DEFAULT '',
+    body      text NOT NULL,
+    tags      text[] NOT NULL DEFAULT '{}',
+    url       text,
+    -- Dense embedding of the chunk (null until embedded; retrieval falls back to
+    -- full-text for null-embedding rows).
+    embedding vector(768),
     -- Full-text index column, maintained by Postgres from the human-readable
     -- fields. title/section are weighted above body so a topic match ranks first.
     search_vector tsvector GENERATED ALWAYS AS (
@@ -34,7 +47,14 @@ CREATE TABLE IF NOT EXISTS guideline_chunks (
     updated_at timestamptz NOT NULL DEFAULT now()
 );
 
--- GIN over the tsvector powers the `@@ websearch_to_tsquery(...)` retrieval.
+-- Upgrade path for a store created before the vector column existed.
+ALTER TABLE guideline_chunks ADD COLUMN IF NOT EXISTS embedding vector(768);
+
+-- HNSW over the embedding powers the `embedding <=> :query` cosine search.
+CREATE INDEX IF NOT EXISTS guideline_chunks_embedding_idx
+    ON guideline_chunks USING hnsw (embedding vector_cosine_ops);
+
+-- GIN over the tsvector powers the `@@ websearch_to_tsquery(...)` fallback.
 CREATE INDEX IF NOT EXISTS guideline_chunks_search_idx
     ON guideline_chunks USING GIN (search_vector);
 

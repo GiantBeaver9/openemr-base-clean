@@ -86,6 +86,50 @@ final class KnowledgeChunkWriterTest extends TestCase
         $this->expectException(\DomainException::class);
         new KnowledgeChunkWriter(new FakeWriteRunner(available: true), 'chunks; DROP TABLE x');
     }
+
+    public function testStoresAPgvectorLiteralWhenAnEmbedderIsConfigured(): void
+    {
+        $runner = new FakeWriteRunner(available: true);
+        (new KnowledgeChunkWriter($runner, 'guideline_chunks', new FixedEmbedder()))->write($this->chunks());
+
+        self::assertStringContainsString(':embedding::vector', (string)$runner->lastUpsertSql);
+        self::assertIsString($runner->lastUpsertParams['embedding'] ?? null);
+        self::assertStringStartsWith('[', (string)$runner->lastUpsertParams['embedding']);
+    }
+
+    public function testStoresNullEmbeddingWhenNoEmbedderIsConfigured(): void
+    {
+        $runner = new FakeWriteRunner(available: true);
+        (new KnowledgeChunkWriter($runner))->write($this->chunks()); // default => UnavailableEmbeddingClient
+
+        self::assertNull($runner->lastUpsertParams['embedding'] ?? 'unset');
+    }
+}
+
+/**
+ * A deterministic embedder returning a fixed vector for every input.
+ */
+final class FixedEmbedder implements \OpenEMR\Modules\ClinicalCopilot\Knowledge\EmbeddingClientInterface
+{
+    public function isAvailable(): bool
+    {
+        return true;
+    }
+
+    public function dimension(): int
+    {
+        return 3;
+    }
+
+    public function embed(string $text): ?array
+    {
+        return [0.1, 0.2, 0.3];
+    }
+
+    public function embedBatch(array $texts): array
+    {
+        return array_map(fn (string $t): array => [0.1, 0.2, 0.3], $texts);
+    }
 }
 
 /**
@@ -95,6 +139,11 @@ final class FakeWriteRunner implements KnowledgeWriteRunner
 {
     /** @var list<string> */
     public array $log = [];
+
+    public ?string $lastUpsertSql = null;
+
+    /** @var array<string, scalar|null> */
+    public array $lastUpsertParams = [];
 
     public function __construct(
         private readonly bool $available,
@@ -133,6 +182,8 @@ final class FakeWriteRunner implements KnowledgeWriteRunner
             throw new \RuntimeException('simulated write failure');
         }
         $this->log[] = 'UPSERT:' . (string)($params['id'] ?? '');
+        $this->lastUpsertSql = $sql;
+        $this->lastUpsertParams = $params;
 
         return 1;
     }

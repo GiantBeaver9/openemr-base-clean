@@ -1,0 +1,152 @@
+<?php
+
+/**
+ * Embeds text via the Google AI Studio (Gemini) embeddings API.
+ *
+ * @package   OpenEMR\Modules\ClinicalCopilot
+ * @link      https://www.open-emr.org
+ * @author    Clinical Co-Pilot Team
+ * @copyright Copyright (c) 2026 OpenEMR Foundation
+ * @license   https://github.com/openemr/openemr/blob/master/LICENSE GNU General Public License 3
+ */
+
+declare(strict_types=1);
+
+namespace OpenEMR\Modules\ClinicalCopilot\Knowledge;
+
+use GuzzleHttp\Client;
+use GuzzleHttp\ClientInterface;
+use GuzzleHttp\Exception\GuzzleException;
+use Psr\Log\LoggerInterface;
+
+/**
+ * The vectors behind the "vector db." Calls `models/{model}:batchEmbedContents`
+ * on `generativelanguage.googleapis.com` with the same API key the rest of the
+ * dev/test LLM path uses, and returns one float vector per input. Only PHI-free
+ * knowledge text (guideline chunks) and PHI-scrubbed queries are ever embedded —
+ * the same non-BAA boundary the knowledge store as a whole observes.
+ *
+ * Every failure degrades to null (never throws to the caller): the writer then
+ * stores the chunk with a NULL embedding and retrieval falls back to full-text,
+ * so a flaky embeddings hop never breaks ingestion or search.
+ */
+final class GeminiEmbeddingClient implements EmbeddingClientInterface
+{
+    private const API_VERSION = 'v1beta';
+    private const TIMEOUT_SECONDS = 30.0;
+
+    private readonly ClientInterface $httpClient;
+
+    public function __construct(
+        private readonly string $apiKey,
+        private readonly string $model = 'text-embedding-004',
+        private readonly int $dimension = 768,
+        ?ClientInterface $httpClient = null,
+        private readonly ?LoggerInterface $logger = null,
+    ) {
+        if ($this->apiKey === '') {
+            throw new \DomainException('GeminiEmbeddingClient.apiKey must not be empty');
+        }
+        // Certificate verification ON, same posture as the generation clients.
+        $this->httpClient = $httpClient ?? new Client(['verify' => true]);
+    }
+
+    public function isAvailable(): bool
+    {
+        return true;
+    }
+
+    public function dimension(): int
+    {
+        return $this->dimension;
+    }
+
+    public function embed(string $text): ?array
+    {
+        return $this->embedBatch([$text])[0] ?? null;
+    }
+
+    /**
+     * @param list<string> $texts
+     *
+     * @return list<list<float>|null>
+     */
+    public function embedBatch(array $texts): array
+    {
+        if ($texts === []) {
+            return [];
+        }
+
+        $modelPath = 'models/' . $this->model;
+        $requests = array_map(
+            fn (string $text): array => [
+                'model' => $modelPath,
+                'content' => ['parts' => [['text' => $text]]],
+            ],
+            $texts,
+        );
+
+        try {
+            $response = $this->httpClient->request('POST', $this->endpointUrl(), [
+                'headers' => [
+                    'Content-Type' => 'application/json',
+                    'x-goog-api-key' => $this->apiKey,
+                ],
+                'json' => ['requests' => $requests],
+                'timeout' => self::TIMEOUT_SECONDS,
+            ]);
+        } catch (GuzzleException $e) {
+            $this->logger?->warning('Clinical Co-Pilot: embedding request failed', ['exception' => $e]);
+
+            return array_fill(0, count($texts), null);
+        }
+
+        return $this->parseEmbeddings((string)$response->getBody(), count($texts));
+    }
+
+    /**
+     * @return list<list<float>|null>
+     */
+    private function parseEmbeddings(string $body, int $expected): array
+    {
+        $decoded = json_decode($body, true);
+        $rows = is_array($decoded) ? ($decoded['embeddings'] ?? null) : null;
+        if (!is_array($rows)) {
+            $this->logger?->warning('Clinical Co-Pilot: embedding response had no embeddings array');
+
+            return array_fill(0, $expected, null);
+        }
+
+        $out = [];
+        foreach ($rows as $row) {
+            $values = is_array($row) ? ($row['values'] ?? null) : null;
+            if (!is_array($values)) {
+                $out[] = null;
+                continue;
+            }
+            $vector = [];
+            foreach ($values as $v) {
+                if (is_int($v) || is_float($v)) {
+                    $vector[] = (float)$v;
+                }
+            }
+            $out[] = $vector === [] ? null : $vector;
+        }
+
+        // Pad/truncate to the expected count so the result stays index-aligned.
+        while (count($out) < $expected) {
+            $out[] = null;
+        }
+
+        return array_slice($out, 0, $expected);
+    }
+
+    private function endpointUrl(): string
+    {
+        return sprintf(
+            'https://generativelanguage.googleapis.com/%s/models/%s:batchEmbedContents',
+            self::API_VERSION,
+            $this->model,
+        );
+    }
+}

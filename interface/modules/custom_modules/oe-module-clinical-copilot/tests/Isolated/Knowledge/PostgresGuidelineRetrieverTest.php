@@ -96,6 +96,58 @@ final class PostgresGuidelineRetrieverTest extends TestCase
         $this->expectException(\DomainException::class);
         new PostgresGuidelineRetriever(new FakeKnowledgeRunner(true), new KnowledgeQueryScrubber(), 'chunks; DROP TABLE x');
     }
+
+    public function testUsesPgvectorSearchWhenEmbeddingsAreAvailable(): void
+    {
+        $runner = new FakeKnowledgeRunner(available: true, rows: [
+            ['id' => 'ada-a1c', 'title' => 'A1c', 'source' => 'ADA', 'section' => 'T', 'body' => 'A1c below 7%.', 'tags' => '{a1c}', 'url' => null, 'score' => 0.9],
+        ]);
+        $retriever = new PostgresGuidelineRetriever($runner, new KnowledgeQueryScrubber(), 'guideline_chunks', new FakeEmbedder());
+
+        $snippets = $retriever->retrieve('a1c target', ['a1c']);
+
+        self::assertCount(1, $snippets);
+        self::assertStringContainsString('embedding <=> :qvec::vector', (string)$runner->lastSql);
+        self::assertArrayHasKey('qvec', $runner->lastParams);
+        self::assertStringStartsWith('[', (string)$runner->lastParams['qvec']);
+        self::assertStringNotContainsString('websearch_to_tsquery', (string)$runner->lastSql);
+    }
+
+    public function testFallsBackToFullTextWhenEmbeddingsUnavailable(): void
+    {
+        // Default constructor => UnavailableEmbeddingClient => no vector path.
+        $runner = new FakeKnowledgeRunner(available: true, rows: []);
+        (new PostgresGuidelineRetriever($runner, new KnowledgeQueryScrubber()))->retrieve('a1c target', ['a1c']);
+
+        self::assertStringContainsString('websearch_to_tsquery', (string)$runner->lastSql);
+    }
+}
+
+/**
+ * A deterministic embedder that reports available and returns a fixed vector, so
+ * the retriever's vector branch is exercised with no provider.
+ */
+final class FakeEmbedder implements \OpenEMR\Modules\ClinicalCopilot\Knowledge\EmbeddingClientInterface
+{
+    public function isAvailable(): bool
+    {
+        return true;
+    }
+
+    public function dimension(): int
+    {
+        return 3;
+    }
+
+    public function embed(string $text): ?array
+    {
+        return [0.1, 0.2, 0.3];
+    }
+
+    public function embedBatch(array $texts): array
+    {
+        return array_map(fn (string $t): array => [0.1, 0.2, 0.3], $texts);
+    }
 }
 
 /**
