@@ -29,6 +29,7 @@ use OpenEMR\Core\OEGlobalsBag;
 use OpenEMR\Modules\ClinicalCopilot\Observability\Metrics\MetricsService;
 use OpenEMR\Modules\ClinicalCopilot\Observability\RateLimit\CadenceCircuitBreaker;
 use OpenEMR\Modules\ClinicalCopilot\Observability\RateLimit\CadenceConfigStore;
+use OpenEMR\Modules\ClinicalCopilot\Knowledge\KnowledgeBaseStatus;
 use OpenEMR\Modules\ClinicalCopilot\Observability\ReadyCheck;
 use OpenEMR\Modules\ClinicalCopilot\Observability\TracePayloadStore;
 use OpenEMR\Modules\ClinicalCopilot\Verify\CheckId;
@@ -184,6 +185,9 @@ $templateVars = [
     'breaker' => (new CadenceCircuitBreaker())->snapshot(),
     'limits' => $configStore->limits(),
     'ready' => (new ReadyCheck())->check(),
+    // The separate, PHI-free medical-knowledge store the summarizer's RAG pulls
+    // from (or 'not_configured' => running on the in-repo offline corpus).
+    'knowledge' => KnowledgeBaseStatus::createDefault()->snapshot(),
     'requests' => $metricsService->requestList($kindFilter, $statusFilter, 100),
     'kind_filter' => $kindFilter,
     'status_filter' => $statusFilter,

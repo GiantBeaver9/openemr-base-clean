@@ -62,6 +62,9 @@ a mystery, check that file before anything else.
 | `CLINICAL_COPILOT_MAX_TURNS_PER_USER_PER_HOUR` | Rate limit (optional) | Max chat turns per clinician per rolling hour. **Default `60`.** | `CLINICAL_COPILOT_MAX_TURNS_PER_USER_PER_HOUR=120` |
 | `CLINICAL_COPILOT_DAILY_LLM_SPEND_CAP_USD` | Cost cap (optional) | Per-site daily LLM spend cap (USD); tripping it opens the circuit breaker. **Default `50`.** | `CLINICAL_COPILOT_DAILY_LLM_SPEND_CAP_USD=100` |
 | `CLINICAL_COPILOT_HOURLY_LLM_BURN_CAP_USD` | Cost cap (optional) | Per-site hourly LLM burn cap (USD). **Default `10`.** | `CLINICAL_COPILOT_HOURLY_LLM_BURN_CAP_USD=25` |
+| `CLINICAL_COPILOT_KNOWLEDGE_DATABASE_URL` | Knowledge store (optional) | Connection URL for the **separate, PHI-free** medical-knowledge Postgres the summarizer's RAG retrieves from. Unset ⇒ the module runs on the in-repo offline corpus. **Never point this at a database holding PHI** — see `docs/knowledge-base.md`. | `CLINICAL_COPILOT_KNOWLEDGE_DATABASE_URL=postgresql://user:pass@host:5432/knowledge?sslmode=require` |
+| `CLINICAL_COPILOT_KNOWLEDGE_DB_HOST` / `_PORT` / `_NAME` / `_USER` / `_PASSWORD` / `_SSLMODE` | Knowledge store (optional) | Discrete equivalent of the URL above, for platforms that expose parts rather than a URL. `_PORT` defaults `5432`, `_SSLMODE` defaults `prefer`. The URL wins if both are set. | `CLINICAL_COPILOT_KNOWLEDGE_DB_HOST=host ...` |
+| `CLINICAL_COPILOT_KNOWLEDGE_TABLE` | Knowledge store (optional) | Table name in the knowledge DB. **Default `guideline_chunks`.** Must be a bare (optionally schema-qualified) identifier. | `CLINICAL_COPILOT_KNOWLEDGE_TABLE=guideline_chunks` |
 
 > The four caps above follow the precedence **env var → seeded DB config row
 > (`mod_copilot_cadence`) → built-in default**. A blank, zero, negative, or

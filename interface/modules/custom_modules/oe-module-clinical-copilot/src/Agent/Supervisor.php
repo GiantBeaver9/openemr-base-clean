@@ -17,7 +17,7 @@ namespace OpenEMR\Modules\ClinicalCopilot\Agent;
 use OpenEMR\Modules\ClinicalCopilot\Config\LlmRuntimeConfig;
 use OpenEMR\Modules\ClinicalCopilot\Ingest\ExtractionClient;
 use OpenEMR\Modules\ClinicalCopilot\Observability\TraceRecorder;
-use OpenEMR\Modules\ClinicalCopilot\Rag\HybridRetriever;
+use OpenEMR\Modules\ClinicalCopilot\Rag\GuidelineRetrieverFactory;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\LlmClientFactory;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\TraceRecorderInterface;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\TraceSpan;
@@ -53,7 +53,7 @@ final class Supervisor
 
         return new self(
             new IntakeExtractorWorker($extractionClient, $tracer),
-            new EvidenceRetrieverWorker(HybridRetriever::createDefault(), $tracer),
+            new EvidenceRetrieverWorker(GuidelineRetrieverFactory::createDefault(), $tracer),
             $tracer,
         );
     }

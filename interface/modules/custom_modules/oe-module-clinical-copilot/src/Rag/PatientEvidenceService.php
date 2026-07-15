@@ -48,7 +48,10 @@ final class PatientEvidenceService
 
     public static function createDefault(): self
     {
-        return new self(HybridRetriever::createDefault());
+        // The factory returns the external knowledge-store retriever when the
+        // Postgres is configured, else the offline corpus pipeline — so the
+        // evidence page and the summarizer draw from the same source.
+        return new self(GuidelineRetrieverFactory::createDefault());
     }
 
     /**

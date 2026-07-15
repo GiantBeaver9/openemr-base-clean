@@ -1,0 +1,210 @@
+<?php
+
+/**
+ * Retrieves guideline evidence from the external medical-knowledge Postgres.
+ *
+ * @package   OpenEMR\Modules\ClinicalCopilot
+ * @link      https://www.open-emr.org
+ * @author    Clinical Co-Pilot Team
+ * @copyright Copyright (c) 2026 OpenEMR Foundation
+ * @license   https://github.com/openemr/openemr/blob/master/LICENSE GNU General Public License 3
+ */
+
+declare(strict_types=1);
+
+namespace OpenEMR\Modules\ClinicalCopilot\Knowledge;
+
+use OpenEMR\Modules\ClinicalCopilot\Rag\EvidenceSnippet;
+use OpenEMR\Modules\ClinicalCopilot\Rag\GuidelineChunk;
+use OpenEMR\Modules\ClinicalCopilot\Rag\RetrieverInterface;
+
+/**
+ * The Week 2 "tool the summarizer calls to pull knowledge from the separate DB."
+ * It is a drop-in {@see RetrieverInterface} — the summarizer, the evidence
+ * worker, and the tests already depend on that seam, so this swaps in behind it
+ * with no consumer change (the offline {@see \OpenEMR\Modules\ClinicalCopilot\Rag\HybridRetriever}
+ * remains the fallback the factory wires when the store is not configured).
+ *
+ * Two guarantees hold the PHI/knowledge segregation:
+ *   - The query is scrubbed to non-PHI keywords by {@see KnowledgeQueryScrubber}
+ *     before it leaves this process, so nothing patient-identifying reaches the
+ *     non-BAA store.
+ *   - Only a parameterized SELECT is issued (via the read-only
+ *     {@see KnowledgeQueryRunner}); this class can neither write to the store nor
+ *     reach OpenEMR's PHI database.
+ *
+ * Ranking is Postgres full-text (`ts_rank` over a `websearch_to_tsquery`) plus a
+ * fixed boost for chunks whose `tags` overlap the requested analytes — the same
+ * "ground THIS out-of-range fact" behaviour the offline retriever gives, but
+ * over a store that can grow past what ships in the repo.
+ */
+final class PostgresGuidelineRetriever implements RetrieverInterface
+{
+    /** Boost added to a chunk's text-rank when its tags overlap the query tags. */
+    private const TAG_OVERLAP_BOOST = 0.5;
+
+    public function __construct(
+        private readonly KnowledgeQueryRunner $runner,
+        private readonly KnowledgeQueryScrubber $scrubber,
+        private readonly string $table = 'guideline_chunks',
+    ) {
+        if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$/', $this->table) !== 1) {
+            // The table name comes from operator env, never a request — but it is
+            // interpolated into SQL (identifiers cannot be bound), so reject any
+            // value that is not a bare (optionally schema-qualified) identifier.
+            throw new \DomainException('Invalid knowledge base table name');
+        }
+    }
+
+    /**
+     * @param list<string> $tags
+     *
+     * @return list<EvidenceSnippet>
+     */
+    public function retrieve(string $query, array $tags = [], int $topK = 4): array
+    {
+        if (!$this->runner->isAvailable()) {
+            return [];
+        }
+
+        $safeQuery = $this->scrubber->scrub($query, $tags);
+        $safeTags = $this->safeTags($tags);
+        if ($safeQuery === '' && $safeTags === []) {
+            return [];
+        }
+
+        // OR the scrubbed keywords rather than AND-ing them. websearch_to_tsquery
+        // defaults to AND, which for a multi-word clinical question ("a1c high")
+        // demands a single chunk carrying every term and misses obviously
+        // relevant guidance. RAG wants recall: ts_rank + the tag boost order the
+        // matches and topK caps them, so OR is the right precision/recall trade.
+        // "or" is websearch_to_tsquery's OR operator; scrubbed terms are >=2
+        // chars of [a-z0-9-] and can never collide with it.
+        $tsQuery = $safeQuery === '' ? '' : implode(' or ', explode(' ', $safeQuery));
+
+        $limit = max(1, min(50, $topK));
+
+        [$tagsExpr, $tagParams] = $this->tagsArrayExpression($safeTags);
+        $sql = sprintf(
+            'SELECT id, title, source, section, body, tags, url,'
+            . ' ts_rank(search_vector, websearch_to_tsquery(\'english\', :q))'
+            . ' + (CASE WHEN tags && %1$s THEN %2$s ELSE 0 END) AS score'
+            . ' FROM %3$s'
+            . ' WHERE search_vector @@ websearch_to_tsquery(\'english\', :q) OR tags && %1$s'
+            . ' ORDER BY score DESC, id ASC'
+            . ' LIMIT %4$d',
+            $tagsExpr,
+            self::TAG_OVERLAP_BOOST,
+            $this->table,
+            $limit,
+        );
+
+        $rows = $this->runner->select($sql, ['q' => $tsQuery] + $tagParams);
+
+        $snippets = [];
+        foreach ($rows as $row) {
+            $chunk = $this->chunkFromRow($row);
+            if ($chunk === null) {
+                continue;
+            }
+            $score = is_numeric($row['score'] ?? null) ? (float)$row['score'] : 0.0;
+            $snippets[] = EvidenceSnippet::forChunk($chunk, $score);
+        }
+
+        return $snippets;
+    }
+
+    /**
+     * @param list<string> $safeTags
+     *
+     * @return array{0: string, 1: array<string, string>} [sql expression, bind params]
+     */
+    private function tagsArrayExpression(array $safeTags): array
+    {
+        if ($safeTags === []) {
+            return ["'{}'::text[]", []];
+        }
+
+        $placeholders = [];
+        $params = [];
+        foreach ($safeTags as $i => $tag) {
+            $placeholders[] = ":t{$i}";
+            $params["t{$i}"] = $tag;
+        }
+
+        return ['ARRAY[' . implode(', ', $placeholders) . ']::text[]', $params];
+    }
+
+    /**
+     * @param list<string> $tags
+     *
+     * @return list<string>
+     */
+    private function safeTags(array $tags): array
+    {
+        $safe = [];
+        foreach ($tags as $tag) {
+            $normalized = strtolower(trim($tag));
+            $normalized = preg_replace('/[^a-z0-9-]/', '', $normalized) ?? '';
+            if ($normalized !== '') {
+                $safe[$normalized] = true;
+            }
+        }
+
+        return array_keys($safe);
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private function chunkFromRow(array $row): ?GuidelineChunk
+    {
+        $id = is_string($row['id'] ?? null) ? $row['id'] : '';
+        $body = is_string($row['body'] ?? null) ? $row['body'] : '';
+        $source = is_string($row['source'] ?? null) ? $row['source'] : '';
+        if ($id === '' || $body === '' || $source === '') {
+            return null;
+        }
+
+        return new GuidelineChunk(
+            id: $id,
+            title: is_string($row['title'] ?? null) ? $row['title'] : '',
+            source: $source,
+            section: is_string($row['section'] ?? null) ? $row['section'] : '',
+            text: $body,
+            tags: $this->parseTagsColumn($row['tags'] ?? null),
+            url: is_string($row['url'] ?? null) && $row['url'] !== '' ? $row['url'] : null,
+        );
+    }
+
+    /**
+     * Postgres returns a `text[]` column as a literal like `{a1c,ldl}` over the
+     * PDO pgsql driver. Parse it back to a list; anything else yields [].
+     *
+     * @return list<string>
+     */
+    private function parseTagsColumn(mixed $value): array
+    {
+        if (is_array($value)) {
+            return array_values(array_filter($value, 'is_string'));
+        }
+        if (!is_string($value) || $value === '' || $value === '{}') {
+            return [];
+        }
+
+        $inner = trim($value, '{}');
+        if ($inner === '') {
+            return [];
+        }
+
+        $tags = [];
+        foreach (explode(',', $inner) as $part) {
+            $part = trim($part, " \"");
+            if ($part !== '') {
+                $tags[] = $part;
+            }
+        }
+
+        return $tags;
+    }
+}

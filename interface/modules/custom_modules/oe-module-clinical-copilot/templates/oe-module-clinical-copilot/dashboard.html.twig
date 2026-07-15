@@ -64,6 +64,19 @@
                 &middot; {{ "LLM"|xlt }}: <span class="badge {{ ready.llm == 'ok' ? 'badge-success' : 'badge-warning' }}">{{ ready.llm|text }}</span>
                 &middot; {{ "worker heartbeat"|xlt }}: <span class="badge {{ ready.worker_heartbeat == 'ok' ? 'badge-success' : 'badge-warning' }}">{{ ready.worker_heartbeat|text }}</span>
             </p>
+            <p class="mb-1">
+                {{ "Knowledge store (RAG, PHI-free, separate DB)"|xlt }}:
+                {% if knowledge.state == 'ok' %}
+                    <span class="badge badge-success">{{ "connected"|xlt }}</span>
+                    <span class="text-muted small">{{ knowledge.chunk_count }} {{ "guideline chunks"|xlt }}</span>
+                {% elseif knowledge.state == 'unreachable' %}
+                    <span class="badge badge-warning">{{ "unreachable"|xlt }}</span>
+                    <span class="text-muted small">{{ "configured but not responding — evidence degrades to empty"|xlt }}</span>
+                {% else %}
+                    <span class="badge badge-secondary">{{ "offline corpus"|xlt }}</span>
+                    <span class="text-muted small">{{ "no external DB configured — using the in-repo guideline corpus"|xlt }}</span>
+                {% endif %}
+            </p>
             <p class="text-muted small">
                 {{ "Rate limits"|xlt }}: {{ "max active sessions/user"|xlt }}={{ limits.max_active_sessions_per_user }},
                 {{ "max turns/user/hr"|xlt }}={{ limits.max_turns_per_user_per_hour }},

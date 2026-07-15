@@ -1,0 +1,85 @@
+# Clinical Co-Pilot — external medical-knowledge store (RAG)
+
+The summarizer grounds its guideline-evidence section with RAG. That evidence
+comes from **general medical knowledge** (paraphrased, widely-published guideline
+summaries), which is a fundamentally different data class from **PHI** (the
+patient chart). This module keeps the two physically separate.
+
+## Two data domains, two databases
+
+| Domain | Store | Holds | Under BAA |
+|---|---|---|---|
+| **PHI** | OpenEMR's MySQL | Patient chart, extractions, telemetry, chat | Yes |
+| **General medical knowledge** | A separate Postgres (e.g. on Railway) | `guideline_chunks` — PHI-free guideline text | Not required |
+
+They are **distinct connections to distinct servers.** A query against the
+knowledge Postgres can never reach a chart row, and the retriever that reads the
+knowledge store never touches the PHI database. The separation is structural, not
+a runtime `WHERE` clause that could be forgotten.
+
+> **The knowledge database must never contain PHI.** Every row is reproducible
+> from source control (the in-repo corpus under `src/Rag/corpus/`). If a value
+> could identify a patient, it does not belong there.
+
+## How the segregation is enforced (defense in depth)
+
+1. **Separate physical store.** `KnowledgeBaseConnection` is its own PDO to its
+   own server, configured by its own env vars. It has no handle on OpenEMR's DB.
+2. **Read-only surface.** The request path talks to the store only through
+   `KnowledgeQueryRunner::select()` — a single parameterized SELECT. There is no
+   write method; the store is populated exclusively by the offline seed script.
+3. **PHI-scrubbed queries in transit.** A retrieval query can be a raw chat
+   question ("why is Jane's A1c 9.4 on 3/2?"). `KnowledgeQueryScrubber` reduces
+   it to non-PHI keywords *before it leaves the process*: it drops names,
+   numbers, dates, and emails, and keeps only clinical terms — including analyte
+   codes like `a1c`/`b12`/`sglt2` — plus the structured analyte tags (which are
+   non-PHI by construction). Nothing patient-identifying reaches the non-BAA store.
+
+## Where it plugs in
+
+Everything rides the existing `RetrieverInterface` seam, so no consumer changed:
+
+```
+Supervisor / PatientEvidenceService
+  └─ GuidelineRetrieverFactory::createDefault()
+       ├─ knowledge Postgres CONFIGURED  → PostgresGuidelineRetriever  (this store)
+       └─ NOT configured                 → HybridRetriever  (offline in-repo corpus)
+```
+
+The choice is made once, from env. With nothing configured the module behaves
+exactly as before — fully offline. Configured-but-unreachable surfaces an honest
+"degraded" (empty evidence, visible in the trace and on the dashboard), rather
+than silently masking a misconfiguration.
+
+## Setup (one command)
+
+Provision a Postgres, then point the module at it and seed it from the corpus:
+
+```bash
+export CLINICAL_COPILOT_KNOWLEDGE_DATABASE_URL="postgresql://user:pass@host:5432/knowledge?sslmode=require"
+
+# Applies schema.sql (idempotent) and upserts every chunk from src/Rag/corpus/*.json.
+php ops/knowledge/seed_from_corpus.php
+```
+
+`ops/knowledge/schema.sql` creates `guideline_chunks` with a Postgres full-text
+`search_vector` (GIN-indexed) and a GIN index over `tags`. Retrieval ranks by
+`ts_rank` over a `websearch_to_tsquery` (keywords OR-combined for recall) plus a
+fixed boost when a chunk's `tags` overlap the requested analytes — the same
+"ground THIS out-of-range fact" behaviour as the offline corpus, over a store
+that can grow past what ships in the repo.
+
+The `pdo_pgsql` PHP extension is required on the app container for the live path;
+without it (or without config) the module falls back to the offline corpus.
+
+## Growing the knowledge base
+
+To add knowledge, extend `src/Rag/corpus/*.json` (keeping it PHI-free and
+reproducible) and re-run the seed — or load your own rows into `guideline_chunks`
+following the same column shape. Re-running the seed is safe: rows upsert by `id`.
+
+## Verifying
+
+The observability dashboard shows a **Knowledge store** row:
+`connected — N guideline chunks` when the Postgres is reachable, `offline corpus`
+when no external DB is configured, or `unreachable` when configured but down.
