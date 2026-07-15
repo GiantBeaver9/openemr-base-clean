@@ -18,10 +18,12 @@
 --
 -- Retrieval is VECTOR-FIRST (pgvector cosine similarity over `embedding`) with
 -- Postgres full-text (`search_vector`) as the fallback when no embedding
--- provider is configured. The vector column width (768) MUST match
+-- provider is configured. The vector column width (1536) MUST match
 -- CLINICAL_COPILOT_KNOWLEDGE_EMBED_DIM / the embedding model (default
--- text-embedding-004 = 768). Changing the dimension requires recreating the
--- column.
+-- gemini-embedding-001 truncated to 1536). 1536 stays under pgvector's 2000-dim
+-- HNSW ceiling for the standard `vector` type, so the index below just works.
+-- Changing the dimension requires recreating the column AND re-embedding every
+-- row (embeddings from different models/widths are not comparable).
 
 -- pgvector: the "vector db" extension. Managed Postgres (incl. Railway) ships it.
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -36,7 +38,7 @@ CREATE TABLE IF NOT EXISTS guideline_chunks (
     url       text,
     -- Dense embedding of the chunk (null until embedded; retrieval falls back to
     -- full-text for null-embedding rows).
-    embedding vector(768),
+    embedding vector(1536),
     -- Full-text index column, maintained by Postgres from the human-readable
     -- fields. title/section are weighted above body so a topic match ranks first.
     search_vector tsvector GENERATED ALWAYS AS (
@@ -48,7 +50,7 @@ CREATE TABLE IF NOT EXISTS guideline_chunks (
 );
 
 -- Upgrade path for a store created before the vector column existed.
-ALTER TABLE guideline_chunks ADD COLUMN IF NOT EXISTS embedding vector(768);
+ALTER TABLE guideline_chunks ADD COLUMN IF NOT EXISTS embedding vector(1536);
 
 -- HNSW over the embedding powers the `embedding <=> :query` cosine search.
 CREATE INDEX IF NOT EXISTS guideline_chunks_embedding_idx

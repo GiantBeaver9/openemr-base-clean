@@ -63,7 +63,7 @@ php ops/knowledge/seed_from_corpus.php
 ```
 
 `ops/knowledge/schema.sql` creates `guideline_chunks` with a pgvector
-`embedding vector(768)` column (HNSW cosine index), a Postgres full-text
+`embedding vector(1536)` column (HNSW cosine index), a Postgres full-text
 `search_vector` (GIN-indexed), and a GIN index over `tags`.
 
 **Retrieval is vector-first.** Each chunk is embedded on write (the Gemini
@@ -83,6 +83,29 @@ Requirements for the live path:
   it the store runs on full-text alone.
 
 Without config the module falls back to the offline in-repo corpus.
+
+**Embedding model & dimension.** The default is `gemini-embedding-001` requested
+at **1536** dims — chosen for scale: it is finer-grained than the older 768-wide
+models yet stays under pgvector's **2000-dim HNSW ceiling** for the standard
+`vector` type, so retrieval keeps the fast index. `gemini-embedding-001` is a
+Matryoshka model, so the module simply asks for a 1536-wide slice of its native
+3072 (`outputDimensionality`); no re-normalization is needed because retrieval
+ranks by cosine, which ignores magnitude.
+
+> **Changing the model or dimension is a re-embed, not a config flip.** Embeddings
+> from different models/widths are not comparable, and `ADD COLUMN IF NOT EXISTS`
+> will not resize an existing column. On a store that already holds vectors, drop
+> and recreate, then re-ingest:
+> ```sql
+> ALTER TABLE guideline_chunks DROP COLUMN embedding;   -- old width
+> ```
+> then re-run `schema.sql` (recreates `embedding vector(1536)` + the index) and
+> re-ingest your documents through the UI/CLI so they embed at the new width. A
+> brand-new store needs none of this — `schema.sql` already creates 1536.
+
+> Note: `seed_from_corpus.php` loads the in-repo corpus for full-text search but
+> does not embed (it runs without the OpenEMR/Gemini runtime). To vector-index the
+> corpus, ingest it through the CLI/UI instead, which embeds on write.
 
 > Note: `seed_from_corpus.php` loads the in-repo corpus for full-text search but
 > does not embed (it runs without the OpenEMR/Gemini runtime). To vector-index the

@@ -22,7 +22,7 @@ namespace OpenEMR\Modules\ClinicalCopilot\Knowledge;
  */
 final class UnavailableEmbeddingClient implements EmbeddingClientInterface
 {
-    public function __construct(private readonly int $dimension = 768)
+    public function __construct(private readonly int $dimension = 1536)
     {
     }
 

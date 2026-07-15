@@ -29,6 +29,13 @@ use Psr\Log\LoggerInterface;
  * Every failure degrades to null (never throws to the caller): the writer then
  * stores the chunk with a NULL embedding and retrieval falls back to full-text,
  * so a flaky embeddings hop never breaks ingestion or search.
+ *
+ * The request pins `outputDimensionality` to the configured width, so a
+ * Matryoshka model (gemini-embedding-001) returns a truncated slice that fits the
+ * pgvector column exactly. No client-side re-normalization is needed: retrieval
+ * ranks by COSINE distance (`vector_cosine_ops` / the `<=>` operator), which is
+ * magnitude-invariant — only the vector's direction matters, and truncation
+ * preserves direction.
  */
 final class GeminiEmbeddingClient implements EmbeddingClientInterface
 {
@@ -39,8 +46,8 @@ final class GeminiEmbeddingClient implements EmbeddingClientInterface
 
     public function __construct(
         private readonly string $apiKey,
-        private readonly string $model = 'text-embedding-004',
-        private readonly int $dimension = 768,
+        private readonly string $model = 'gemini-embedding-001',
+        private readonly int $dimension = 1536,
         ?ClientInterface $httpClient = null,
         private readonly ?LoggerInterface $logger = null,
     ) {
@@ -82,6 +89,11 @@ final class GeminiEmbeddingClient implements EmbeddingClientInterface
             fn (string $text): array => [
                 'model' => $modelPath,
                 'content' => ['parts' => [['text' => $text]]],
+                // Ask the model for exactly the column width. gemini-embedding-001
+                // is Matryoshka-trained: it returns the first N of its native 3072
+                // as a valid shorter embedding, so 1536 keeps pgvector's standard
+                // HNSW index (2000-dim cap) while staying finer-grained than 768.
+                'outputDimensionality' => $this->dimension,
             ],
             $texts,
         );
