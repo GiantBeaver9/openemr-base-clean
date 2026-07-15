@@ -71,6 +71,38 @@ final class IngestController
         return $this->ingest->ingestIntake($bytes, $filename, $mimeType, $this->newCorrelationId(), $userId);
     }
 
+    /**
+     * Deferred-save intake: extract the fields but create/persist NOTHING, for
+     * the human-reviewed create-at-save flow.
+     *
+     * @return array{fields: array<string, string|null>, vision_used: bool, schema_rejected: bool}
+     */
+    public function previewIntake(string $bytes, string $mimeType): array
+    {
+        return $this->ingest->previewIntake($bytes, $mimeType, $this->newCorrelationId());
+    }
+
+    /**
+     * The human-confirmed intake save: create the patient from reviewed
+     * demographics, store the source PDF, and write reviewed allergies/meds to
+     * the chart lists. Returns the new pid or validation errors.
+     *
+     * @param array<string, string|null> $demographics field_key => reviewed value
+     * @param array{allergies?: ?string, medications?: ?string} $clinical
+     *
+     * @return array{pid: ?int, errors: list<string>}
+     */
+    public function commitReviewedIntake(
+        array $demographics,
+        array $clinical,
+        string $pdfBytes,
+        string $filename,
+        string $mimeType,
+        int $userId,
+    ): array {
+        return $this->ingest->commitReviewedIntake($demographics, $clinical, $pdfBytes, $filename, $mimeType, $userId);
+    }
+
     public function ingestLab(int $pid, string $bytes, string $filename, string $mimeType, int $userId): IngestResult
     {
         return $this->ingest->ingestLab($pid, $bytes, $filename, $mimeType, $this->newCorrelationId(), $userId);

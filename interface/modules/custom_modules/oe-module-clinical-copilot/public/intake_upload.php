@@ -1,7 +1,14 @@
 <?php
 
 /**
- * Clinical Co-Pilot -- Week 2 intake upload: create a patient from an intake PDF.
+ * Clinical Co-Pilot -- Week 2 intake: create a patient from an intake PDF.
+ *
+ * Deferred-save flow: upload -> extract (persist NOTHING) -> a two-pane review
+ * screen (prefilled new-patient fields on the left, the source PDF on the right)
+ * -> the human edits and clicks Save, and only THEN is the patient created, the
+ * PDF stored, and reviewed allergies/medications written to the chart. Nothing
+ * is written before the human confirms, so a failed/absent extraction degrades
+ * to a blank form to fill by hand rather than crashing.
  *
  * @package   OpenEMR
  * @link      https://www.open-emr.org
@@ -19,17 +26,18 @@ require_once __DIR__ . '/../../../../globals.php';
 
 use OpenEMR\Common\Acl\AclMain;
 use OpenEMR\Common\Csrf\CsrfUtils;
+use OpenEMR\Common\Logging\SystemLogger;
 use OpenEMR\Common\Session\SessionWrapperFactory;
 use OpenEMR\Common\Twig\TwigContainer;
 use OpenEMR\Core\OEGlobalsBag;
 use OpenEMR\Modules\ClinicalCopilot\Config\LlmRuntimeConfig;
 use OpenEMR\Modules\ClinicalCopilot\Controller\IngestController;
+use OpenEMR\Modules\ClinicalCopilot\Ingest\IntakeFormTemplate;
 use OpenEMR\Modules\ClinicalCopilot\Ingest\UploadedDocument;
 
 $session = SessionWrapperFactory::getInstance()->getActiveSession();
 $isPost = ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST';
 
-// CSRF -> ACL -> session identity (build-notes.md page bootstrap contract).
 if ($isPost) {
     CsrfUtils::checkCsrfInput(INPUT_POST, $session, dieOnFail: true);
 }
@@ -43,8 +51,10 @@ if (!AclMain::aclCheckCore('patients', 'med') || !AclMain::aclCheckCore('clinica
 $authUserId = (int)($session->get('authUserID') ?? 0);
 $webRoot = OEGlobalsBag::getInstance()->getWebRoot();
 $moduleBase = $webRoot . '/interface/modules/custom_modules/oe-module-clinical-copilot/public';
+$postUrl = $moduleBase . '/intake_upload.php';
+$action = $isPost ? (string)($_POST['action'] ?? '') : '';
 
-if ($isPost && ($_POST['action'] ?? '') === 'upload') {
+if ($action === 'upload') {
     $entry = $_FILES['document'] ?? null;
     $upload = UploadedDocument::fromFilesEntry($entry);
     if ($upload === null) {
@@ -52,19 +62,77 @@ if ($isPost && ($_POST['action'] ?? '') === 'upload') {
         exit;
     }
 
-    $controller = IngestController::createDefault();
-    $result = $controller->ingestIntake($upload->bytes, $upload->filename, $upload->mimeType, $authUserId);
+    // Extract only -- no patient, no draft, no writes. Degrades to empty on any
+    // model failure (the form just renders blank for manual entry).
+    try {
+        $preview = IngestController::createDefault()->previewIntake($upload->bytes, $upload->mimeType);
+        $values = is_array($preview['fields'] ?? null) ? $preview['fields'] : [];
+    } catch (\Throwable $e) {
+        (new SystemLogger())->error('ClinicalCopilot: intake preview failed', ['exception' => $e]);
+        $values = [];
+    }
 
-    header('Location: ' . $moduleBase . '/extraction_review.php?extraction_id=' . $result->extractionId);
+    renderReview($postUrl, $values, base64_encode($upload->bytes), $upload->mimeType, $upload->filename, []);
+    exit;
+}
+
+if ($action === 'save') {
+    $values = readFieldValues();
+    $pdfB64 = (string)($_POST['pdf_b64'] ?? '');
+    $pdfMime = (string)($_POST['pdf_mime'] ?? 'application/pdf');
+    $pdfName = (string)($_POST['pdf_name'] ?? 'intake.pdf');
+    $pdfBytes = $pdfB64 !== '' ? (string)base64_decode($pdfB64, true) : '';
+
+    $clinical = [
+        'allergies' => $values['allergies'] ?? null,
+        'medications' => $values['current_medications'] ?? null,
+    ];
+
+    try {
+        $result = IngestController::createDefault()
+            ->commitReviewedIntake($values, $clinical, $pdfBytes, $pdfName, $pdfMime, $authUserId);
+    } catch (\Throwable $e) {
+        (new SystemLogger())->error('ClinicalCopilot: intake save failed', ['exception' => $e]);
+        renderReview($postUrl, $values, $pdfB64, $pdfMime, $pdfName, [xl('The patient could not be saved right now. Please try again.')]);
+        exit;
+    }
+
+    if ($result['pid'] !== null) {
+        // Land on the new patient's chart (core demographics summary, which
+        // accepts set_pid to make them the active patient).
+        header('Location: ' . $webRoot . '/interface/patient_file/summary/demographics.php?set_pid=' . (int)$result['pid']);
+        exit;
+    }
+
+    renderReview($postUrl, $values, $pdfB64, $pdfMime, $pdfName, $result['errors']);
     exit;
 }
 
 renderIntakeForm($moduleBase, $webRoot);
 
+/**
+ * @return array<string, string>
+ */
+function readFieldValues(): array
+{
+    $raw = $_POST['field'] ?? [];
+    if (!is_array($raw)) {
+        return [];
+    }
+
+    $values = [];
+    foreach ($raw as $key => $value) {
+        if (is_string($key) && is_string($value)) {
+            $values[$key] = trim($value);
+        }
+    }
+
+    return $values;
+}
+
 function renderIntakeForm(string $moduleBase, string $webRoot, string $error = ''): void
 {
-    $twig = (new TwigContainer(dirname(__DIR__) . '/templates', OEGlobalsBag::getInstance()->getKernel()))->getTwig();
-    echo $twig->render('oe-module-clinical-copilot/intake_upload.html.twig', [
+    echo twigEnv()->render('oe-module-clinical-copilot/intake_upload.html.twig', [
         'post_url' => $moduleBase . '/intake_upload.php',
         'pdf_url' => $moduleBase . '/intake_form_pdf.php',
         'web_root' => $webRoot,
@@ -72,4 +140,48 @@ function renderIntakeForm(string $moduleBase, string $webRoot, string $error = '
         'llm_configured' => LlmRuntimeConfig::llmConfigured(),
         'max_mb' => (int)floor(UploadedDocument::MAX_DOCUMENT_BYTES / (1024 * 1024)),
     ]);
+}
+
+/**
+ * Render the two-pane review screen: prefilled new-patient fields (left), the
+ * source PDF (right), all sections expanded.
+ *
+ * @param array<string, string> $values   field_key => current value
+ * @param list<string>          $errors
+ */
+function renderReview(string $postUrl, array $values, string $pdfB64, string $pdfMime, string $pdfName, array $errors): void
+{
+    // Build the grouped field view model from the single source of truth that
+    // also drives the printable form (so the screen and the PDF always match).
+    $groups = [];
+    foreach (IntakeFormTemplate::sections() as $section) {
+        $fields = [];
+        foreach ($section['fields'] as $field) {
+            $key = $field['key'];
+            $fields[] = [
+                'key' => $key,
+                'label' => $field['label'],
+                'is_demographic' => $field['patient_data'] !== null,
+                'lines' => $field['lines'],
+                'value' => $values[$key] ?? '',
+            ];
+        }
+        $groups[] = ['section' => $section['section'], 'fields' => $fields];
+    }
+
+    echo twigEnv()->render('oe-module-clinical-copilot/intake_review.html.twig', [
+        'post_url' => $postUrl,
+        'groups' => $groups,
+        'errors' => $errors,
+        'pdf_data_uri' => 'data:' . $pdfMime . ';base64,' . $pdfB64,
+        'pdf_b64' => $pdfB64,
+        'pdf_mime' => $pdfMime,
+        'pdf_name' => $pdfName,
+        'sex_options' => ['Male', 'Female', 'Unknown', 'Other'],
+    ]);
+}
+
+function twigEnv(): \Twig\Environment
+{
+    return (new TwigContainer(dirname(__DIR__) . '/templates', OEGlobalsBag::getInstance()->getKernel()))->getTwig();
 }

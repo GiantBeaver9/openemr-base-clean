@@ -101,6 +101,28 @@ final class ChartWriter
      */
     public function createPatientFromIntake(array $demographics): int
     {
+        $result = $this->tryCreatePatient($demographics);
+        if ($result['pid'] === null) {
+            throw new \RuntimeException('Core rejected the intake patient insert (validation)');
+        }
+
+        return $result['pid'];
+    }
+
+    /**
+     * Non-throwing patient create for the deferred-save review flow: map the
+     * reviewed demographics to `patient_data` columns and insert via the core
+     * PatientService. Returns the new pid, or the core validation messages so the
+     * endpoint can re-render the form with errors instead of surfacing a 500.
+     * This is the ONLY create path used by the human-confirmed intake save; the
+     * patient does not exist until the reviewer clicks Save.
+     *
+     * @param array<string, string|null> $demographics field_key => value
+     *
+     * @return array{pid: ?int, errors: list<string>}
+     */
+    public function tryCreatePatient(array $demographics): array
+    {
         $data = [];
         foreach (self::DEMOGRAPHIC_COLUMNS as $fieldKey => $column) {
             if (array_key_exists($fieldKey, $demographics) && $demographics[$fieldKey] !== null && $demographics[$fieldKey] !== '') {
@@ -110,17 +132,66 @@ final class ChartWriter
 
         $result = $this->patientService->insert($data);
         if (!$result->isValid()) {
-            throw new \RuntimeException('Core rejected the intake patient insert (validation)');
+            return ['pid' => null, 'errors' => $this->flattenValidationMessages($result->getValidationMessages())];
         }
 
         $payload = $result->getData();
         $first = is_array($payload) ? ($payload[0] ?? null) : null;
         $pid = is_array($first) ? ($first['pid'] ?? null) : null;
         if (!is_int($pid) && !(is_string($pid) && ctype_digit($pid))) {
-            throw new \RuntimeException('Core patient insert returned no pid');
+            return ['pid' => null, 'errors' => ['The patient could not be saved. Please try again.']];
         }
 
-        return (int)$pid;
+        return ['pid' => (int)$pid, 'errors' => []];
+    }
+
+    /**
+     * Writes reviewed free-text clinical lines (one allergy / medication per
+     * line) to the chart `lists` as active entries. Blank input is a no-op. Called
+     * only from the human-confirmed intake save — the core Add-Patient form does
+     * not capture these, so this is where "allergen information etc." lands.
+     */
+    public function addChartListLines(int $pid, string $type, ?string $text, int $userId): void
+    {
+        if ($text === null || trim($text) === '') {
+            return;
+        }
+
+        foreach (preg_split('/[\r\n;]+/', $text) ?: [] as $line) {
+            $title = trim($line);
+            if ($title === '') {
+                continue;
+            }
+            $uuid = (new UuidRegistry(['table_name' => 'lists']))->createUuid();
+            QueryUtils::sqlInsert(
+                'INSERT INTO `lists` (`pid`, `type`, `title`, `begdate`, `activity`, `date`, `user`, `uuid`) '
+                . 'VALUES (?, ?, ?, ?, 1, NOW(), ?, ?)',
+                [$pid, $type, $title, date('Y-m-d'), (string)$userId, $uuid],
+            );
+        }
+    }
+
+    /**
+     * @param mixed $messages the ProcessingResult validation messages (field => message(s))
+     *
+     * @return list<string>
+     */
+    private function flattenValidationMessages(mixed $messages): array
+    {
+        $errors = [];
+        if (is_array($messages)) {
+            foreach ($messages as $field => $fieldMessages) {
+                foreach (is_array($fieldMessages) ? $fieldMessages : [$fieldMessages] as $message) {
+                    $text = is_string($message) ? $message : (is_scalar($message) ? (string)$message : 'invalid');
+                    $errors[] = is_string($field) && $field !== '' ? "{$field}: {$text}" : $text;
+                }
+            }
+        }
+        if ($errors === []) {
+            $errors[] = 'Required demographics are missing or invalid (first name, last name, birth sex, and date of birth are required).';
+        }
+
+        return $errors;
     }
 
     /**
@@ -163,9 +234,13 @@ final class ChartWriter
         string $filename,
         string $mimeType,
         string $bytes,
-        int $extractionId,
+        ?int $extractionId,
     ): ?int {
         $doc = new \Document();
+        // Link the document back to the staging extraction when there is one; the
+        // deferred-save intake flow has no extraction row, so store it unlinked.
+        $foreignId = $extractionId ?? 0;
+        $foreignTable = $extractionId !== null ? 'mod_copilot_extraction' : '';
         $error = $doc->createDocument(
             $pid,
             $categoryId,
@@ -177,8 +252,8 @@ final class ChartWriter
             0,
             null,
             null,
-            $extractionId,
-            'mod_copilot_extraction',
+            $foreignId,
+            $foreignTable,
         );
 
         if (is_string($error) && $error !== '') {

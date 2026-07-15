@@ -78,6 +78,72 @@ final class AttachAndExtract
     }
 
     /**
+     * Deferred-save intake preview: extract the intake fields but persist NOTHING
+     * and create NO patient. Degrades to an empty map (a blank form the reviewer
+     * hand-fills) when the model is unavailable or its output fails the schema —
+     * so this can never crash the way the old create-at-upload path did. The
+     * human confirms on the review screen; only then does {@see commitReviewedIntake}
+     * write anything.
+     *
+     * @return array{fields: array<string, string|null>, vision_used: bool, schema_rejected: bool}
+     */
+    public function previewIntake(string $bytes, string $mimeType, string $correlationId): array
+    {
+        $span = $this->openSpan($correlationId, null, 'preview', 0);
+        [$outcome, $visionUsed, $schemaRejected] = $this->tryExtract(
+            DocType::IntakeForm,
+            $bytes,
+            $mimeType,
+            $correlationId,
+            $span,
+            0,
+        );
+        $this->tracer->record($span);
+
+        return [
+            'fields' => $this->demographicsFrom($outcome),
+            'vision_used' => $visionUsed,
+            'schema_rejected' => $schemaRejected,
+        ];
+    }
+
+    /**
+     * The human-confirmed save (deferred persistence): create the patient from
+     * the REVIEWED demographics, store the source PDF against the new chart, and
+     * write the reviewed allergies/medications to the chart lists — all here, in
+     * the one save the user triggered, nothing before it. Returns the new pid, or
+     * validation errors so the endpoint re-renders the form instead of crashing.
+     *
+     * @param array<string, string|null> $demographics field_key => reviewed value
+     * @param array{allergies?: ?string, medications?: ?string} $clinical
+     *
+     * @return array{pid: ?int, errors: list<string>}
+     */
+    public function commitReviewedIntake(
+        array $demographics,
+        array $clinical,
+        string $pdfBytes,
+        string $filename,
+        string $mimeType,
+        int $userId,
+    ): array {
+        $create = $this->chartWriter->tryCreatePatient($demographics);
+        if ($create['pid'] === null) {
+            return ['pid' => null, 'errors' => $create['errors']];
+        }
+        $pid = $create['pid'];
+
+        if ($pdfBytes !== '') {
+            $this->chartWriter->storeSourceDocument($pid, $this->documentCategoryId, $filename, $mimeType, $pdfBytes, null);
+        }
+
+        $this->chartWriter->addChartListLines($pid, 'allergy', $clinical['allergies'] ?? null, $userId);
+        $this->chartWriter->addChartListLines($pid, 'medication', $clinical['medications'] ?? null, $userId);
+
+        return ['pid' => $pid, 'errors' => []];
+    }
+
+    /**
      * Labs: existing patient. Store the source, extract, persist the draft. No
      * chart write here — results reach `procedure_result` only on lock.
      */
