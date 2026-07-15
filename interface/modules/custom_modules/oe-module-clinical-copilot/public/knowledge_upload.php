@@ -31,12 +31,20 @@ use OpenEMR\Modules\ClinicalCopilot\Knowledge\ChunkOptions;
 use OpenEMR\Modules\ClinicalCopilot\Knowledge\DocumentMetadata;
 use OpenEMR\Modules\ClinicalCopilot\Knowledge\KnowledgeBaseStatus;
 use OpenEMR\Modules\ClinicalCopilot\Knowledge\KnowledgeDocumentIngestor;
+use OpenEMR\Modules\ClinicalCopilot\Knowledge\TagInput;
 use OpenEMR\Modules\ClinicalCopilot\Knowledge\UnsupportedDocumentException;
 use OpenEMR\Modules\ClinicalCopilot\Rag\GuidelineChunk;
-use OpenEMR\Modules\ClinicalCopilot\Reduce\LlmUnavailableException;
 
 $session = SessionWrapperFactory::getInstance()->getActiveSession();
 $isPost = ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST';
+
+// A body over post_max_size makes PHP discard $_POST/$_FILES (incl. the CSRF
+// token); detect it and return a clear size error rather than dying on CSRF.
+if ($isPost && $_POST === [] && (int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) {
+    http_response_code(413);
+    echo xlt('That upload was too large to process. Please use a smaller file.');
+    exit;
+}
 
 if ($isPost) {
     CsrfUtils::checkCsrfInput(INPUT_POST, $session, dieOnFail: true);
@@ -60,77 +68,80 @@ $postUrl = $moduleBase . '/knowledge_upload.php';
 /** Upper bound on an uploaded knowledge document (matches the Gemini inline cap). */
 const KNOWLEDGE_MAX_BYTES = 12 * 1024 * 1024;
 
-$ingestor = KnowledgeDocumentIngestor::createDefault();
 $action = $isPost ? (string)($_POST['action'] ?? '') : '';
 
-if ($action === 'preview') {
-    $meta = readMetadata();
-    if ($meta === null) {
-        renderForm($moduleBase, $postUrl, error: xl('A source label is required (it is the citation and the re-upload key).'));
-        exit;
-    }
-    $baseTags = parseTags((string)($_POST['tags'] ?? ''));
-    $chunkOptions = readChunkOptions();
+// Everything from here can reach the model or the external store. Any failure —
+// an unconfigured/unreachable store, a transient outage, a bad table env, an
+// audit or render hiccup — resolves to ONE generic notice, never a raw error or
+// internal detail. Input guidance (missing source, wrong file type) stays specific.
+try {
+    $ingestor = KnowledgeDocumentIngestor::createDefault();
 
-    try {
-        [$bytes, $mimeType, $pasted] = readDocumentInput();
-        if ($bytes === '') {
-            renderForm($moduleBase, $postUrl, error: xl('Upload a document or paste some text to ingest.'));
+    if ($action === 'preview') {
+        $meta = readMetadata();
+        if ($meta === null) {
+            renderForm($postUrl, error: xl('A source label is required (it is the citation and the re-upload key).'));
             exit;
         }
+        $baseTags = TagInput::parse((string)($_POST['tags'] ?? ''));
+        $chunkOptions = readChunkOptions();
+
+        try {
+            [$bytes, $mimeType, $pasted] = readDocumentInput();
+        } catch (UnsupportedDocumentException) {
+            renderForm($postUrl, error: xl('That file type is not supported. Upload text, markdown, HTML, PDF, or an image.'));
+            exit;
+        }
+        if ($bytes === '') {
+            renderForm($postUrl, error: xl('Upload a document or paste some text to ingest.'));
+            exit;
+        }
+
         $chunks = $pasted
             ? $ingestor->previewFromText($bytes, $meta, $baseTags, $chunkOptions)
             : $ingestor->preview($bytes, $mimeType, $meta, $baseTags, $chunkOptions);
-    } catch (UnsupportedDocumentException $e) {
-        renderForm($moduleBase, $postUrl, error: xl('That file type is not supported. Upload text, markdown, HTML, PDF, or an image.'));
-        exit;
-    } catch (LlmUnavailableException $e) {
-        renderForm($moduleBase, $postUrl, error: xl('Reading a PDF/image needs the model, which is not configured. Paste the text or upload a .txt/.md/.html file instead.'));
-        exit;
-    } catch (\Throwable $e) {
-        (new SystemLogger())->error('ClinicalCopilot: knowledge preview failed', ['exception' => $e]);
-        renderForm($moduleBase, $postUrl, error: xl('Could not read that document (see server log).'));
+
+        if ($chunks === []) {
+            renderForm($postUrl, error: xl('No text could be read from that document. Please try again later, or contact your administrator.'));
+            exit;
+        }
+
+        renderReview($postUrl, $meta, $chunks);
         exit;
     }
 
-    if ($chunks === []) {
-        renderForm($moduleBase, $postUrl, error: xl('No text could be extracted from that document.'));
-        exit;
-    }
+    if ($action === 'commit') {
+        $chunks = decodeChunks((string)($_POST['chunks_json'] ?? ''));
+        if ($chunks === []) {
+            renderForm($postUrl, error: xl('Nothing to commit — please upload and preview a document first.'));
+            exit;
+        }
+        $replaceExisting = ($_POST['replace_existing'] ?? '1') === '1';
 
-    renderReview($moduleBase, $postUrl, $meta, $chunks);
-    exit;
-}
-
-if ($action === 'commit') {
-    $chunks = decodeChunks((string)($_POST['chunks_json'] ?? ''));
-    if ($chunks === []) {
-        renderForm($moduleBase, $postUrl, error: xl('Nothing to commit — please upload and preview a document first.'));
-        exit;
-    }
-    $replaceExisting = ($_POST['replace_existing'] ?? '1') === '1';
-
-    try {
         $written = $ingestor->commit($chunks, $replaceExisting);
-    } catch (\Throwable $e) {
-        (new SystemLogger())->error('ClinicalCopilot: knowledge commit failed', ['exception' => $e]);
-        renderForm($moduleBase, $postUrl, error: xl('Could not write to the knowledge store (check that it is configured and reachable).'));
+
+        EventAuditLogger::getInstance()->newEvent(
+            'security',
+            $authUser,
+            $authProvider,
+            1,
+            "Clinical Co-Pilot: ingested knowledge document '{$chunks[0]->source}' ({$written} chunks)",
+        );
+
+        renderResult($postUrl, $chunks[0]->source, $written);
         exit;
     }
 
-    EventAuditLogger::getInstance()->newEvent(
-        'security',
-        $authUser,
-        $authProvider,
-        1,
-        "Clinical Co-Pilot: ingested knowledge document '{$chunks[0]->source}' ({$written} chunks)",
-    );
-
-    renderResult($moduleBase, $postUrl, $chunks[0]->source, $written);
-    exit;
+    renderForm($postUrl);
+} catch (\Throwable $e) {
+    (new SystemLogger())->error('ClinicalCopilot: knowledge upload failed', ['exception' => $e]);
+    try {
+        renderForm($postUrl, error: xl('We could not complete that just now. Please try again later, or contact your administrator.'));
+    } catch (\Throwable) {
+        http_response_code(500);
+        echo xlt('We could not complete that just now. Please try again later, or contact your administrator.');
+    }
 }
-
-renderForm($moduleBase, $postUrl);
 
 // --- helpers -------------------------------------------------------------
 
@@ -164,22 +175,6 @@ function readChunkOptions(): ChunkOptions
     }
 
     return new ChunkOptions($target, $overlap);
-}
-
-/**
- * @return list<string>
- */
-function parseTags(string $raw): array
-{
-    $tags = [];
-    foreach (preg_split('/[,\n]/', $raw) ?: [] as $tag) {
-        $tag = trim($tag);
-        if ($tag !== '') {
-            $tags[] = $tag;
-        }
-    }
-
-    return $tags;
 }
 
 /**
@@ -241,7 +236,7 @@ function decodeChunks(string $json): array
     return $chunks;
 }
 
-function renderForm(string $moduleBase, string $postUrl, string $error = ''): void
+function renderForm(string $postUrl, string $error = ''): void
 {
     echo twig()->render('oe-module-clinical-copilot/knowledge_upload.html.twig', [
         'view' => 'form',
@@ -260,7 +255,7 @@ function renderForm(string $moduleBase, string $postUrl, string $error = ''): vo
 /**
  * @param list<GuidelineChunk> $chunks
  */
-function renderReview(string $moduleBase, string $postUrl, DocumentMetadata $meta, array $chunks): void
+function renderReview(string $postUrl, DocumentMetadata $meta, array $chunks): void
 {
     $view = array_map(static fn (GuidelineChunk $c): array => [
         'id' => $c->id,
@@ -270,6 +265,11 @@ function renderReview(string $moduleBase, string $postUrl, DocumentMetadata $met
         'chars' => mb_strlen($c->text),
     ], $chunks);
 
+    // Chunk bodies are already normalized to valid UTF-8 by the extractor, so
+    // json_encode should not fail; guard anyway so a malformed round-trip becomes
+    // an empty payload (→ "nothing to commit") rather than a broken hidden field.
+    $chunksJson = json_encode(array_map(static fn (GuidelineChunk $c): array => $c->toArray(), $chunks));
+
     echo twig()->render('oe-module-clinical-copilot/knowledge_upload.html.twig', [
         'view' => 'review',
         'post_url' => $postUrl,
@@ -277,11 +277,11 @@ function renderReview(string $moduleBase, string $postUrl, DocumentMetadata $met
         'title' => $meta->title,
         'chunk_count' => count($chunks),
         'chunks' => $view,
-        'chunks_json' => json_encode(array_map(static fn (GuidelineChunk $c): array => $c->toArray(), $chunks)),
+        'chunks_json' => $chunksJson !== false ? $chunksJson : '[]',
     ]);
 }
 
-function renderResult(string $moduleBase, string $postUrl, string $source, int $written): void
+function renderResult(string $postUrl, string $source, int $written): void
 {
     echo twig()->render('oe-module-clinical-copilot/knowledge_upload.html.twig', [
         'view' => 'result',

@@ -130,6 +130,19 @@ final class GeminiEmbeddingClient implements EmbeddingClientInterface
                     $vector[] = (float)$v;
                 }
             }
+            // Guard the configured dimension: a model whose output width does not
+            // match the pgvector column would throw an opaque "different vector
+            // dimensions" on write and silently disable vector reads. Treat a
+            // mismatch as "not embedded" so the store degrades to full-text with a
+            // clear signal rather than corrupting.
+            if ($vector !== [] && count($vector) !== $this->dimension) {
+                $this->logger?->warning('Clinical Co-Pilot: embedding dimension mismatch', [
+                    'expected' => $this->dimension,
+                    'got' => count($vector),
+                    'model' => $this->model,
+                ]);
+                $vector = [];
+            }
             $out[] = $vector === [] ? null : $vector;
         }
 

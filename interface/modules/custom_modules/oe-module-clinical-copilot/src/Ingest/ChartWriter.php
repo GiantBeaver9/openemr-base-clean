@@ -92,24 +92,6 @@ final class ChartWriter
     }
 
     /**
-     * Creates the patient from verified intake demographics and returns the new
-     * pid. Non-demographic intake facts are ignored here (they live in staging).
-     *
-     * @param array<string, string|null> $demographics field_key => value
-     *
-     * @throws \RuntimeException when core validation rejects the insert
-     */
-    public function createPatientFromIntake(array $demographics): int
-    {
-        $result = $this->tryCreatePatient($demographics);
-        if ($result['pid'] === null) {
-            throw new \RuntimeException('Core rejected the intake patient insert (validation)');
-        }
-
-        return $result['pid'];
-    }
-
-    /**
      * Non-throwing patient create for the deferred-save review flow: map the
      * reviewed demographics to `patient_data` columns and insert via the core
      * PatientService. Returns the new pid, or the core validation messages so the
@@ -150,8 +132,11 @@ final class ChartWriter
      * line) to the chart `lists` as active entries. Blank input is a no-op. Called
      * only from the human-confirmed intake save — the core Add-Patient form does
      * not capture these, so this is where "allergen information etc." lands.
+     *
+     * $userName is the LOGIN NAME (patient_data/lists convention stores the
+     * username in `lists.user`, e.g. "admin" — not the numeric user id).
      */
-    public function addChartListLines(int $pid, string $type, ?string $text, int $userId): void
+    public function addChartListLines(int $pid, string $type, ?string $text, string $userName): void
     {
         if ($text === null || trim($text) === '') {
             return;
@@ -166,7 +151,7 @@ final class ChartWriter
             QueryUtils::sqlInsert(
                 'INSERT INTO `lists` (`pid`, `type`, `title`, `begdate`, `activity`, `date`, `user`, `uuid`) '
                 . 'VALUES (?, ?, ?, ?, 1, NOW(), ?, ?)',
-                [$pid, $type, $title, date('Y-m-d'), (string)$userId, $uuid],
+                [$pid, $type, $title, date('Y-m-d'), $userName, $uuid],
             );
         }
     }

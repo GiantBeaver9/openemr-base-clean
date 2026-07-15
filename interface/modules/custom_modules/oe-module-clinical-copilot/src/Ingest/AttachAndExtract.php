@@ -14,25 +14,25 @@ declare(strict_types=1);
 
 namespace OpenEMR\Modules\ClinicalCopilot\Ingest;
 
+use OpenEMR\Common\Logging\SystemLogger;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\NullTraceRecorder;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\TraceRecorderInterface;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\TraceSpan;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\LlmUnavailableException;
 
 /**
- * The Week 2 `attach_and_extract(patient_id, file, doc_type)` tool. It never
- * commits derived facts to the chart itself — that is the lock step
- * ({@see ExtractionReview}) via {@see ChartWriter}. The one exception is intake:
- * a patient must exist before we can navigate to their page, so intake creates
- * the patient at upload from the model's best-guess demographics; the physician
- * then verifies/corrects on that patient's page before locking.
+ * The Week 2 `attach_and_extract` flow. It never commits derived facts to the
+ * chart itself — labs reach the chart only at the human lock step
+ * ({@see ExtractionReview} via {@see ChartWriter}), and intake creates the
+ * patient only at the human-confirmed save ({@see commitReviewedIntake}); nothing
+ * is written at upload.
  *
  * Everything degrades: no model configured ({@see LlmUnavailableException}) or
  * model output that fails the strict schema ({@see SchemaValidationException})
- * both fall back to a blank draft the physician hand-fills — the flow never
- * dead-ends on a missing or misbehaving model. The correlation id threads
- * through the ingest span, the vision_extract child span, and (later) the
- * chart_commit span, so the whole ingestion is one reconstructable trace.
+ * both fall back to a blank draft/form the reviewer hand-fills — the flow never
+ * dead-ends on a missing or misbehaving model. The correlation id threads through
+ * the ingest span and the vision_extract child span, so the extraction is one
+ * reconstructable trace.
  */
 final class AttachAndExtract
 {
@@ -43,38 +43,6 @@ final class AttachAndExtract
         private readonly int $documentCategoryId,
         private readonly TraceRecorderInterface $tracer = new NullTraceRecorder(),
     ) {
-    }
-
-    /**
-     * Intake: create the patient from the extracted demographics, store the
-     * source, and persist the draft. Returns the new pid + extraction id.
-     */
-    public function ingestIntake(
-        string $bytes,
-        string $filename,
-        string $mimeType,
-        string $correlationId,
-        int $userId,
-    ): IngestResult {
-        $span = $this->openSpan($correlationId, null, 'ingest', 0);
-        [$outcome, $visionUsed, $schemaRejected] = $this->tryExtract(
-            DocType::IntakeForm,
-            $bytes,
-            $mimeType,
-            $correlationId,
-            $span,
-            0,
-        );
-
-        $demographics = $this->demographicsFrom($outcome);
-        $pid = $this->chartWriter->createPatientFromIntake($demographics);
-
-        $extractionId = $this->persistDraft($pid, DocType::IntakeForm, $outcome, $visionUsed, $correlationId, $userId);
-        $this->storeSource($pid, $filename, $mimeType, $bytes, $extractionId);
-
-        $this->tracer->record($span);
-
-        return new IngestResult($pid, $extractionId, DocType::IntakeForm, $visionUsed, $schemaRejected);
     }
 
     /**
@@ -116,6 +84,7 @@ final class AttachAndExtract
      *
      * @param array<string, string|null> $demographics field_key => reviewed value
      * @param array{allergies?: ?string, medications?: ?string} $clinical
+     * @param string $userName the acting clinician's LOGIN NAME (for lists.user)
      *
      * @return array{pid: ?int, errors: list<string>}
      */
@@ -125,7 +94,7 @@ final class AttachAndExtract
         string $pdfBytes,
         string $filename,
         string $mimeType,
-        int $userId,
+        string $userName,
     ): array {
         $create = $this->chartWriter->tryCreatePatient($demographics);
         if ($create['pid'] === null) {
@@ -133,12 +102,23 @@ final class AttachAndExtract
         }
         $pid = $create['pid'];
 
-        if ($pdfBytes !== '') {
-            $this->chartWriter->storeSourceDocument($pid, $this->documentCategoryId, $filename, $mimeType, $pdfBytes, null);
+        // The patient now EXISTS. The PDF store and the allergy/medication list
+        // writes are best-effort from here: a failure must NOT report a total
+        // failure (which would prompt the reviewer to re-save and create a
+        // duplicate patient). Log any shortfall and land them on the chart.
+        $logger = new SystemLogger();
+        try {
+            if ($pdfBytes !== '') {
+                $documentId = $this->chartWriter->storeSourceDocument($pid, $this->documentCategoryId, $filename, $mimeType, $pdfBytes, null);
+                if ($documentId === null) {
+                    $logger->warning('ClinicalCopilot: intake source PDF could not be stored', ['pid' => $pid]);
+                }
+            }
+            $this->chartWriter->addChartListLines($pid, 'allergy', $clinical['allergies'] ?? null, $userName);
+            $this->chartWriter->addChartListLines($pid, 'medication', $clinical['medications'] ?? null, $userName);
+        } catch (\Throwable $e) {
+            $logger->error('ClinicalCopilot: intake post-create writes partially failed', ['pid' => $pid, 'exception' => $e]);
         }
-
-        $this->chartWriter->addChartListLines($pid, 'allergy', $clinical['allergies'] ?? null, $userId);
-        $this->chartWriter->addChartListLines($pid, 'medication', $clinical['medications'] ?? null, $userId);
 
         return ['pid' => $pid, 'errors' => []];
     }

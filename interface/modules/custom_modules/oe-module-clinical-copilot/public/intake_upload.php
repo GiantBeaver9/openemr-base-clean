@@ -38,6 +38,15 @@ use OpenEMR\Modules\ClinicalCopilot\Ingest\UploadedDocument;
 $session = SessionWrapperFactory::getInstance()->getActiveSession();
 $isPost = ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST';
 
+// A body over PHP's post_max_size makes PHP discard $_POST/$_FILES (including the
+// CSRF token), which would otherwise die on the missing token. Detect it and
+// return a clear size error instead. (The carried base64 PDF can approach this.)
+if ($isPost && $_POST === [] && (int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) {
+    http_response_code(413);
+    echo xlt('That upload was too large to process. Please use a smaller file.');
+    exit;
+}
+
 if ($isPost) {
     CsrfUtils::checkCsrfInput(INPUT_POST, $session, dieOnFail: true);
 }
@@ -48,7 +57,7 @@ if (!AclMain::aclCheckCore('patients', 'med') || !AclMain::aclCheckCore('clinica
     exit;
 }
 
-$authUserId = (int)($session->get('authUserID') ?? 0);
+$authUser = (string)($session->get('authUser') ?? '');
 $webRoot = OEGlobalsBag::getInstance()->getWebRoot();
 $moduleBase = $webRoot . '/interface/modules/custom_modules/oe-module-clinical-copilot/public';
 $postUrl = $moduleBase . '/intake_upload.php';
@@ -79,7 +88,10 @@ if ($action === 'upload') {
 if ($action === 'save') {
     $values = readFieldValues();
     $pdfB64 = (string)($_POST['pdf_b64'] ?? '');
-    $pdfMime = (string)($_POST['pdf_mime'] ?? 'application/pdf');
+    // pdf_mime rides through a hidden field, so re-validate it against the upload
+    // allowlist on save — never trust it for the stored document type or the
+    // review iframe's data: URI.
+    $pdfMime = safePdfMime((string)($_POST['pdf_mime'] ?? 'application/pdf'));
     $pdfName = (string)($_POST['pdf_name'] ?? 'intake.pdf');
     $pdfBytes = $pdfB64 !== '' ? (string)base64_decode($pdfB64, true) : '';
 
@@ -90,7 +102,7 @@ if ($action === 'save') {
 
     try {
         $result = IngestController::createDefault()
-            ->commitReviewedIntake($values, $clinical, $pdfBytes, $pdfName, $pdfMime, $authUserId);
+            ->commitReviewedIntake($values, $clinical, $pdfBytes, $pdfName, $pdfMime, $authUser);
     } catch (\Throwable $e) {
         (new SystemLogger())->error('ClinicalCopilot: intake save failed', ['exception' => $e]);
         renderReview($postUrl, $values, $pdfB64, $pdfMime, $pdfName, [xl('The patient could not be saved right now. Please try again.')]);
@@ -109,6 +121,14 @@ if ($action === 'save') {
 }
 
 renderIntakeForm($moduleBase, $webRoot);
+
+/** Re-validate the round-tripped mime against the upload allowlist; else PDF. */
+function safePdfMime(string $mime): string
+{
+    $allowed = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp'];
+
+    return in_array($mime, $allowed, true) ? $mime : 'application/pdf';
+}
 
 /**
  * @return array<string, string>

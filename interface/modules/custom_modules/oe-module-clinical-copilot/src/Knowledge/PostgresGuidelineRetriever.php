@@ -51,12 +51,7 @@ final class PostgresGuidelineRetriever implements RetrieverInterface
         private readonly string $table = 'guideline_chunks',
         ?EmbeddingClientInterface $embedder = null,
     ) {
-        if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$/', $this->table) !== 1) {
-            // The table name comes from operator env, never a request — but it is
-            // interpolated into SQL (identifiers cannot be bound), so reject any
-            // value that is not a bare (optionally schema-qualified) identifier.
-            throw new \DomainException('Invalid knowledge base table name');
-        }
+        KnowledgeTableName::assertValid($this->table);
         // No embedder ⇒ full-text search only (the vector path is skipped).
         $this->embedder = $embedder ?? new UnavailableEmbeddingClient();
     }
@@ -80,16 +75,21 @@ final class PostgresGuidelineRetriever implements RetrieverInterface
 
         $limit = max(1, min(50, $topK));
 
-        // VECTOR-FIRST: embed the scrubbed (non-PHI) query and rank by pgvector
-        // cosine similarity, boosted by tag overlap. If embeddings are not
-        // configured, or the query embed fails, or no embedded rows match, fall
-        // back to Postgres full-text so search always returns something.
+        // VECTOR-FIRST, HYBRID: embed the scrubbed (non-PHI) query and rank by
+        // pgvector cosine similarity, boosted by tag overlap. Vector search only
+        // sees rows that HAVE an embedding, so when the store is mixed (e.g. a
+        // seeded corpus with NULL embeddings alongside embedded uploads) we top up
+        // the remaining slots from full-text — otherwise the non-embedded rows
+        // would be silently unreachable. With no embeddings configured (or the
+        // query embed fails), it is full-text only.
         $queryVector = $this->embedder->isAvailable() && $safeQuery !== '' ? $this->embedder->embed($safeQuery) : null;
         if ($queryVector !== null) {
-            $rows = $this->vectorSearch($queryVector, $safeTags, $limit);
-            if ($rows !== []) {
-                return $this->mapRows($rows);
+            $vectorRows = $this->vectorSearch($queryVector, $safeTags, $limit);
+            if (count($vectorRows) >= $limit) {
+                return $this->mapRows($vectorRows);
             }
+
+            return $this->mapRows($this->mergeById($vectorRows, $this->fullTextSearch($safeQuery, $safeTags, $limit), $limit));
         }
 
         return $this->mapRows($this->fullTextSearch($safeQuery, $safeTags, $limit));
@@ -107,12 +107,10 @@ final class PostgresGuidelineRetriever implements RetrieverInterface
     private function vectorSearch(array $queryVector, array $safeTags, int $limit): array
     {
         [$tagsExpr, $tagParams] = $this->tagsArrayExpression($safeTags);
-        $vectorLiteral = '[' . implode(',', array_map(
-            static fn (float $v): string => rtrim(rtrim(sprintf('%.7f', $v), '0'), '.'),
-            $queryVector,
-        )) . ']';
+        $vectorLiteral = PgLiteral::vector($queryVector);
 
-        // 1 - cosine distance = cosine similarity, in [0,1]; add the tag boost.
+        // pgvector <=> is cosine DISTANCE, so (1 - distance) is cosine similarity
+        // (range [-1,1]); add the tag-overlap boost, order by the combined score.
         $sql = sprintf(
             'SELECT id, title, source, section, body, tags, url,'
             . ' (1 - (embedding <=> :qvec::vector))'
@@ -211,16 +209,40 @@ final class PostgresGuidelineRetriever implements RetrieverInterface
      */
     private function safeTags(array $tags): array
     {
-        $safe = [];
-        foreach ($tags as $tag) {
-            $normalized = strtolower(trim($tag));
-            $normalized = preg_replace('/[^a-z0-9-]/', '', $normalized) ?? '';
-            if ($normalized !== '') {
-                $safe[$normalized] = true;
+        return TagNormalizer::normalizeList($tags);
+    }
+
+    /**
+     * Merge full-text rows in after the vector rows to fill up to $limit, skipping
+     * ids already present — so a mixed store's non-embedded rows stay reachable
+     * without disturbing the vector ranking of the rows that had embeddings.
+     *
+     * @param list<array<string, mixed>> $primary
+     * @param list<array<string, mixed>> $secondary
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function mergeById(array $primary, array $secondary, int $limit): array
+    {
+        $merged = $primary;
+        $seen = [];
+        foreach ($primary as $row) {
+            if (is_string($row['id'] ?? null)) {
+                $seen[$row['id']] = true;
+            }
+        }
+        foreach ($secondary as $row) {
+            if (count($merged) >= $limit) {
+                break;
+            }
+            $id = $row['id'] ?? null;
+            if (is_string($id) && !isset($seen[$id])) {
+                $merged[] = $row;
+                $seen[$id] = true;
             }
         }
 
-        return array_keys($safe);
+        return $merged;
     }
 
     /**

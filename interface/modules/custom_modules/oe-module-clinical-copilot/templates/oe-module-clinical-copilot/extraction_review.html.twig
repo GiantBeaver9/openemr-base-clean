@@ -89,8 +89,8 @@
         <tbody>
         {% for f in fields %}
             <tr id="ccp-row-{{ f.id|attr }}" data-field-id="{{ f.id|attr }}"
-                data-page="{{ f.page is not null ? f.page : '' }}"
-                data-bbox="{{ f.bbox ? f.bbox|join(',') : '' }}">
+                data-page="{{ (f.page is not null ? f.page : '')|attr }}"
+                data-bbox="{{ (f.bbox ? f.bbox|join(',') : '')|attr }}">
                 <td class="align-middle text-muted">{{ loop.index }}</td>
                 <td class="align-middle"><strong>{{ f.field_key|text }}</strong></td>
                 <td>
@@ -119,7 +119,7 @@
                 </td>
                 <td class="align-middle ccp-cite">
                     {% if f.page is not null %}
-                        <span title="{{ f.quote|attr }}" data-bbox="{{ f.bbox ? f.bbox|join(',') : '' }}">
+                        <span title="{{ f.quote|attr }}" data-bbox="{{ (f.bbox ? f.bbox|join(',') : '')|attr }}">
                             <i class="fa fa-file-text-o"></i> {{ "p."|xlt }}{{ f.page|text }}
                         </span>
                     {% else %}
@@ -128,7 +128,7 @@
                 </td>
             </tr>
         {% else %}
-            <tr><td colspan="{{ is_lab ? 7 : 5 }}" class="text-muted">{{ "No fields yet."|xlt }}</td></tr>
+            <tr><td colspan="{{ is_lab ? 8 : 5 }}" class="text-muted">{{ "No fields yet."|xlt }}</td></tr>
         {% endfor %}
         </tbody>
     </table>

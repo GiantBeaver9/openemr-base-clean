@@ -66,11 +66,6 @@ final class IngestController
         return new self($ingest, $store, new ExtractionReview($store, $chartWriter, $tracer));
     }
 
-    public function ingestIntake(string $bytes, string $filename, string $mimeType, int $userId): IngestResult
-    {
-        return $this->ingest->ingestIntake($bytes, $filename, $mimeType, $this->newCorrelationId(), $userId);
-    }
-
     /**
      * Deferred-save intake: extract the fields but create/persist NOTHING, for
      * the human-reviewed create-at-save flow.
@@ -89,6 +84,7 @@ final class IngestController
      *
      * @param array<string, string|null> $demographics field_key => reviewed value
      * @param array{allergies?: ?string, medications?: ?string} $clinical
+     * @param string $userName the acting clinician's login name (for lists.user)
      *
      * @return array{pid: ?int, errors: list<string>}
      */
@@ -98,9 +94,9 @@ final class IngestController
         string $pdfBytes,
         string $filename,
         string $mimeType,
-        int $userId,
+        string $userName,
     ): array {
-        return $this->ingest->commitReviewedIntake($demographics, $clinical, $pdfBytes, $filename, $mimeType, $userId);
+        return $this->ingest->commitReviewedIntake($demographics, $clinical, $pdfBytes, $filename, $mimeType, $userName);
     }
 
     public function ingestLab(int $pid, string $bytes, string $filename, string $mimeType, int $userId): IngestResult
