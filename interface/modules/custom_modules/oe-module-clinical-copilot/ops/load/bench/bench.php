@@ -16,10 +16,13 @@
  * are complementary: this isolates the CPU cost of the module's logic; the k6
  * runbook measures it end-to-end under a real web stack.
  *
- * Concurrency is real OS-process concurrency via pcntl_fork: `--concurrency N`
- * forks N worker processes that hammer the workload in parallel for the
- * duration, exactly the way N PHP-FPM workers would contend for the same
- * cores. Latency percentiles are computed with the module's OWN RateMath
+ * Concurrency is real OS-process concurrency via proc_open: `--concurrency N`
+ * launches N `php bench.php ... --worker` subprocesses that hammer the workload
+ * in parallel for the duration, exactly the way N PHP-FPM workers would contend
+ * for the same cores. proc_open (not the pcntl extension, which is absent from
+ * many PHP builds including the OpenEMR/Railway container) means this runs
+ * anywhere a CLI php can spawn a subprocess. Latency percentiles are computed
+ * with the module's OWN RateMath
  * (the same function the observability dashboard uses), so the harness and
  * the production metric agree by construction.
  *
@@ -81,8 +84,31 @@ if ($opts['list']) {
     exit(0);
 }
 
-if (!function_exists('pcntl_fork')) {
-    fwrite(STDERR, "bench: pcntl extension required for concurrency (install php-pcntl)\n");
+// Worker mode: this process was launched by the orchestrator (below) via
+// proc_open. It runs exactly ONE worker for one workload and writes its samples
+// to --out, then exits. No forking — real OS-process concurrency comes from the
+// orchestrator spawning many of these, so no pcntl extension is needed (it is
+// absent from many PHP builds, e.g. the OpenEMR container).
+if (isset($opts['worker'])) {
+    $wl = $positional[0] ?? '';
+    if (!isset($registry[$wl])) {
+        fwrite(STDERR, "bench worker: unknown workload '{$wl}'\n");
+        exit(2);
+    }
+    $wDuration = (float)$opts['duration'];
+    $wIters = (int)$opts['iters'];
+    $wWarmup = (int)$opts['warmup'];
+    if ($wDuration <= 0.0 && $wIters <= 0) {
+        $wDuration = 10.0;
+    }
+    run_worker($registry[$wl], $wDuration, $wIters, $wWarmup, (string)$opts['out']);
+    exit(0);
+}
+
+// Concurrency is real OS processes launched via proc_open — far more widely
+// available than the pcntl extension (which the OpenEMR/Railway PHP lacks).
+if (!function_exists('proc_open')) {
+    fwrite(STDERR, "bench: proc_open is disabled in this PHP; cannot run concurrent workers.\n");
     exit(2);
 }
 
@@ -168,26 +194,40 @@ function run_matrix_cell(
     string $tmpDir,
 ): array {
     $wallStart = hrtime(true);
-    $children = [];
+    $self = __FILE__;
+    $php = PHP_BINARY;
+
+    // Launch all workers in parallel (proc_open returns immediately), each a
+    // fresh `php bench.php <workload> --worker ...` writing its samples to a
+    // file. True concurrency without pcntl.
+    $procs = [];
     for ($w = 0; $w < $concurrency; $w++) {
-        $pid = pcntl_fork();
-        if ($pid === -1) {
-            fwrite(STDERR, "bench: fork failed\n");
+        $outFile = "{$tmpDir}/w{$w}.json";
+        $cmd = escapeshellarg($php) . ' ' . escapeshellarg($self) . ' ' . escapeshellarg($workloadName)
+            . ' --worker'
+            . ' --duration=' . escapeshellarg((string)$duration)
+            . ' --iters=' . escapeshellarg((string)$itersPerWorker)
+            . ' --warmup=' . escapeshellarg((string)$warmup)
+            . ' --out=' . escapeshellarg($outFile);
+        $proc = proc_open($cmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        if (!is_resource($proc)) {
+            fwrite(STDERR, "bench: proc_open failed to launch a worker\n");
             exit(2);
         }
-        if ($pid === 0) {
-            // child
-            run_worker($setup, $duration, $itersPerWorker, $warmup, "{$tmpDir}/w{$w}.json");
-            exit(0);
-        }
-        $children[$pid] = $w;
+        $procs[] = ['proc' => $proc, 'pipes' => $pipes];
     }
 
-    foreach ($children as $pid => $_) {
-        pcntl_waitpid($pid, $status);
+    // Wait for all: drain each child's pipes (avoids a full-buffer deadlock),
+    // then proc_close (which blocks until that child exits). All were launched
+    // above, so they ran in parallel; total wait is the slowest worker.
+    foreach ($procs as $p) {
+        stream_get_contents($p['pipes'][1]);
+        stream_get_contents($p['pipes'][2]);
+        fclose($p['pipes'][1]);
+        fclose($p['pipes'][2]);
+        proc_close($p['proc']);
     }
-    $wallNs = hrtime(true) - $wallStart;
-    $wallSec = $wallNs / 1e9;
+    $wallSec = (hrtime(true) - $wallStart) / 1e9;
 
     // Merge every worker's samples + resource accounting.
     $latenciesMs = [];
