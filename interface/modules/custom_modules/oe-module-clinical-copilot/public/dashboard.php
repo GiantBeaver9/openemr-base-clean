@@ -133,13 +133,6 @@ foreach (CheckId::cases() as $check) {
 
 $dashboardUrl = OEGlobalsBag::getInstance()->getWebRoot() . '/interface/modules/custom_modules/oe-module-clinical-copilot/public/dashboard.php';
 
-// The current site, validated to OpenEMR's own site-id charset so the refresh
-// URL can never itself trip the "Invalid URL" 400 guard it is meant to avoid.
-$siteId = (string)($session->get('site_id') ?? '');
-if ($siteId === '' || preg_match('/[^A-Za-z0-9\-.]/', $siteId) === 1) {
-    $siteId = 'default';
-}
-
 $templateVars = [
     'window_hours' => $windowHours,
     'metrics' => $metrics,
@@ -161,13 +154,6 @@ $templateVars = [
     'eval_result' => $evalResult,
     'eval_error' => $evalError,
     'dashboard_url' => $dashboardUrl,
-    // Explicit, clean URL for the 30s auto-refresh. Reloading the raw current
-    // URL can drop/mangle the `site` param and trip OpenEMR's site-id guard
-    // (globals.php "Invalid URL", HTTP 400); pin a valid `site` + the window so
-    // every refresh is a known-good GET (and transient drill-down params fall
-    // away on refresh, which is also the behaviour you want).
-    'refresh_url' => $dashboardUrl . '?site=' . urlencode($siteId) . '&window_hours=' . $windowHours,
-    'refresh_seconds' => 30,
 ];
 
 $twig = (new TwigContainer(dirname(__DIR__) . '/templates', OEGlobalsBag::getInstance()->getKernel()))->getTwig();

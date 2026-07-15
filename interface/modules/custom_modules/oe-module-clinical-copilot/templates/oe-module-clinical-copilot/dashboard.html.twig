@@ -21,7 +21,9 @@
 <head>
     <title>{{ "Clinical Co-Pilot -- Observability"|xlt }}</title>
     {{ setupHeader() }}
-    <meta http-equiv="refresh" content="{{ refresh_seconds }};url={{ refresh_url|attr }}">
+    {# Auto-refresh temporarily removed (was intermittently 400-ing on some
+       deployments — under investigation). Use the "Refresh" link below to
+       update on demand. #}
     <style>
         .ccp-tile { border: 1px solid #dee2e6; border-radius: 4px; padding: 0.75rem; margin-bottom: 0.75rem; }
         .ccp-tile h6 { color: #6c757d; font-size: 0.8em; text-transform: uppercase; margin-bottom: 0.25rem; }
@@ -33,7 +35,8 @@
 <body class="body_top">
 <div class="container-fluid mt-3">
     <h4><i class="fa fa-line-chart mr-2"></i>{{ "Clinical Co-Pilot -- Observability"|xlt }}
-        <small class="text-muted">{{ "auto-refreshes every 30s -- window: last"|xlt }} {{ window_hours }}h</small>
+        <small class="text-muted">{{ "window: last"|xlt }} {{ window_hours }}h</small>
+        <a href="{{ dashboard_url|attr }}" class="btn btn-outline-secondary btn-sm ml-2"><i class="fa fa-refresh mr-1"></i>{{ "Refresh"|xlt }}</a>
     </h4>
 
     {% if alerts is not empty %}
