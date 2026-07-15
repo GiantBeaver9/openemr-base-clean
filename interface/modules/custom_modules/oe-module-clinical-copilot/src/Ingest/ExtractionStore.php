@@ -152,6 +152,20 @@ final class ExtractionStore
     }
 
     /**
+     * Records the lab-identity guard verdict on the header: did the document's
+     * printed patient name/DOB match the chart it was uploaded onto. Written once
+     * at ingest (labs only); read back to render the review-screen banner. The
+     * detail carries PHI and stays in the module MySQL protection domain (T16).
+     */
+    public function setIdentity(int $extractionId, LabIdentityStatus $status, ?string $detail): void
+    {
+        QueryUtils::sqlStatementThrowException(
+            'UPDATE `mod_copilot_extraction` SET `identity_status` = ?, `identity_detail` = ? WHERE `id` = ?',
+            [$status->value, $detail, $extractionId],
+        );
+    }
+
+    /**
      * Links the stored source document to the extraction after the file is
      * saved (the extraction id must exist first, so the documents row can
      * foreign-reference it — hence this second step).
@@ -210,6 +224,12 @@ final class ExtractionStore
             fieldAccuracy: $row['field_accuracy'] !== null ? (float)$row['field_accuracy'] : null,
             createdBy: $row['created_by'] !== null ? (int)$row['created_by'] : null,
             lockedBy: $row['locked_by'] !== null ? (int)$row['locked_by'] : null,
+            // `?? null` tolerates a DB installed before the identity columns
+            // existed (the #IfMissingColumn upgrade may not have run yet).
+            identityStatus: LabIdentityStatus::tryFromString(
+                isset($row['identity_status']) && $row['identity_status'] !== null ? (string)$row['identity_status'] : null,
+            ),
+            identityDetail: isset($row['identity_detail']) && $row['identity_detail'] !== null ? (string)$row['identity_detail'] : null,
         );
     }
 

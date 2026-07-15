@@ -207,6 +207,11 @@ final class IngestController
             'field_accuracy' => $header->fieldAccuracy,
             'source_document_id' => $header->sourceDocumentId,
             'model' => $header->model,
+            // Lab-identity guard: did the document-header patient name/DOB match
+            // this chart (null for non-lab / no vision run). Drives the review
+            // banner that alerts the uploader to a possible PHI mix-up.
+            'identity_status' => $header->identityStatus?->value,
+            'identity_detail' => $header->identityDetail,
             'fields' => $fields,
         ];
     }

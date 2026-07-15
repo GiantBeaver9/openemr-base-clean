@@ -25,10 +25,14 @@ final readonly class ParsedExtraction
 {
     /**
      * @param list<ExtractedField> $fields
+     * @param string|null          $patientName document-header patient name (labs only; null otherwise)
+     * @param string|null          $patientDob  document-header patient DOB (labs only; null otherwise)
      */
     public function __construct(
         public DocType $docType,
         public array $fields,
+        public ?string $patientName = null,
+        public ?string $patientDob = null,
     ) {
     }
 

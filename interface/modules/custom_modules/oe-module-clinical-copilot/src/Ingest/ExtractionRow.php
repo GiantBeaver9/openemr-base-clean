@@ -27,6 +27,8 @@ final readonly class ExtractionRow
         public ?float $fieldAccuracy,
         public ?int $createdBy,
         public ?int $lockedBy,
+        public ?LabIdentityStatus $identityStatus = null,
+        public ?string $identityDetail = null,
     ) {
     }
 

@@ -263,6 +263,8 @@ CREATE TABLE IF NOT EXISTS `mod_copilot_extraction` (
     `tokens_out` INT(11) DEFAULT NULL,
     `cost_usd` DECIMAL(10,6) DEFAULT NULL,
     `field_accuracy` DECIMAL(5,4) DEFAULT NULL COMMENT 'observability: accepted-unchanged / total fields, computed on lock; a rate, never a clinical value (no PHI)',
+    `identity_status` VARCHAR(16) DEFAULT NULL COMMENT 'lab_pdf only: match | mismatch | unknown — did the document-header patient name/DOB match this chart (PHI-mixing guard); NULL when no vision run or non-lab',
+    `identity_detail` TEXT DEFAULT NULL COMMENT 'lab_pdf only: human-readable name/DOB comparison shown on the review banner; PHI, stays in the module MySQL protection domain (T16), never crosses to the knowledge boundary',
     `created_by` BIGINT(20) DEFAULT NULL COMMENT 'references users.id; the uploader',
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `locked_at` DATETIME DEFAULT NULL,
@@ -469,4 +471,19 @@ ALTER TABLE `mod_copilot_ui_event` ADD KEY `idx_created_at` (`created_at`);
 
 #IfNotIndex mod_copilot_qa idx_created_at
 ALTER TABLE `mod_copilot_qa` ADD KEY `idx_created_at` (`created_at`);
+#EndIf
+
+-- ============================================================================
+-- Lab identity guard (added after initial Week 2 release). The CREATE TABLE
+-- block above carries these for fresh installs; these #IfMissingColumn guards
+-- add them to databases installed before the guard existed, so a lab upload
+-- can record whether the document-header patient name/DOB matched the chart it
+-- was attached to (the PHI-mixing alert on the review screen). Idempotent.
+-- ============================================================================
+#IfMissingColumn mod_copilot_extraction identity_status
+ALTER TABLE `mod_copilot_extraction` ADD COLUMN `identity_status` VARCHAR(16) DEFAULT NULL COMMENT 'lab_pdf only: match | mismatch | unknown';
+#EndIf
+
+#IfMissingColumn mod_copilot_extraction identity_detail
+ALTER TABLE `mod_copilot_extraction` ADD COLUMN `identity_detail` TEXT DEFAULT NULL COMMENT 'lab_pdf only: name/DOB comparison for the review banner';
 #EndIf
