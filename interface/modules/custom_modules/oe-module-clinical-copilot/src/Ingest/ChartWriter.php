@@ -71,6 +71,20 @@ final class ChartWriter
         'address_state' => 'state',
         'address_postal' => 'postal_code',
         'country' => 'country_code',
+        'county' => 'county',
+        'marital_status' => 'status',
+        'race' => 'race',
+        'ethnicity' => 'ethnicity',
+        'language' => 'language',
+        'mothers_name' => 'mothersname',
+        'emergency_contact' => 'contact_relationship',
+        'emergency_phone' => 'phone_contact',
+        'occupation' => 'occupation',
+        'employer_name' => 'em_name',
+        'employer_street' => 'em_street',
+        'employer_city' => 'em_city',
+        'employer_state' => 'em_state',
+        'employer_postal' => 'em_postal_code',
     ];
 
     public function __construct(private readonly PatientService $patientService)
