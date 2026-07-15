@@ -141,6 +141,66 @@
         </div>
     </div>
 
+    <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <strong>{{ "Load test — in-process, 50 workers"|xlt }}</strong>
+            <form method="post" action="{{ dashboard_url|attr }}" class="form-inline mb-0">
+                {{ csrfToken('default', 'csrf_token_form') }}
+                <input type="hidden" name="action" value="run_load_test">
+                <button type="submit" class="btn btn-sm btn-primary">{{ "Run load test"|xlt }}</button>
+            </form>
+        </div>
+        <div class="card-body">
+            {# Load-test mode: temporary, auto-reverting lift of the per-user chat caps. #}
+            {% if load_test_mode.active %}
+                <div class="alert alert-warning d-flex justify-content-between align-items-center py-2">
+                    <span>
+                        <strong>{{ "Load-test mode ON"|xlt }}</strong> —
+                        {{ "per-user chat caps lifted; daily/hourly $ caps + breaker still enforced. Auto-reverts in"|xlt }}
+                        ~{{ (load_test_mode.seconds_remaining / 60)|round }} {{ "min"|xlt }}.
+                    </span>
+                    <form method="post" action="{{ dashboard_url|attr }}" class="mb-0">
+                        {{ csrfToken('default', 'csrf_token_form') }}
+                        <input type="hidden" name="action" value="disable_load_test">
+                        <button type="submit" class="btn btn-sm btn-outline-secondary">{{ "Disable now"|xlt }}</button>
+                    </form>
+                </div>
+            {% else %}
+                <form method="post" action="{{ dashboard_url|attr }}" class="form-inline mb-2">
+                    {{ csrfToken('default', 'csrf_token_form') }}
+                    <input type="hidden" name="action" value="enable_load_test">
+                    <button type="submit" class="btn btn-sm btn-outline-warning">{{ "Enable load-test mode (30 min)"|xlt }}</button>
+                    <span class="text-muted small ml-2">{{ "Temporarily lifts the per-user chat throttle so a chat load test isn't rate-limited; auto-reverts after 30 min. $ spend caps + breaker stay on."|xlt }}</span>
+                </form>
+            {% endif %}
+
+            {% if load_test_error %}
+                <div class="alert alert-danger mb-0">{{ load_test_error|text }}</div>
+            {% elseif load_test_result %}
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>{{ "Workload"|xlt }}</th><th>{{ "Conc"|xlt }}</th><th>{{ "Throughput (ops/s)"|xlt }}</th><th>p50</th><th>p95</th><th>p99</th><th>{{ "CPU"|xlt }}</th><th>{{ "RSS (MB)"|xlt }}</th></tr></thead>
+                    <tbody>
+                    {% for r in load_test_result %}
+                        <tr>
+                            <td>{{ r.workload|text }}</td>
+                            <td>{{ r.concurrency }}</td>
+                            <td>{{ r.throughput_ops_sec }}</td>
+                            <td>{{ r.latency_ms.p50 }}ms</td>
+                            <td>{{ r.latency_ms.p95 }}ms</td>
+                            <td>{{ r.latency_ms.p99 }}ms</td>
+                            <td>{{ r.cpu.pct_of_all_cores }}%</td>
+                            <td>{{ r.memory.aggregate_rss_hwm_mb }}</td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                <p class="text-muted small mb-0 mt-1">{{ "In-process module compute at 50 parallel workers (retrieval + verify). Not the full HTTP stack — for that run ops/load/k6 against the deployment (RESULTS.md Part B)."|xlt }}</p>
+            {% else %}
+                <p class="text-muted mb-0">{{ "Press \"Run load test\" for real throughput/latency/CPU/memory at 50 concurrent workers (ops/load/bench). Measures module compute; the full HTTP 50-user test is k6 (RESULTS.md Part B)."|xlt }}</p>
+            {% endif %}
+        </div>
+    </div>
+
     <div class="row">
         <div class="col-md-3"><div class="ccp-tile">
             <h6>{{ "Requests (window)"|xlt }}</h6>

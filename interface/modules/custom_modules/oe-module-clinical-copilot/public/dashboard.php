@@ -57,9 +57,11 @@ $authUser = (string)($session->get('authUser') ?? '');
 $authProvider = (string)($session->get('authProvider') ?? '');
 $configStore = new CadenceConfigStore();
 
-// Populated only when the "Run evals" button is pressed (a POST action below).
+// Populated only when a testing-panel button is pressed (POST actions below).
 $evalResult = null;
 $evalError = null;
+$loadTestResult = null;
+$loadTestError = null;
 
 if ($isPost) {
     $action = (string)($_POST['action'] ?? '');
@@ -82,6 +84,28 @@ if ($isPost) {
             (new \OpenEMR\Common\Logging\SystemLogger())->error('ClinicalCopilot: dashboard eval run failed', ['exception' => $e]);
         }
         EventAuditLogger::getInstance()->newEvent('security', $authUser, $authProvider, 1, 'Clinical Co-Pilot: eval gate run from dashboard');
+    } elseif ($action === 'run_load_test') {
+        // In-process concurrency bench at 50 workers (real CPU/latency/throughput
+        // of the module's hot paths). Real OS-process concurrency needs pcntl,
+        // which is CLI-only — so shell out to the CLI bench and read its JSON.
+        // A short, bounded burst; the daily/hourly $ caps + breaker are untouched.
+        $benchScript = dirname(__DIR__) . '/ops/load/bench/bench.php';
+        $cmd = 'php ' . escapeshellarg($benchScript)
+            . ' guideline_retrieval_sparse verify_chat --concurrency=50 --duration=4 --warmup=100 --json 2>/dev/null';
+        $raw = function_exists('shell_exec') ? @shell_exec($cmd) : null;
+        $decoded = is_string($raw) ? json_decode(trim($raw), true) : null;
+        if (is_array($decoded) && $decoded !== []) {
+            $loadTestResult = $decoded;
+        } else {
+            $loadTestError = 'Load test could not run (needs CLI php with pcntl and shell_exec enabled). Run it from a shell: ops/load/bench/bench.php ... --concurrency=50.';
+        }
+        EventAuditLogger::getInstance()->newEvent('security', $authUser, $authProvider, 1, 'Clinical Co-Pilot: in-process load test run from dashboard');
+    } elseif ($action === 'enable_load_test') {
+        $configStore->enableLoadTestMode($authUser, 30);
+        EventAuditLogger::getInstance()->newEvent('security', $authUser, $authProvider, 1, 'Clinical Co-Pilot: load-test mode ENABLED (per-user chat caps lifted 30m)');
+    } elseif ($action === 'disable_load_test') {
+        $configStore->disableLoadTestMode($authUser);
+        EventAuditLogger::getInstance()->newEvent('security', $authUser, $authProvider, 1, 'Clinical Co-Pilot: load-test mode disabled');
     }
 }
 
@@ -153,6 +177,9 @@ $templateVars = [
     'payload_json' => $payloadJson,
     'eval_result' => $evalResult,
     'eval_error' => $evalError,
+    'load_test_result' => $loadTestResult,
+    'load_test_error' => $loadTestError,
+    'load_test_mode' => $configStore->loadTestMode(),
     'dashboard_url' => $dashboardUrl,
     // Auto-refresh cadence. Low-volume app, so 2 minutes (not 30s). The refresh
     // targets the BARE dashboard URL (no ?site, no drill-down params) — the same

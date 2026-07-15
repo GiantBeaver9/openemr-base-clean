@@ -29,6 +29,13 @@ final class CadenceConfigStore
 {
     private const LIMITS_CODE_SET = 'rate_limit_breaker';
     private const STATE_CODE_SET = 'rate_limit_breaker_state';
+    private const LOAD_TEST_CODE_SET = 'load_test_mode';
+
+    /** The per-user chat caps' value while load-test mode is active. */
+    private const LOAD_TEST_UNCAPPED = 1_000_000;
+
+    /** Hard bound on how long load-test mode can be enabled for (minutes). */
+    private const LOAD_TEST_MAX_MINUTES = 240;
 
     /**
      * @return array{
@@ -41,7 +48,128 @@ final class CadenceConfigStore
      */
     public function limits(): array
     {
-        return self::resolveLimits($this->loadConfigJson(self::LIMITS_CODE_SET));
+        $limits = self::resolveLimits($this->loadConfigJson(self::LIMITS_CODE_SET));
+
+        // Load-test mode (temporary, auto-reverting): lift the PER-USER chat
+        // throttle so a burst/load test is not rate-limited. The daily/hourly $
+        // spend caps and the circuit breaker deliberately stay ON as the hard
+        // cost backstop, and the lift disappears the moment the window expires
+        // ({@see self::loadTestModeActive()}) — no cron, no manual reset needed.
+        if ($this->loadTestModeActive()) {
+            $limits['max_active_sessions_per_user'] = self::LOAD_TEST_UNCAPPED;
+            $limits['max_turns_per_user_per_hour'] = self::LOAD_TEST_UNCAPPED;
+        }
+
+        return $limits;
+    }
+
+    /**
+     * True while load-test mode is enabled AND its window has not expired.
+     * Expiry is checked at READ time, so the lift auto-reverts with no cron.
+     */
+    public function loadTestModeActive(?\DateTimeImmutable $now = null): bool
+    {
+        return self::isLoadTestActive($this->loadConfigJson(self::LOAD_TEST_CODE_SET), $now ?? new \DateTimeImmutable());
+    }
+
+    /**
+     * Pure expiry check (no I/O) so the auto-revert semantics are unit-testable.
+     * Active only when the stored flag is true AND now is before expires_at.
+     *
+     * @param array<string, mixed> $config
+     */
+    public static function isLoadTestActive(array $config, \DateTimeImmutable $now): bool
+    {
+        if (($config['active'] ?? false) !== true) {
+            return false;
+        }
+        $expiresAt = is_string($config['expires_at'] ?? null) ? $config['expires_at'] : null;
+        if ($expiresAt === null) {
+            return false;
+        }
+        try {
+            $expires = new \DateTimeImmutable($expiresAt);
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return $now < $expires;
+    }
+
+    /**
+     * Load-test-mode status for the dashboard.
+     *
+     * @return array{active: bool, expires_at: ?string, set_by: ?string, seconds_remaining: int}
+     */
+    public function loadTestMode(): array
+    {
+        $config = $this->loadConfigJson(self::LOAD_TEST_CODE_SET);
+        $now = new \DateTimeImmutable();
+        $active = self::isLoadTestActive($config, $now);
+        $expiresAt = is_string($config['expires_at'] ?? null) ? $config['expires_at'] : null;
+
+        $secondsRemaining = 0;
+        if ($active && $expiresAt !== null) {
+            try {
+                $secondsRemaining = max(0, (new \DateTimeImmutable($expiresAt))->getTimestamp() - $now->getTimestamp());
+            } catch (\Throwable) {
+                $secondsRemaining = 0;
+            }
+        }
+
+        return [
+            'active' => $active,
+            'expires_at' => $expiresAt,
+            'set_by' => is_string($config['set_by'] ?? null) ? $config['set_by'] : null,
+            'seconds_remaining' => $secondsRemaining,
+        ];
+    }
+
+    /**
+     * Enable load-test mode for a bounded window (clamped to
+     * {@see self::LOAD_TEST_MAX_MINUTES}), after which it auto-reverts.
+     */
+    public function enableLoadTestMode(string $actor, int $durationMinutes): void
+    {
+        $durationMinutes = max(1, min(self::LOAD_TEST_MAX_MINUTES, $durationMinutes));
+        $now = new \DateTimeImmutable();
+        $this->upsertLoadTestState([
+            'active' => true,
+            'expires_at' => $now->add(new \DateInterval('PT' . $durationMinutes . 'M'))->format(DATE_ATOM),
+            'set_by' => $actor,
+            'set_at' => $now->format(DATE_ATOM),
+        ]);
+    }
+
+    public function disableLoadTestMode(string $actor): void
+    {
+        $this->upsertLoadTestState([
+            'active' => false,
+            'expires_at' => null,
+            'set_by' => $actor,
+            'set_at' => (new \DateTimeImmutable())->format(DATE_ATOM),
+        ]);
+    }
+
+    /**
+     * Upsert the load-test-mode config row (it is not seeded, so INSERT-or-UPDATE
+     * on the unique code_set).
+     *
+     * @param array<string, mixed> $config
+     */
+    private function upsertLoadTestState(array $config): void
+    {
+        QueryUtils::sqlStatementThrowException(
+            'INSERT INTO `mod_copilot_cadence` (`code_set`, `config_json`, `version`, `updated_at`)
+             VALUES (?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE `config_json` = VALUES(`config_json`), `updated_at` = VALUES(`updated_at`)',
+            [
+                self::LOAD_TEST_CODE_SET,
+                json_encode($config, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
+                'v1',
+                (new \DateTimeImmutable())->format('Y-m-d H:i:s'),
+            ],
+        );
     }
 
     /**
