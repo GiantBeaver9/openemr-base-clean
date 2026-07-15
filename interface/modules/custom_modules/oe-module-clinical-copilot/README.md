@@ -33,6 +33,12 @@ shared engineering context every build unit read before its own brief —
 useful if you want the condensed, PHP-signature-level version of the specs
 above rather than the full prose.
 
+[`docs/decisions.md`](docs/decisions.md) is the running decisions & tradeoffs
+log — the *why* (and the roads not taken) behind the ongoing engineering
+choices: the lab identity guard, deferred-save intake, the separate knowledge
+Postgres, the `gemini-embedding-001 @ 1536` embedding choice, local pgvector
+bring-up, and more. New calls append here as they are made.
+
 ## LLM credential / config surface
 
 [`docs/configuration.md`](docs/configuration.md) is the complete list of
