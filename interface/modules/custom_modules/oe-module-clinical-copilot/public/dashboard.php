@@ -154,6 +154,12 @@ $templateVars = [
     'eval_result' => $evalResult,
     'eval_error' => $evalError,
     'dashboard_url' => $dashboardUrl,
+    // Auto-refresh cadence. Low-volume app, so 2 minutes (not 30s). The refresh
+    // targets the BARE dashboard URL (no ?site, no drill-down params) — the same
+    // thing the manual Refresh button loads and known to work — so it can never
+    // trip OpenEMR's site-id / multisite session guard the way the earlier
+    // ?site-carrying refresh did.
+    'refresh_seconds' => 120,
 ];
 
 $twig = (new TwigContainer(dirname(__DIR__) . '/templates', OEGlobalsBag::getInstance()->getKernel()))->getTwig();
