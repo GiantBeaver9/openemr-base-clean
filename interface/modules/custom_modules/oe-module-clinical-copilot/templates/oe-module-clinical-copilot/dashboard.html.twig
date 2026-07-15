@@ -21,7 +21,7 @@
 <head>
     <title>{{ "Clinical Co-Pilot -- Observability"|xlt }}</title>
     {{ setupHeader() }}
-    <meta http-equiv="refresh" content="30">
+    <meta http-equiv="refresh" content="{{ refresh_seconds }};url={{ refresh_url|attr }}">
     <style>
         .ccp-tile { border: 1px solid #dee2e6; border-radius: 4px; padding: 0.75rem; margin-bottom: 0.75rem; }
         .ccp-tile h6 { color: #6c757d; font-size: 0.8em; text-transform: uppercase; margin-bottom: 0.25rem; }
@@ -173,15 +173,46 @@
             </table>
         </div></div>
         <div class="col-md-6"><div class="ccp-tile">
-            <h6>{{ "Verification pass/fail per check"|xlt }}</h6>
+            <h6>
+                {{ "Verification by check"|xlt }}
+                {% if verify_gate_enforced %}
+                    <span class="badge badge-success">{{ "content gate enforced"|xlt }}</span>
+                {% else %}
+                    <span class="badge badge-secondary">{{ "content gate advisory"|xlt }}</span>
+                {% endif %}
+            </h6>
             <table class="table table-sm mb-0">
-                <thead><tr><th>{{ "Check"|xlt }}</th><th>{{ "Passed"|xlt }}</th><th>{{ "Failed"|xlt }}</th></tr></thead>
+                <thead><tr><th>{{ "Check"|xlt }}</th><th>{{ "Status"|xlt }}</th><th>{{ "Passed"|xlt }}</th><th>{{ "Failed"|xlt }}</th></tr></thead>
                 <tbody>
-                {% for check, counts in metrics.verification_pass_fail_by_check %}
-                    <tr><td>{{ check|text }}</td><td>{{ counts.passed }}</td><td>{{ counts.failed }}</td></tr>
+                {% for c in verification_checks %}
+                    <tr>
+                        <td>{{ c.label|text }} <span class="text-muted small">{{ c.code|text }}</span></td>
+                        <td>
+                            {% if c.enforced %}
+                                <span class="badge badge-success">{{ "enforced"|xlt }}</span>
+                            {% else %}
+                                <span class="badge badge-light border">{{ "not enforced"|xlt }}</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ c.passed }}</td>
+                        <td>
+                            {% if c.failed > 0 and not c.enforced %}
+                                <span class="text-muted">{{ c.failed }} <small>{{ "(advisory)"|xlt }}</small></span>
+                            {% elseif c.failed > 0 %}
+                                <span class="text-danger font-weight-bold">{{ c.failed }}</span>
+                            {% else %}
+                                {{ c.failed }}
+                            {% endif %}
+                        </td>
+                    </tr>
                 {% endfor %}
                 </tbody>
             </table>
+            {% if not verify_gate_enforced %}
+                <p class="text-muted small mb-0 mt-1">
+                    {{ "Content checks are advisory in this deployment: verdicts are recorded but do not block answers (set CLINICAL_COPILOT_VERIFY_ENFORCE=1 to enforce). A \"fail\" here is a would-fail, not a blocked turn. Patient identity stays enforced unconditionally."|xlt }}
+                </p>
+            {% endif %}
         </div></div>
     </div>
 

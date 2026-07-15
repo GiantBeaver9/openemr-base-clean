@@ -31,6 +31,8 @@ use OpenEMR\Modules\ClinicalCopilot\Observability\RateLimit\CadenceCircuitBreake
 use OpenEMR\Modules\ClinicalCopilot\Observability\RateLimit\CadenceConfigStore;
 use OpenEMR\Modules\ClinicalCopilot\Observability\ReadyCheck;
 use OpenEMR\Modules\ClinicalCopilot\Observability\TracePayloadStore;
+use OpenEMR\Modules\ClinicalCopilot\Verify\CheckId;
+use OpenEMR\Modules\ClinicalCopilot\Verify\VerificationPolicy;
 
 $session = SessionWrapperFactory::getInstance()->getActiveSession();
 $isPost = ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST';
@@ -108,9 +110,41 @@ if ($correlationId !== '') {
 $payload = $payloadRef !== '' ? (new TracePayloadStore())->fetch($payloadRef) : null;
 $payloadJson = $payload !== null ? json_encode($payload['payload'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) : null;
 
+$metrics = $metricsService->overview($since);
+
+// Verification panel, named and enforcement-aware. The V1-V6 content gate is a
+// runtime policy (VerificationPolicy): when it is NOT enforced, the checks still
+// RUN and record verdicts (so the ledger shows what would have failed) but they
+// do not block/degrade a turn — so a "fail" is advisory, not a blocked turn.
+// Patient identity (V3) is enforced unconditionally (cross-patient PHI guard).
+$verifyTally = is_array($metrics['verification_pass_fail_by_check'] ?? null) ? $metrics['verification_pass_fail_by_check'] : [];
+$verifyGateEnforced = VerificationPolicy::gateEnforced();
+$verificationChecks = [];
+foreach (CheckId::cases() as $check) {
+    $counts = is_array($verifyTally[$check->value] ?? null) ? $verifyTally[$check->value] : ['passed' => 0, 'failed' => 0];
+    $verificationChecks[] = [
+        'code' => $check->value,
+        'label' => $check->label(),
+        'passed' => (int)($counts['passed'] ?? 0),
+        'failed' => (int)($counts['failed'] ?? 0),
+        'enforced' => $verifyGateEnforced || $check === CheckId::PatientIdentity,
+    ];
+}
+
+$dashboardUrl = OEGlobalsBag::getInstance()->getWebRoot() . '/interface/modules/custom_modules/oe-module-clinical-copilot/public/dashboard.php';
+
+// The current site, validated to OpenEMR's own site-id charset so the refresh
+// URL can never itself trip the "Invalid URL" 400 guard it is meant to avoid.
+$siteId = (string)($session->get('site_id') ?? '');
+if ($siteId === '' || preg_match('/[^A-Za-z0-9\-.]/', $siteId) === 1) {
+    $siteId = 'default';
+}
+
 $templateVars = [
     'window_hours' => $windowHours,
-    'metrics' => $metricsService->overview($since),
+    'metrics' => $metrics,
+    'verification_checks' => $verificationChecks,
+    'verify_gate_enforced' => $verifyGateEnforced,
     'alerts' => $metricsService->recentFiredAlerts(),
     'breaker' => (new CadenceCircuitBreaker())->snapshot(),
     'limits' => $configStore->limits(),
@@ -126,7 +160,14 @@ $templateVars = [
     'payload_json' => $payloadJson,
     'eval_result' => $evalResult,
     'eval_error' => $evalError,
-    'dashboard_url' => OEGlobalsBag::getInstance()->getWebRoot() . '/interface/modules/custom_modules/oe-module-clinical-copilot/public/dashboard.php',
+    'dashboard_url' => $dashboardUrl,
+    // Explicit, clean URL for the 30s auto-refresh. Reloading the raw current
+    // URL can drop/mangle the `site` param and trip OpenEMR's site-id guard
+    // (globals.php "Invalid URL", HTTP 400); pin a valid `site` + the window so
+    // every refresh is a known-good GET (and transient drill-down params fall
+    // away on refresh, which is also the behaviour you want).
+    'refresh_url' => $dashboardUrl . '?site=' . urlencode($siteId) . '&window_hours=' . $windowHours,
+    'refresh_seconds' => 30,
 ];
 
 $twig = (new TwigContainer(dirname(__DIR__) . '/templates', OEGlobalsBag::getInstance()->getKernel()))->getTwig();

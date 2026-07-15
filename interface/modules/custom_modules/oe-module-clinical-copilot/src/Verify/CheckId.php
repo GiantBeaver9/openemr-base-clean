@@ -29,4 +29,21 @@ enum CheckId: string
     case NumericGrounding = 'V4';
     case BannedClaimLint = 'V5';
     case ConflictPassthrough = 'V6';
+
+    /**
+     * A human-readable name for the observability dashboard (the V-codes are an
+     * internal shorthand; the ledger and the dashboard should read plainly).
+     * Exhaustive match, no default — a new check forces a name here.
+     */
+    public function label(): string
+    {
+        return match ($this) {
+            self::SchemaGate => 'Schema gate',
+            self::CitationResolution => 'Citation grounding',
+            self::PatientIdentity => 'Patient identity',
+            self::NumericGrounding => 'Numeric grounding',
+            self::BannedClaimLint => 'Safe-language lint',
+            self::ConflictPassthrough => 'Conflict surfacing',
+        };
+    }
 }
