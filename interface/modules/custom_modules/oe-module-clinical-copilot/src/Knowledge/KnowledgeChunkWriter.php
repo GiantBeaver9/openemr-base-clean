@@ -36,9 +36,7 @@ final class KnowledgeChunkWriter
         private readonly string $table = 'guideline_chunks',
         ?EmbeddingClientInterface $embedder = null,
     ) {
-        if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$/', $this->table) !== 1) {
-            throw new \DomainException('Invalid knowledge base table name');
-        }
+        KnowledgeTableName::assertValid($this->table);
         // No embedder configured ⇒ store chunks with a NULL embedding; retrieval
         // then uses full-text search until an embedding key is set.
         $this->embedder = $embedder ?? new UnavailableEmbeddingClient();
@@ -99,9 +97,9 @@ final class KnowledgeChunkWriter
                     'source' => $chunk->source,
                     'section' => $chunk->section,
                     'body' => $chunk->text,
-                    'tags' => $this->pgTextArray($chunk->tags),
+                    'tags' => PgLiteral::textArray($chunk->tags),
                     'url' => $chunk->url,
-                    'embedding' => $this->pgVectorLiteral($vectors[$i] ?? null),
+                    'embedding' => ($v = $vectors[$i] ?? null) !== null && $v !== [] ? PgLiteral::vector($v) : null,
                 ]);
                 $written++;
             }
@@ -125,35 +123,4 @@ final class KnowledgeChunkWriter
         return trim(implode("\n", array_filter([$chunk->title, $chunk->section, $chunk->text])));
     }
 
-    /**
-     * A pgvector literal (`[0.1,0.2,...]`) bound and cast with `:embedding::vector`,
-     * or null when the chunk was not embedded (leaving the column NULL).
-     *
-     * @param list<float>|null $vector
-     */
-    private function pgVectorLiteral(?array $vector): ?string
-    {
-        if ($vector === null || $vector === []) {
-            return null;
-        }
-
-        return '[' . implode(',', array_map(static fn (float $v): string => rtrim(rtrim(sprintf('%.7f', $v), '0'), '.'), $vector)) . ']';
-    }
-
-    /**
-     * @param list<string> $values
-     */
-    private function pgTextArray(array $values): string
-    {
-        if ($values === []) {
-            return '{}';
-        }
-
-        $quoted = array_map(
-            static fn (string $v): string => '"' . str_replace(['\\', '"'], ['\\\\', '\\"'], $v) . '"',
-            $values,
-        );
-
-        return '{' . implode(',', $quoted) . '}';
-    }
 }

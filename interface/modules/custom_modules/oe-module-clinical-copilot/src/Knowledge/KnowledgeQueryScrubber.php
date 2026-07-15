@@ -86,12 +86,9 @@ final class KnowledgeQueryScrubber
 
     private function normalizeTag(string $tag): string
     {
-        // Tags are trusted non-PHI, but still normalize to the same token shape
-        // as free-text keywords so duplicates collapse.
-        $tag = strtolower(trim($tag));
-        $tag = preg_replace('/[^a-z0-9-]/', '', $tag) ?? '';
-
-        return $tag;
+        // Tags are trusted non-PHI, but normalize to the shared canonical shape so
+        // they collapse against free-text keywords and match the stored tags.
+        return TagNormalizer::normalize($tag);
     }
 
     private function safeKeyword(string $token): ?string

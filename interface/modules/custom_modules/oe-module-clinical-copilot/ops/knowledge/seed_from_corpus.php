@@ -25,6 +25,8 @@ declare(strict_types=1);
  */
 
 use OpenEMR\Modules\ClinicalCopilot\Knowledge\KnowledgeBaseConfig;
+use OpenEMR\Modules\ClinicalCopilot\Knowledge\KnowledgeTableName;
+use OpenEMR\Modules\ClinicalCopilot\Knowledge\PgLiteral;
 use OpenEMR\Modules\ClinicalCopilot\Rag\GuidelineCorpus;
 
 $moduleRoot = dirname(__DIR__, 2);
@@ -57,6 +59,8 @@ if (!$config->isConfigured()) {
         . "(or CLINICAL_COPILOT_KNOWLEDGE_DB_HOST/_NAME/_USER/_PASSWORD)."
     );
 }
+
+KnowledgeTableName::assertValid($config->table);
 
 if ($config->table !== 'guideline_chunks') {
     // schema.sql hard-codes the table name; a custom table must be created by the
@@ -105,30 +109,10 @@ foreach ($chunks as $chunk) {
         'source' => $chunk->source,
         'section' => $chunk->section,
         'body' => $chunk->text,
-        'tags' => pgTextArray($chunk->tags),
+        'tags' => PgLiteral::textArray($chunk->tags),
         'url' => $chunk->url,
     ]);
     $seeded++;
 }
 
 echo "seed_from_corpus: upserted {$seeded} guideline chunks into '{$config->table}' on {$config->host}.\n";
-
-/**
- * Build a Postgres `text[]` array literal from a list of strings, quoting and
- * escaping each element so it round-trips regardless of content.
- *
- * @param list<string> $values
- */
-function pgTextArray(array $values): string
-{
-    if ($values === []) {
-        return '{}';
-    }
-
-    $quoted = array_map(
-        static fn (string $v): string => '"' . str_replace(['\\', '"'], ['\\\\', '\\"'], $v) . '"',
-        $values,
-    );
-
-    return '{' . implode(',', $quoted) . '}';
-}

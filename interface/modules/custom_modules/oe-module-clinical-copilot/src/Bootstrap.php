@@ -66,9 +66,6 @@ class Bootstrap
      * failure to locate the Reports menu or build the item is logged and
      * swallowed rather than breaking the host menu (I6/I7 style degradation
      * — this module must never take down core navigation).
-     *
-     * @param MenuEvent $event
-     * @return MenuEvent
      */
     public function addCustomMenuItem(MenuEvent $event): MenuEvent
     {

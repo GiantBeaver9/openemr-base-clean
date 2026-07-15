@@ -31,6 +31,7 @@ declare(strict_types=1);
 use OpenEMR\Modules\ClinicalCopilot\Knowledge\ChunkOptions;
 use OpenEMR\Modules\ClinicalCopilot\Knowledge\DocumentMetadata;
 use OpenEMR\Modules\ClinicalCopilot\Knowledge\KnowledgeDocumentIngestor;
+use OpenEMR\Modules\ClinicalCopilot\Knowledge\TagInput;
 
 $ignoreAuth = true;
 $_GET['site'] = $_GET['site'] ?? 'default';
@@ -63,7 +64,7 @@ if (!$ingestor->isStoreAvailable()) {
 }
 
 $replaceExisting = !isset($opts['no-replace']);
-$baseTags = parseTags(is_string($opts['tags'] ?? null) ? $opts['tags'] : '');
+$baseTags = TagInput::parse(is_string($opts['tags'] ?? null) ? $opts['tags'] : '');
 $chunkOptions = isset($opts['chunk-size'])
     ? new ChunkOptions((int)$opts['chunk-size'], isset($opts['overlap']) ? (int)$opts['overlap'] : ChunkOptions::DEFAULT_OVERLAP)
     : ChunkOptions::default();
@@ -116,19 +117,3 @@ foreach ($files as $path) {
 }
 
 echo "done: {$totalDocs} document(s), {$totalChunks} chunk(s) written.\n";
-
-/**
- * @return list<string>
- */
-function parseTags(string $raw): array
-{
-    $tags = [];
-    foreach (explode(',', $raw) as $tag) {
-        $tag = trim($tag);
-        if ($tag !== '') {
-            $tags[] = $tag;
-        }
-    }
-
-    return $tags;
-}

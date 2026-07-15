@@ -148,9 +148,7 @@ final class DocumentChunker
 
     private function normalizeTag(string $tag): string
     {
-        $tag = strtolower(trim($tag));
-
-        return preg_replace('/[^a-z0-9-]/', '', $tag) ?? '';
+        return TagNormalizer::normalize($tag);
     }
 
     /**

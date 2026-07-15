@@ -50,7 +50,7 @@ final class KnowledgeBaseStatus
         }
 
         $table = $this->config->table;
-        if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$/', $table) !== 1) {
+        if (!KnowledgeTableName::isValid($table)) {
             return ['state' => 'unreachable', 'configured' => true, 'chunk_count' => null];
         }
 

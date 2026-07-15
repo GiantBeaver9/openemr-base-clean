@@ -15,7 +15,6 @@ declare(strict_types=1);
 namespace OpenEMR\Modules\ClinicalCopilot\Knowledge;
 
 use PDO;
-use PDOException;
 
 /**
  * The write twin of {@see KnowledgeBaseConnection}. It connects with the
@@ -75,23 +74,19 @@ final class KnowledgeWriteConnection implements KnowledgeWriteRunner
             return $this->pdo;
         }
 
-        try {
-            $this->pdo = new PDO(
-                $this->config->dsn(),
-                $this->config->effectiveWriteUser(),
-                $this->config->effectiveWritePassword(),
-                [
-                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                    PDO::ATTR_EMULATE_PREPARES => false,
-                    PDO::ATTR_TIMEOUT => 10,
-                ],
-            );
-        } catch (PDOException $e) {
-            // Rethrow so the ingestion endpoint reports a hard failure — a write
-            // that could not connect must never look like a success.
-            throw $e;
-        }
+        // A PDOException here propagates by design: unlike the read path, a write
+        // that cannot connect must never look like a success.
+        $this->pdo = new PDO(
+            $this->config->dsn(),
+            $this->config->effectiveWriteUser(),
+            $this->config->effectiveWritePassword(),
+            [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_EMULATE_PREPARES => false,
+                PDO::ATTR_TIMEOUT => 10,
+            ],
+        );
 
         return $this->pdo;
     }
