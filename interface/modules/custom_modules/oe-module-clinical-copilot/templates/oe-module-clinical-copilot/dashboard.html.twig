@@ -21,10 +21,11 @@
 <head>
     <title>{{ "Clinical Co-Pilot -- Observability"|xlt }}</title>
     {{ setupHeader() }}
-    {# Auto-refresh to the BARE dashboard URL (no ?site, no drill-down params) —
-       identical to the manual Refresh button, so it cannot trip OpenEMR's
-       site-id / multisite session guard the way a ?site-carrying refresh did. #}
-    <meta http-equiv="refresh" content="{{ refresh_seconds }};url={{ dashboard_url|attr }}">
+    {# Auto-refresh carrying THIS session's own site id (dashboard_url_site).
+       Because it is the session's OWN site it always matches $_SESSION['site_id']
+       (never trips the multisite session-clear guard), and if the session has
+       since expired it redirects to login instead of throwing a 400. #}
+    <meta http-equiv="refresh" content="{{ refresh_seconds }};url={{ dashboard_url_site|attr }}">
     <style>
         .ccp-tile { border: 1px solid #dee2e6; border-radius: 4px; padding: 0.75rem; margin-bottom: 0.75rem; }
         .ccp-tile h6 { color: #6c757d; font-size: 0.8em; text-transform: uppercase; margin-bottom: 0.25rem; }
@@ -37,7 +38,7 @@
 <div class="container-fluid mt-3">
     <h4><i class="fa fa-line-chart mr-2"></i>{{ "Clinical Co-Pilot -- Observability"|xlt }}
         <small class="text-muted">{{ "window: last"|xlt }} {{ window_hours }}h &middot; {{ "auto-refreshes every"|xlt }} {{ (refresh_seconds / 60)|round }} {{ "min"|xlt }}</small>
-        <a href="{{ dashboard_url|attr }}" class="btn btn-outline-secondary btn-sm ml-2"><i class="fa fa-refresh mr-1"></i>{{ "Refresh"|xlt }}</a>
+        <a href="{{ dashboard_url_site|attr }}" class="btn btn-outline-secondary btn-sm ml-2"><i class="fa fa-refresh mr-1"></i>{{ "Refresh"|xlt }}</a>
     </h4>
 
     {% if alerts is not empty %}
@@ -69,7 +70,7 @@
                 {{ "daily spend cap"|xlt }}=${{ limits.daily_llm_spend_cap_usd }},
                 {{ "hourly burn cap"|xlt }}=${{ limits.hourly_llm_burn_cap_usd }}
             </p>
-            <form method="post" action="{{ dashboard_url|attr }}" class="form-inline">
+            <form method="post" action="{{ dashboard_url_site|attr }}" class="form-inline">
                 {# See doc.html.twig's Regenerate form for why the field name is
                    pinned explicitly: csrfToken()'s own default ("_token") does not
                    match dashboard.php's CsrfUtils::checkCsrfInput() default key
@@ -91,7 +92,7 @@
     <div class="card mb-3">
         <div class="card-header d-flex justify-content-between align-items-center">
             <strong>{{ "Evals — 50-case boolean-rubric gate"|xlt }}</strong>
-            <form method="post" action="{{ dashboard_url|attr }}" class="form-inline mb-0">
+            <form method="post" action="{{ dashboard_url_site|attr }}" class="form-inline mb-0">
                 {# Same pinned CSRF field name as the breaker form above. #}
                 {{ csrfToken('default', 'csrf_token_form') }}
                 <input type="hidden" name="action" value="run_evals">
@@ -144,7 +145,7 @@
     <div class="card mb-3">
         <div class="card-header d-flex justify-content-between align-items-center">
             <strong>{{ "Load test — in-process, 50 workers"|xlt }}</strong>
-            <form method="post" action="{{ dashboard_url|attr }}" class="form-inline mb-0">
+            <form method="post" action="{{ dashboard_url_site|attr }}" class="form-inline mb-0">
                 {{ csrfToken('default', 'csrf_token_form') }}
                 <input type="hidden" name="action" value="run_load_test">
                 <button type="submit" class="btn btn-sm btn-primary">{{ "Run load test"|xlt }}</button>
@@ -159,14 +160,14 @@
                         {{ "per-user chat caps lifted; daily/hourly $ caps + breaker still enforced. Auto-reverts in"|xlt }}
                         ~{{ (load_test_mode.seconds_remaining / 60)|round }} {{ "min"|xlt }}.
                     </span>
-                    <form method="post" action="{{ dashboard_url|attr }}" class="mb-0">
+                    <form method="post" action="{{ dashboard_url_site|attr }}" class="mb-0">
                         {{ csrfToken('default', 'csrf_token_form') }}
                         <input type="hidden" name="action" value="disable_load_test">
                         <button type="submit" class="btn btn-sm btn-outline-secondary">{{ "Disable now"|xlt }}</button>
                     </form>
                 </div>
             {% else %}
-                <form method="post" action="{{ dashboard_url|attr }}" class="form-inline mb-2">
+                <form method="post" action="{{ dashboard_url_site|attr }}" class="form-inline mb-2">
                     {{ csrfToken('default', 'csrf_token_form') }}
                     <input type="hidden" name="action" value="enable_load_test">
                     <button type="submit" class="btn btn-sm btn-outline-warning">{{ "Enable load-test mode (30 min)"|xlt }}</button>
