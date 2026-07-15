@@ -45,6 +45,26 @@ so the container picks up the new env.
 | `install-module.php` | headless register + install (`table.sql`) + enable, run in-container |
 | `print-patients.php` | prints seeded demo patients + their doc URLs |
 | `compose.gemini.yml` | compose overlay that passes the LLM env vars into the container |
+| `compose.knowledge.yml` | compose overlay adding the pgvector **knowledge DB** + the `pdo_pgsql` driver |
+| `knowledge/Dockerfile` | local openemr image = flex + `pdo_pgsql` (the knowledge store needs it) |
+| `knowledge-up.sh` | one-command bring-up of the local vector DB (build → start → schema → wait) |
+
+## Knowledge store (RAG vector DB) — local pgvector
+
+The knowledge base is a **separate Postgres** from OpenEMR's MySQL (PHI never
+lands there). To exercise the upload → chunk → embed → store → retrieve flow
+locally, without a Railway instance:
+
+```bash
+interface/modules/custom_modules/oe-module-clinical-copilot/ops/local/knowledge-up.sh
+#   --seed  also loads the in-repo corpus   |   --down  tears the stack down (keeps data)
+```
+
+It stacks `compose.knowledge.yml` onto the dev stack, so it composes with
+`setup.sh`'s stack. Provision the **same** schema to Railway with
+[`../knowledge/deploy_railway.sh`](../knowledge/deploy_railway.sh). Full write-up:
+[`../../docs/knowledge-base.md`](../../docs/knowledge-base.md) → "Testing locally
+in Docker".
 
 ## Manual path (if you prefer step-by-step, or the auto-install needs a nudge)
 
@@ -107,3 +127,9 @@ docker compose -f docker/development-easy/docker-compose.yml \
   above exists precisely for that reason.
 - Synthetic patients only (OPEN-1). Do **not** point the dev/test Gemini key at
   real PHI.
+- `knowledge/Dockerfile` installs `pdo_pgsql` onto the flex image at **build**
+  time and verifies it (`php -m | grep pdo_pgsql`), so a wrong Alpine package
+  name fails `docker compose build` loudly rather than degrading at runtime. The
+  three knowledge files were validated by `bash -n` and `docker compose config`
+  (clean three-way merge), but the image build itself was not run here (no
+  Docker) — watch that one build step on your first `knowledge-up.sh`.

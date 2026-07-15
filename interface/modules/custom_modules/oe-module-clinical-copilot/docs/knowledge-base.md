@@ -88,6 +88,52 @@ Without config the module falls back to the offline in-repo corpus.
 > does not embed (it runs without the OpenEMR/Gemini runtime). To vector-index the
 > corpus, ingest it through the CLI/UI instead, which embeds on write.
 
+## Testing locally in Docker (no Railway needed)
+
+The knowledge store is a **separate database** from OpenEMR's MySQL — in
+production it lives at Railway, but for local testing it spins up as its own
+pgvector container next to the app, identical schema, zero cloud dependency:
+
+```bash
+# From anywhere in the repo. Builds an openemr image variant with pdo_pgsql,
+# starts a pgvector "knowledge_db", applies schema.sql, and wires the module to it.
+interface/modules/custom_modules/oe-module-clinical-copilot/ops/local/knowledge-up.sh
+
+# Export a Gemini key first (in this shell or ops/local/gemini.local.env) so
+# chunks embed for vector search; without it the store runs on full-text alone.
+export CLINICAL_COPILOT_GEMINI_API_KEY=your_ai_studio_key
+```
+
+That gives you `knowledge_db` reachable as host `knowledge_db:5432` from the app
+container (`copilot`/`copilot`, db `knowledge`) and `localhost:55432` from your
+host for `psql`. Then drive the real flow at **Maintenance → Knowledge Base
+(RAG)**: upload a PDF, pick a chunk size, preview, and store — the chunks land in
+the local vector DB and retrieval reads from it on the next synthesis.
+
+Two things the stock OpenEMR image lacks are handled for you: the overlay
+(`ops/local/compose.knowledge.yml`) rebuilds the app image from
+`ops/local/knowledge/Dockerfile` to add the **`pdo_pgsql`** driver, and pgvector's
+image ships the **`vector`** extension `schema.sql` enables. Tear down with
+`knowledge-up.sh --down` (the data volume is kept).
+
+### Promoting to Railway (or any Postgres)
+
+The same schema goes to a deployed instance with one script — point it at the
+**separate** Railway Postgres (its own service, never OpenEMR's DB):
+
+```bash
+# Grab the PUBLIC connection URL from Railway's Postgres "Connect" tab.
+interface/modules/custom_modules/oe-module-clinical-copilot/ops/knowledge/deploy_railway.sh \
+    "postgresql://user:pass@host.proxy.rlwy.net:5432/railway?sslmode=require"
+
+#   --seed  also loads the in-repo corpus (full-text; vector-index via the UI/CLI).
+```
+
+It applies `schema.sql` idempotently using your host `psql`, or a throwaway
+`pgvector/pgvector:pg16` container if you have no host client — only Docker is
+required. Then set `CLINICAL_COPILOT_KNOWLEDGE_DATABASE_URL` on the deployed
+OpenEMR service (and ensure its image carries `pdo_pgsql`).
+
 ## Adding a document (chunk-and-store, no code change)
 
 When a new guideline or reference comes out, push it straight in — no deploy:
