@@ -45,9 +45,10 @@ $webRoot = OEGlobalsBag::getInstance()->getWebRoot();
 $moduleBase = $webRoot . '/interface/modules/custom_modules/oe-module-clinical-copilot/public';
 
 if ($isPost && ($_POST['action'] ?? '') === 'upload') {
-    $upload = UploadedDocument::fromFilesEntry($_FILES['document'] ?? null);
+    $entry = $_FILES['document'] ?? null;
+    $upload = UploadedDocument::fromFilesEntry($entry);
     if ($upload === null) {
-        renderIntakeForm($moduleBase, $webRoot, error: xl('Please choose a PDF or image to upload.'));
+        renderIntakeForm($moduleBase, $webRoot, error: UploadedDocument::describeRejection($entry));
         exit;
     }
 
@@ -69,5 +70,6 @@ function renderIntakeForm(string $moduleBase, string $webRoot, string $error = '
         'web_root' => $webRoot,
         'error' => $error,
         'llm_configured' => LlmRuntimeConfig::llmConfigured(),
+        'max_mb' => (int)floor(UploadedDocument::MAX_DOCUMENT_BYTES / (1024 * 1024)),
     ]);
 }

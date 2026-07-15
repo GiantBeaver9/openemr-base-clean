@@ -61,9 +61,10 @@ $controller = IngestController::createDefault();
 $action = $isPost ? ($_POST['action'] ?? '') : '';
 
 if ($action === 'upload') {
-    $upload = UploadedDocument::fromFilesEntry($_FILES['document'] ?? null);
+    $entry = $_FILES['document'] ?? null;
+    $upload = UploadedDocument::fromFilesEntry($entry);
     if ($upload === null) {
-        renderLabForm($moduleBase, $webRoot, $pid, error: xl('Please choose a PDF or image to upload.'));
+        renderLabForm($moduleBase, $webRoot, $pid, error: UploadedDocument::describeRejection($entry));
         exit;
     }
 

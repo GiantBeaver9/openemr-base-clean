@@ -39,6 +39,7 @@
                     <label for="ccpIntakeFile">{{ "Intake form (PDF or image)"|xlt }}</label>
                     <input type="file" class="form-control-file" id="ccpIntakeFile" name="document"
                            accept="application/pdf,image/png,image/jpeg,image/webp">
+                    <small class="form-text text-muted">{{ "PDF, PNG, JPEG, or WEBP"|xlt }}{% if max_mb %} &middot; {{ "max"|xlt }} {{ max_mb }} MB{% endif %}. {{ "For a large multi-page scan, upload one page at a time."|xlt }}</small>
                 </div>
                 <button type="submit" class="btn btn-primary">
                     <i class="fa fa-upload mr-1"></i>{{ "Upload & extract"|xlt }}
