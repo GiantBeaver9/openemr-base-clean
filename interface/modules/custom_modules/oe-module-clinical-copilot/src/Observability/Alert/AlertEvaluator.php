@@ -278,12 +278,8 @@ final class AlertEvaluator
 
     private function checkWorkerHeartbeatStale(array $thresholds, \DateTimeImmutable $now): AlertFinding
     {
-        $raw = QueryUtils::fetchSingleValue(
-            "SELECT `config_json` FROM `mod_copilot_cadence` WHERE `code_set` = 'worker_heartbeat'",
-            'config_json',
-        );
-        $config = is_string($raw) ? json_decode($raw, true) : null;
-        $lastTickAt = is_array($config) && is_string($config['last_tick_at'] ?? null) ? $config['last_tick_at'] : null;
+        $config = $this->cadenceConfig->get('worker_heartbeat');
+        $lastTickAt = is_string($config['last_tick_at'] ?? null) ? $config['last_tick_at'] : null;
 
         $intervalMinutes = (int)(QueryUtils::fetchSingleValue(
             "SELECT `execute_interval` FROM `background_services` WHERE `name` = 'clinical_copilot_worker'",
@@ -374,12 +370,7 @@ final class AlertEvaluator
      */
     private function loadThresholds(): array
     {
-        $raw = QueryUtils::fetchSingleValue(
-            "SELECT `config_json` FROM `mod_copilot_cadence` WHERE `code_set` = 'alert_thresholds'",
-            'config_json',
-        );
-        $config = is_string($raw) ? json_decode($raw, true) : null;
-        $config = is_array($config) ? $config : [];
+        $config = $this->cadenceConfig->get('alert_thresholds');
 
         return [
             'eval_window_minutes' => (int)($config['eval_window_minutes'] ?? 15),
@@ -398,9 +389,7 @@ final class AlertEvaluator
      */
     private static function intColumn(string $sql, array $binds): array
     {
-        $rows = QueryUtils::fetchRecords($sql, $binds);
-
-        return array_map(static fn (array $row): int => (int)$row['v'], $rows);
+        return self::column($sql, $binds, static fn (mixed $v): int => (int)$v);
     }
 
     /**
@@ -409,8 +398,18 @@ final class AlertEvaluator
      */
     private static function stringColumn(string $sql, array $binds): array
     {
+        return self::column($sql, $binds, static fn (mixed $v): string => (string)$v);
+    }
+
+    /**
+     * @param list<mixed> $binds
+     * @param \Closure(mixed): (int|string) $cast
+     * @return list<int|string>
+     */
+    private static function column(string $sql, array $binds, \Closure $cast): array
+    {
         $rows = QueryUtils::fetchRecords($sql, $binds);
 
-        return array_map(static fn (array $row): string => (string)$row['v'], $rows);
+        return array_map(static fn (array $row): int|string => $cast($row['v']), $rows);
     }
 }

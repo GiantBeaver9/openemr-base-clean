@@ -60,31 +60,7 @@ final class ScheduledPatientListReader
                 continue;
             }
 
-            $name = self::collapseSpaces(
-                (string)($row['fname'] ?? '') . ' ' . (string)($row['mname'] ?? '') . ' ' . (string)($row['lname'] ?? '')
-            );
-            $pubpid = trim((string)($row['pubpid'] ?? ''));
-            if ($pubpid === '') {
-                $pubpid = "PID-{$pid}";
-            }
-
-            $startRaw = $row['pc_startTime'] ?? null;
-            $appointmentTime = is_string($startRaw) && $startRaw !== ''
-                ? substr($startRaw, 0, 5)
-                : '—';
-
-            $title = trim((string)($row['pc_title'] ?? ''));
-            if ($title === '') {
-                $title = 'Appointment';
-            }
-
-            $byPid[$pid] = new ScheduledPatientRow(
-                $pid,
-                $pubpid,
-                $name !== '' ? $name : $pubpid,
-                $appointmentTime,
-                $title,
-            );
+            $byPid[$pid] = self::hydrateRow($row, $pid);
         }
 
         return array_values($byPid);
@@ -131,12 +107,20 @@ final class ScheduledPatientListReader
             return null;
         }
 
-        $name = self::collapseSpaces(
+        return self::hydrateRow($row, $resolvedPid);
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private static function hydrateRow(array $row, int $pid): ScheduledPatientRow
+    {
+        $name = TextNormalizer::collapseSpaces(
             (string)($row['fname'] ?? '') . ' ' . (string)($row['mname'] ?? '') . ' ' . (string)($row['lname'] ?? '')
         );
         $pubpid = trim((string)($row['pubpid'] ?? ''));
         if ($pubpid === '') {
-            $pubpid = "PID-{$resolvedPid}";
+            $pubpid = "PID-{$pid}";
         }
 
         $startRaw = $row['pc_startTime'] ?? null;
@@ -150,16 +134,11 @@ final class ScheduledPatientListReader
         }
 
         return new ScheduledPatientRow(
-            $resolvedPid,
+            $pid,
             $pubpid,
             $name !== '' ? $name : $pubpid,
             $appointmentTime,
             $title,
         );
-    }
-
-    private static function collapseSpaces(string $value): string
-    {
-        return trim((string)preg_replace('/\s+/', ' ', $value));
     }
 }

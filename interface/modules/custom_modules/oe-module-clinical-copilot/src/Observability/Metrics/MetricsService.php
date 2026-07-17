@@ -15,6 +15,7 @@ declare(strict_types=1);
 namespace OpenEMR\Modules\ClinicalCopilot\Observability\Metrics;
 
 use OpenEMR\Common\Database\QueryUtils;
+use OpenEMR\Modules\ClinicalCopilot\Observability\UiEvent\UiEventStore;
 use OpenEMR\Modules\ClinicalCopilot\Observability\UiEvent\UiEventType;
 
 /**
@@ -39,6 +40,11 @@ use OpenEMR\Modules\ClinicalCopilot\Observability\UiEvent\UiEventType;
  */
 final class MetricsService
 {
+    public function __construct(
+        private readonly UiEventStore $uiEventStore = new UiEventStore(),
+    ) {
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -319,34 +325,32 @@ final class MetricsService
 
     private function reviewerConcurrenceRate(string $sinceSql): float
     {
-        $total = (int)QueryUtils::fetchSingleValue(
-            "SELECT COUNT(*) AS c FROM `mod_copilot_qa` WHERE `status` = 'ok' AND `concurs` IS NOT NULL AND `created_at` > ?",
-            'c',
-            [$sinceSql],
-        );
-        $concurring = (int)QueryUtils::fetchSingleValue(
-            "SELECT COUNT(*) AS c FROM `mod_copilot_qa` WHERE `status` = 'ok' AND `concurs` = 1 AND `created_at` > ?",
-            'c',
-            [$sinceSql],
-        );
-
-        return RateMath::percentage($concurring, $total);
+        return $this->qaBooleanRate('concurs', $sinceSql);
     }
 
     private function salienceScore(string $sinceSql): float
     {
+        return $this->qaBooleanRate('salience_ok', $sinceSql);
+    }
+
+    private function qaBooleanRate(string $column, string $sinceSql): float
+    {
+        if (!in_array($column, ['concurs', 'salience_ok'], true)) {
+            throw new \DomainException("MetricsService: unsupported qa column '{$column}'");
+        }
+
         $total = (int)QueryUtils::fetchSingleValue(
-            "SELECT COUNT(*) AS c FROM `mod_copilot_qa` WHERE `status` = 'ok' AND `salience_ok` IS NOT NULL AND `created_at` > ?",
+            "SELECT COUNT(*) AS c FROM `mod_copilot_qa` WHERE `status` = 'ok' AND `{$column}` IS NOT NULL AND `created_at` > ?",
             'c',
             [$sinceSql],
         );
-        $ok = (int)QueryUtils::fetchSingleValue(
-            "SELECT COUNT(*) AS c FROM `mod_copilot_qa` WHERE `status` = 'ok' AND `salience_ok` = 1 AND `created_at` > ?",
+        $matching = (int)QueryUtils::fetchSingleValue(
+            "SELECT COUNT(*) AS c FROM `mod_copilot_qa` WHERE `status` = 'ok' AND `{$column}` = 1 AND `created_at` > ?",
             'c',
             [$sinceSql],
         );
 
-        return RateMath::percentage($ok, $total);
+        return RateMath::percentage($matching, $total);
     }
 
     private function qaAverage(string $column, string $sinceSql): float
@@ -411,22 +415,14 @@ final class MetricsService
             'c',
             [$sinceSql],
         );
-        $clicks = (int)QueryUtils::fetchSingleValue(
-            "SELECT COUNT(*) AS c FROM `mod_copilot_ui_event` WHERE `event_type` = ? AND `created_at` > ?",
-            'c',
-            [UiEventType::CitationClick->value, $since->format('Y-m-d H:i:s')],
-        );
+        $clicks = $this->uiEventStore->count(UiEventType::CitationClick, $since);
 
         return RateMath::percentage($clicks, $shown);
     }
 
     private function factsPanelOpens(\DateTimeImmutable $since): int
     {
-        return (int)QueryUtils::fetchSingleValue(
-            "SELECT COUNT(*) AS c FROM `mod_copilot_ui_event` WHERE `event_type` = ? AND `created_at` > ?",
-            'c',
-            [UiEventType::FactsPanelOpen->value, $since->format('Y-m-d H:i:s')],
-        );
+        return $this->uiEventStore->count(UiEventType::FactsPanelOpen, $since);
     }
 
     /**

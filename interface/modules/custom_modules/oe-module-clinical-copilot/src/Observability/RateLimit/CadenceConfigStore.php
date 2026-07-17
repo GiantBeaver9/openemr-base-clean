@@ -281,6 +281,20 @@ final class CadenceConfigStore
     }
 
     /**
+     * Read + decode a `mod_copilot_cadence` config row by `code_set`,
+     * falling back to `[]` when the row is missing or its JSON does not
+     * decode to an array. Public so other read paths that need a raw
+     * cadence config row (e.g. {@see \OpenEMR\Modules\ClinicalCopilot\Observability\Alert\AlertEvaluator})
+     * do not have to hand-roll the same SELECT + decode.
+     *
+     * @return array<string, mixed>
+     */
+    public function get(string $codeSet): array
+    {
+        return $this->loadConfigJson($codeSet);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function loadConfigJson(string $codeSet): array

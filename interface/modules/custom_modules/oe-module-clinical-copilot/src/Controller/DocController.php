@@ -14,6 +14,7 @@ declare(strict_types=1);
 
 namespace OpenEMR\Modules\ClinicalCopilot\Controller;
 
+use OpenEMR\Common\Database\QueryUtils;
 use OpenEMR\Common\Logging\EventAuditLogger;
 use OpenEMR\Common\Session\SessionWrapperFactory;
 use OpenEMR\Modules\ClinicalCopilot\Config\LlmRuntimeConfig;
@@ -270,7 +271,7 @@ final class DocController
 
     private function isAuthorizedForCorrelation(string $correlationId, int $userId, int $pid): bool
     {
-        $row = \OpenEMR\Common\Database\QueryUtils::querySingleRow(
+        $row = QueryUtils::querySingleRow(
             'SELECT `user_id` FROM `mod_copilot_trace` WHERE `correlation_id` = ? AND `pid` = ? ORDER BY `id` ASC LIMIT 1',
             [$correlationId, $pid],
         );
