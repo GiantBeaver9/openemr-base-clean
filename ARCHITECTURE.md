@@ -287,6 +287,108 @@ Every failure in the tables above traces to one of five classes, each with its o
 
 ---
 
+# Part 2 (Week 2) — Document ingestion, the one sanctioned chart write, and the external knowledge store
+
+Everything above (the LLM platform section and §1–§6) is **Part 1**: a strictly read-only agent. It narrates and navigates the chart, and the read-only invariant is enforced, not asserted (§4) — a module-scoped PHPStan rule made a core-table write a static-analysis error *everywhere*.
+
+Part 2 adds the write side, deliberately and narrowly. Two new capabilities need to put data *into* the world: extracting structured facts from uploaded documents, and grounding synthesis in external guideline knowledge. Neither is allowed to erode the Part 1 posture. The organizing decisions (recorded in the module's `docs/decisions.md`, P1–P3):
+
+- **Additivity still holds (P1).** All Part 2 code lives under `interface/modules/custom_modules/oe-module-clinical-copilot/`; the CI gate `ops/ci/check-additivity.sh` still fails on any diff that escapes the module directory. Draft state lives in two new module-owned tables (`mod_copilot_extraction`, `mod_copilot_extracted_fact`), joining the `mod_copilot_*` family from Part 1.
+- **The chart write is confined to one class (P1).** Week 2 relaxes the read-only invariant in *exactly one place*: `Ingest/ChartWriter`. The same custom PHPStan rule that proved Part 1 never wrote — `tests/PHPStan/Rules/ForbiddenWriteOutsideRepositoriesRule` — now names `ChartWriter` as the sole `SANCTIONED_CORE_WRITERS` entry; from inside it both raw `QueryUtils` writes and host-service `insert`/`update` calls are permitted, from anywhere else they remain a static-analysis error. A reviewer auditing "what can this module write to a real chart" reads exactly one class.
+- **Degrade cleanly, never dead-end (P2)** and **PHI stays in the BAA boundary (P3)** carry over verbatim — see §12 and the per-flow analysis in `docs/ingestion-failure-modes.md`.
+
+## §7 Multimodal document ingestion (extract structured facts from an upload)
+
+A physician uploads a PDF or image; a **vision model (Gemini, the same Vertex/BAA surface as Part 1's LLM platform)** transcribes it into *structured facts under a strict JSON schema*, exactly mirroring Part 1's Key-decision-1 discipline — the model extracts into a provider-enforced schema, it does not free-form. Two document types are supported, each with its own schema and downstream commit path:
+
+- **Intake forms** → new-patient demographics + clinical fields (chief concern, meds, allergies, family hx), each carrying a page/quote/bbox `SourceCitation`.
+- **Lab reports** → discrete results (test/value/unit/range/flag) with per-field citations and a document-header patient name/DOB (used by the identity guard, §9).
+
+**Classes.** `Ingest/UploadedDocument` (parses the `$_FILES` entry) → `Controller/IngestController` → `Ingest/AttachAndExtract` (the orchestrator: `previewIntake` + `commitReviewedIntake` for intake's deferred save; `ingestLab` for labs) → `Ingest/ExtractionClient::extract` (drives the vision model via the reused `ReadPath/LlmClientFactory`) → `Ingest/ExtractionSchema` (`validate` / `parse` / `blankExtraction`). **Labs** stage a draft through `Ingest/ExtractionStore` into `mod_copilot_extraction` (one header row per upload) and `mod_copilot_extracted_fact` (one row per field). **Intake persists nothing at upload** — extraction only prefills a review screen; the patient row is created later, at the human Save (§8).
+
+**Degradation is by construction.** `AttachAndExtract::tryExtract` swallows `LlmUnavailableException` / `SchemaValidationException` and substitutes a **blank draft** rather than surfacing an error or a provider message — no LLM configured (the documented default), a failed call, or a schema reject all land the reviewer on the same manual-entry review screen, never a 500. No exception message reaches the user on either clinical path (P3 / §4's "never expose `getMessage()`").
+
+## §8 Human-in-the-loop review → the one chart write
+
+The single place this module writes the core chart is a human-gated commit, and `Ingest/ChartWriter` is the only class that performs it. The two doc types reach the chart by **different** paths — intake through a deferred save at the review screen, labs through a lock on a staged draft — but both require an explicit human action and both funnel through `ChartWriter`.
+
+**Intake — deferred save (decision D2).** The patient is **not** created at upload time, and intake **stages no draft** (no `mod_copilot_extraction` row). Upload → `IngestController::previewIntake` → `AttachAndExtract::previewIntake` extracts and returns the fields but persists nothing → a two-pane review screen (`public/intake_upload.php`, `templates/oe-module-clinical-copilot/intake_review.html.twig`) prefills the new-patient fields on the left with the source PDF on the right → the human edits and clicks **Save** → *only then* does `AttachAndExtract::commitReviewedIntake` call `ChartWriter::tryCreatePatient` (via the host `PatientService::insert` + `PatientValidator`, non-throwing so validation errors re-render the form) to create the patient, then `storeSourceDocument` and `addChartListLines` for reviewed allergies/medications. Post-create writes are best-effort — a failure there is logged, never reported as a total failure that could prompt a re-save and duplicate the patient. Nothing is persisted before the human confirms, so the failure mode is "a blank form to hand-fill," never a half-created patient. (The source PDF rides the page as base64 — decision D3 — with no server-side temp stash; an oversize edge is a 413 guard.) A brand-new intake patient gets the extracted facts only, **not** a generated narrative (decision D4): a narrative at first contact would pre-frame the encounter before the clinician has done their own fact-finding.
+
+**Labs — commit down the core procedure chain on "Verify & lock."** Labs *do* stage a draft (`ExtractionStore` → `mod_copilot_extraction` / `_extracted_fact`), reviewed on `public/extraction_review.php` / `extraction_review.html.twig`. The commit entry point is `Ingest/ExtractionReview::lock`, which for a lab dispatches to `commitLabs` → `ChartWriter::commitLabResults`, writing the standard OpenEMR chain: `procedure_order → procedure_order_code → procedure_report → procedure_result` (one `procedure_result` per verified field), each bound to the stored source `document_id` for provenance and stamped with the human-entered draw/collection date. No chart write happens at ingest; the only commit is at lock, so every degraded path is safe. `commitLabResults` is idempotent per-field.
+
+Compact data-flows:
+
+```
+INTAKE  intake_upload.php (action=upload) → IngestController::previewIntake
+        → AttachAndExtract::previewIntake → ExtractionClient::extract (vision, intake schema)
+        → ExtractionSchema::parse   [NOTHING PERSISTED]
+        → intake_review.php prefilled form  [HUMAN edits, clicks Save (action=save)]
+        → IngestController::commitReviewedIntake → AttachAndExtract::commitReviewedIntake
+        → ChartWriter::tryCreatePatient (PatientService::insert) + storeSourceDocument + addChartListLines
+        —— degraded (no/failed LLM, schema reject) ⇒ empty field map ⇒ blank form, hand-fill
+
+LAB     lab_upload.php (pid>0) → IngestController::ingestLab → AttachAndExtract::ingestLab
+        → ExtractionClient::extract (vision, lab schema) → ExtractionStore draft → storeSourceDocument
+        → AttachAndExtract::recordLabIdentity (§9)
+        → extraction_review.php  [HUMAN verifies rows + draw date, "Verify & lock"]
+        → ExtractionReview::lock → commitLabs
+        → ChartWriter::commitLabResults: procedure_order → _code → _report → _result (per field)
+        —— degraded ⇒ zero-row draft ⇒ reviewer adds rows by hand (AttachAndExtract::startManualLab)
+```
+
+## §9 Lab identity guard (PHI-mixing prevention)
+
+A lab PDF is uploaded *onto* a chosen patient's chart, yet the file itself names a patient. If those disagree, the wrong person's results are about to be attached — a PHI-mixing incident. `Ingest/AttachAndExtract::recordLabIdentity` compares the document-header `patient_name`/`patient_dob` against the target chart's `fname`/`lname`/`DOB` via `Ingest/LabIdentityMatcher`, and persists a verdict (`match` / `mismatch` / `unknown`) on the extraction header through `ExtractionStore::setIdentity` — stored in `mod_copilot_extraction.identity_status` with a human-readable `identity_detail` for the banner.
+
+The review template turns the verdict into a **persistent banner**: red on `mismatch` ("may belong to a different patient — do NOT lock"), amber on `unknown` ("could not confirm"), quiet green on `match`. The matcher is deliberately **conservative** (decision D1): any concrete name or DOB conflict is a `mismatch` even if the other field agrees; a name match requires both first and last as whole tokens; **nothing on the document to compare is `unknown`, never a silent pass**. It is best-effort — a failure reading the chart is logged and swallowed, so the guard can never block an upload the reviewer must still verify by eye. It flags for a human; it does not hard-block and it does not auto-reroute (inferring identity and then acting on it is exactly the move that mixes PHI). `identity_detail` is PHI and stays in the module's MySQL protection domain (T16) — it never crosses to the knowledge boundary (§10).
+
+## §10 External knowledge store (RAG) with a hard PHI boundary
+
+Part 1's synthesis and chat cite the patient's chart. Part 2 adds a *general medical knowledge* evidence layer — paraphrased, widely-published guideline summaries — grounded in RAG. That knowledge is a fundamentally different data class from PHI, and the module keeps the two **physically separate** (decision K1, `docs/knowledge-base.md`):
+
+| Domain | Store | Holds | Under BAA |
+|---|---|---|---|
+| PHI | OpenEMR's MySQL | chart, extractions, telemetry, chat | Yes |
+| General medical knowledge | a **separate Postgres** (Railway in prod) | `guideline_chunks` — PHI-free guideline text | Not required |
+
+These are distinct connections to distinct servers: a query against the knowledge Postgres can never reach a chart row. The boundary is defended in depth:
+
+1. **Separate physical store.** `Knowledge/KnowledgeBaseConnection` is its own PDO to its own server, configured by its own env vars, with no handle on OpenEMR's DB.
+2. **Read path is SELECT-only.** The request path reaches the store only through `Knowledge/KnowledgeQueryRunner::select()`; the write path is a separate role/interface (`KnowledgeWriteConnection` / `KnowledgeWriteRunner`).
+3. **PHI-scrubbed queries in transit.** A retrieval query can be a raw chat question ("why is Jane's A1c 9.4 on 3/2?"). `Knowledge/KnowledgeQueryScrubber` reduces it to non-PHI clinical keywords (dropping names, numbers, dates, emails; keeping analyte codes and structured tags) **before it leaves the process** — nothing patient-identifying reaches the non-BAA store.
+
+**Retrieval is vector-first with a full-text fallback (hybrid, decision K3).** `Knowledge/PostgresGuidelineRetriever` ranks by pgvector cosine (`embedding <=> :query`, plus a boost when a chunk's `tags` overlap the requested analytes) and **falls through to Postgres full-text** (`ts_rank` over `websearch_to_tsquery`, keywords OR-combined) when no embedding key is configured, a query embed fails, or no embedded rows match. Vector search is an upgrade layered on full-text, never a hard dependency. The choice of retriever is made **once, from env**, by `Rag/GuidelineRetrieverFactory::createDefault()`, riding the existing `Rag/RetrieverInterface` seam so no consumer (`Rag/PatientEvidenceService`, the Supervisor) changed: knowledge Postgres configured ⇒ `PostgresGuidelineRetriever`; unconfigured ⇒ `Rag/HybridRetriever` over the offline in-repo corpus at `src/Rag/corpus/` (currently `endocrinology.json`). Configured-but-unreachable surfaces an honest "degraded" (empty evidence, visible in the trace/dashboard), never a silent mask.
+
+**Embeddings (decision K4).** The default is `gemini-embedding-001` requested at **1536 dims** (`Knowledge/GeminiEmbeddingClient`; `EmbeddingClientFactory` returns `UnavailableEmbeddingClient` with no key ⇒ full-text only). 1536 is finer-grained than the older 768-wide models yet stays under **pgvector's 2000-dim HNSW ceiling for the standard `vector` type**, so the fast index still applies; stored as `vector(1536)`. `gemini-embedding-001` is a Matryoshka model, so the module asks for a 1536-wide slice of its native 3072 via `outputDimensionality`; no client-side re-normalization is needed because retrieval ranks by cosine (magnitude-invariant). Changing the model or dimension is a **re-embed, not a config flip** — embeddings across widths/models aren't comparable and `ADD COLUMN IF NOT EXISTS` won't resize a column.
+
+**Ingestion is PHP, in-module (decision K2).** Chunk-and-store runs at a **Maintenance → Knowledge Base (RAG)** admin page (`public/knowledge_upload.php`, `src/Bootstrap.php`) and a CLI (`ops/knowledge/ingest_document.php`), both driving `Knowledge/KnowledgeDocumentIngestor`: `DocumentTextExtractor` gets plain text (text/markdown/HTML directly; PDF/image via `DocumentTranscriber` reusing the Gemini vision seam — no new PDF dependency) → `DocumentChunker` splits on heading/paragraph boundaries at a **per-document chunk size** (chosen per upload, not a global constant — decision K5) and auto-detects analyte tags → `KnowledgeChunkWriter::write` upserts in one transaction, **replacing the document's previous chunks by `source`** so a corrected version supersedes the old one. Each chunk is **embedded on write**. A knowledge-upload failure surfaces a single calm generic notice (decision K6), unlike the rich hand-entry fallback of the clinical paths — it is an admin action over a reproducible corpus with nothing to salvage.
+
+```
+KNOWLEDGE RETRIEVAL
+  Supervisor / PatientEvidenceService → GuidelineRetrieverFactory::createDefault()  [once, from env]
+    ├─ knowledge Postgres CONFIGURED → PostgresGuidelineRetriever
+    │     query → KnowledgeQueryScrubber (strip PHI) → [embed query] → KnowledgeQueryRunner::select()
+    │       → pgvector cosine + tag boost   ─ enough hits ─→ evidence snippets
+    │                                        └ few/none, or no embed key ─→ full-text (ts_rank) fallback
+    └─ NOT configured → HybridRetriever over src/Rag/corpus/*.json  (fully offline, unchanged from before)
+```
+
+## §11 Deploy and ops (the knowledge Postgres is a distinct service)
+
+- **Distinct service.** In production the knowledge store is a separate Postgres (Railway); for dev it is a local `pgvector/pgvector` container standing next to the app via the compose overlay `ops/local/compose.knowledge.yml`, brought up with `ops/local/knowledge-up.sh` (one command; identical schema to prod, zero cloud dependency — decision L1).
+- **`pdo_pgsql` on the app image.** OpenEMR core is MySQL-only, so its stock image ships without the Postgres PDO driver the knowledge store needs. A tiny derived image (`ops/local/knowledge/Dockerfile`, `FROM openemr/openemr:flex` + install `pdo_pgsql`, verified at build time) adds just the driver for dev (decision L2); deployed images install it in their own build.
+- **Self-seeding on deploy.** `ops/knowledge/seed_from_corpus.php` both **ensures pgvector** (`ops/knowledge/schema.sql` runs `CREATE EXTENSION IF NOT EXISTS vector` and creates `guideline_chunks` with the `vector(1536)` HNSW-cosine index, a GIN full-text index, and a GIN tags index) and **upserts the in-repo corpus**, idempotently — meant to run as the OpenEMR service's **pre-deploy / release command** so every deploy guarantees the extension + corpus. Honest scope: the seed loads **full-text rows only** (it runs without the OpenEMR/Gemini runtime, so it does **not** embed); to vector-index the corpus, ingest it through the UI/CLI, which embeds on write. A seeded-but-unembedded corpus is still searched (full-text), consistent with the vector-first/full-text-fallback contract. From a laptop, `ops/knowledge/deploy_railway.sh` applies the schema via host `psql` (or a throwaway pgvector container) and seeds if `php`+`pdo_pgsql` are present.
+
+## §12 Cross-cutting invariants preserved from Part 1
+
+Part 2 is additive in behavior as well as in code — the Part 1 guarantees still hold:
+
+- **Additivity (P1).** Module-directory-only; `ops/ci/check-additivity.sh` fails the build on any escaping diff. Core writes are confined to `ChartWriter` and proven so by `ForbiddenWriteOutsideRepositoriesRule` (§8) — the same enforcement mechanism as Part 1's read-only proof, now with exactly one sanctioned writer.
+- **Degrade cleanly, never dead-end (P2).** Every new dependency has a defined fallback: no LLM ⇒ facts-only / manual-entry review (§7–§8); no knowledge Postgres ⇒ offline in-repo corpus (§10); no embeddings key ⇒ full-text search (§10). Nothing in a request path throws to the user because a best-effort capability was unavailable. The per-flow failure analysis lives in `docs/ingestion-failure-modes.md`.
+- **PHI stays in the BAA boundary (P3 / §4).** Chart data, extractions (including the identity guard's `identity_detail`), and telemetry live only in OpenEMR's MySQL. The knowledge Postgres is PHI-free by construction and its query path is scrubbed before egress (§10). LLM egress on the read paths remains pseudonymized per §4.
+
+---
+
 ## Case-study compliance map
 
 | Requirement | Where |
