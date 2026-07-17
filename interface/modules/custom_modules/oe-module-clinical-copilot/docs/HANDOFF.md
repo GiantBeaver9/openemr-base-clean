@@ -101,6 +101,17 @@ Still open by decision / bigger than a doc-close:
   everything else). The real reason is now logged in `AttachAndExtract::tryExtract`
   (LlmUnavailableException vs SchemaValidationException) and surfaced as a
   banner on the intake review screen. Check `openemr-cmd php-log` for the cause.
+- **Knowledge/pgvector never connects on Railway even with all env set** —
+  fixed. Root cause: the web (Apache/mod_php) process does not inherit the
+  container env the shell sees, so `CLINICAL_COPILOT_KNOWLEDGE_*` were invisible
+  to it → `KnowledgeBaseConfig::isConfigured()` false → silent degrade to the
+  offline corpus. `railway-install-copilot.sh` now materializes the knowledge-DB
+  + embedding vars into `ops/local/gemini.local.env` (the same fallback file
+  already used for the Gemini key), which `LlmEnv` loads per request. **Redeploy
+  once** so the boot script rewrites that file. Diagnostic trap: `php
+  ops/knowledge/check.php` runs on the **CLI**, which *does* see the env, so it
+  reports PASS while the web path fails — verify from an actual chat request /
+  the dashboard, not just check.php.
 
 ## How to run checks
 
