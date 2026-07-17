@@ -125,6 +125,27 @@ final class TraceRecorderTest extends TestCase
         $this->recorder->record($this->span('ccp-test-bad-kind', 'not_a_real_kind', 'ok'));
     }
 
+    /**
+     * Regression: the deferred-save intake preview opens a `preview` span
+     * (AttachAndExtract::previewIntake). It was missing from ALLOWED_KINDS, so
+     * record() threw, previewIntake's caller swallowed it, and intake extraction
+     * silently degraded to "model unavailable". The span kind must be accepted.
+     */
+    public function testPreviewKindIsAccepted(): void
+    {
+        $correlationId = 'ccp-test-' . bin2hex(random_bytes(8));
+
+        $this->recorder->record($this->span($correlationId, 'preview', 'ok'));
+
+        $count = (int)QueryUtils::fetchSingleValue(
+            'SELECT COUNT(*) AS c FROM `mod_copilot_trace` WHERE `correlation_id` = ?',
+            'c',
+            [$correlationId],
+        );
+
+        self::assertSame(1, $count, "the intake 'preview' span kind must record, not throw");
+    }
+
     public function testUnrecognizedStatusIsRejected(): void
     {
         $this->expectException(\DomainException::class);
