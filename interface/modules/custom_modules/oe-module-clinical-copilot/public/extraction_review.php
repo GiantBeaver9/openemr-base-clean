@@ -76,7 +76,12 @@ if ($isPost) {
                 );
                 break;
             case 'lock':
-                $controller->lock($extractionId, $authUserId);
+                // Specimen draw/collection date entered on the review screen
+                // (labs). Accept only a strict Y-m-d; anything else → null, and
+                // the commit falls back to today.
+                $rawDate = trim((string)($_POST['collection_date'] ?? ''));
+                $collectionDate = preg_match('/^\d{4}-\d{2}-\d{2}$/', $rawDate) === 1 ? $rawDate : null;
+                $controller->lock($extractionId, $authUserId, $collectionDate);
                 break;
             case 'unlock':
                 $controller->unlock($extractionId, $isElevated);
@@ -102,6 +107,9 @@ $vm['patient_url'] = isset($vm['pid']) ? $moduleBase . '/doc.php?pid=' . $vm['pi
 $vm['source_view_url'] = (isset($vm['source_document_id'], $vm['pid']) && $vm['source_document_id'])
     ? $webRoot . '/controller.php?document&retrieve&patient_id=' . $vm['pid'] . '&document_id=' . $vm['source_document_id']
     : '';
+// Draw/collection date field default (labs). Prefilled to today; the reviewer
+// sets the real specimen date before locking.
+$vm['collection_date'] = date('Y-m-d');
 
 $twig = (new TwigContainer(dirname(__DIR__) . '/templates', OEGlobalsBag::getInstance()->getKernel()))->getTwig();
 echo $twig->render('oe-module-clinical-copilot/extraction_review.html.twig', $vm);

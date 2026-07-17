@@ -278,18 +278,27 @@
         </a>
         <div>
             {% if not locked %}
-                <form method="POST" action="{{ post_url|attr }}" style="display:inline;"
-                      onsubmit="return confirm('{{ "Lock these values and write them into the chart?"|xlj }}');">
+                {# Single-quoted attribute: xlj (json_encode) supplies double
+                   quotes, which would close a double-quoted attribute early. #}
+                <form method="POST" action="{{ post_url|attr }}" class="form-inline d-inline-flex align-items-end"
+                      onsubmit='return confirm({{ "Lock these values and write them into the chart?"|xlj }})'>
                     {{ csrfToken('default', 'csrf_token_form') }}
                     <input type="hidden" name="action" value="lock">
                     <input type="hidden" name="extraction_id" value="{{ extraction_id|attr }}">
+                    {% if is_lab %}
+                        <div class="form-group mb-0 mr-2">
+                            <label class="small mb-0 mr-1" for="ccpDrawDate">{{ "Draw date"|xlt }}</label>
+                            <input type="date" id="ccpDrawDate" class="form-control form-control-sm"
+                                   name="collection_date" value="{{ collection_date|attr }}">
+                        </div>
+                    {% endif %}
                     <button type="submit" class="btn btn-success">
                         <i class="fa fa-lock mr-1"></i>{{ "Verify & lock"|xlt }}
                     </button>
                 </form>
             {% elseif is_elevated %}
                 <form method="POST" action="{{ post_url|attr }}" style="display:inline;"
-                      onsubmit="return confirm('{{ "Unlock this extraction for correction?"|xlj }}');">
+                      onsubmit='return confirm({{ "Unlock this extraction for correction?"|xlj }})'>
                     {{ csrfToken('default', 'csrf_token_form') }}
                     <input type="hidden" name="action" value="unlock">
                     <input type="hidden" name="extraction_id" value="{{ extraction_id|attr }}">

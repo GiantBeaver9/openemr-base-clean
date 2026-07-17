@@ -342,13 +342,17 @@ final class ChartWriter
                     $reportId,
                     $field->fieldKey,
                     $field->fieldKey,
-                    $field->value,
-                    $field->unit,
-                    $field->refRange,
+                    // `units`, `range`, and `document_id` are NOT NULL in core
+                    // (procedure_result); a manual lab has null unit/range and no
+                    // source PDF, so coalesce to the column defaults or the INSERT
+                    // throws (this was the "verify & lock" failure on manual labs).
+                    $field->value ?? '',
+                    $field->unit ?? '',
+                    $field->refRange ?? '',
                     $field->abnormalFlag !== null ? strtolower($field->abnormalFlag) : '',
                     'final',
                     $orderedDate,
-                    $documentId,
+                    $documentId ?? 0,
                 ],
             );
             $committed[$row->id] = $resultId;

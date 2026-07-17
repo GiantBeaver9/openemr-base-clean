@@ -114,10 +114,10 @@ final class IngestController
         $this->review->editField($extractionId, $fieldId, $value, $elevated);
     }
 
-    public function lock(int $extractionId, int $userId): void
+    public function lock(int $extractionId, int $userId, ?string $collectionDate = null): void
     {
         // provider_id for committed lab results = the verifying clinician.
-        $this->review->lock($extractionId, $userId, $userId);
+        $this->review->lock($extractionId, $userId, $userId, $collectionDate);
     }
 
     public function unlock(int $extractionId, bool $elevated): void
