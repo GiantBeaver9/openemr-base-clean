@@ -121,8 +121,15 @@ $vm['review_url'] = $reviewUrl;
 $vm['is_elevated'] = $isElevated;
 $vm['error'] = isset($_GET['err']);
 $vm['patient_url'] = isset($vm['pid']) ? $moduleBase . '/doc.php?pid=' . $vm['pid'] : $moduleBase . '/doc.php';
+// as_file=false makes the document controller serve the file with
+// `Content-Disposition: inline` (not `attachment`), so the browser renders
+// the PDF inside the review iframe instead of downloading it. Without it the
+// retrieve action defaults to as_file=true: the iframe stays blank and the
+// browser fires a "save file" prompt whenever the pane loads. The parameter
+// order matters — controller.php dispatches positionally, so as_file must
+// follow document_id to land on retrieve_action()'s third argument.
 $vm['source_view_url'] = (isset($vm['source_document_id'], $vm['pid']) && $vm['source_document_id'])
-    ? $webRoot . '/controller.php?document&retrieve&patient_id=' . $vm['pid'] . '&document_id=' . $vm['source_document_id']
+    ? $webRoot . '/controller.php?document&retrieve&patient_id=' . $vm['pid'] . '&document_id=' . $vm['source_document_id'] . '&as_file=false'
     : '';
 // Draw/collection date field default (labs). Prefilled to today; the reviewer
 // sets the real specimen date before locking.
