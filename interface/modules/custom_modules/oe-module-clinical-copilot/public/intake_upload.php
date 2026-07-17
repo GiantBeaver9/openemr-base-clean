@@ -73,12 +73,37 @@ if ($action === 'upload') {
 
     // Extract only -- no patient, no draft, no writes. Degrades to empty on any
     // model failure (the form just renders blank for manual entry).
+    $visionUsed = false;
+    $schemaRejected = false;
     try {
         $preview = IngestController::createDefault()->previewIntake($upload->bytes, $upload->mimeType);
         $values = is_array($preview['fields'] ?? null) ? $preview['fields'] : [];
+        $visionUsed = (bool)($preview['vision_used'] ?? false);
+        $schemaRejected = (bool)($preview['schema_rejected'] ?? false);
     } catch (\Throwable $e) {
         (new SystemLogger())->error('ClinicalCopilot: intake preview failed', ['exception' => $e]);
         $values = [];
+    }
+
+    // Turn a silent blank form into a diagnostic: say WHY nothing prefilled so a
+    // reviewer (and we) can tell "model not configured" from "read but rejected"
+    // from "nothing on the page" — instead of guessing at an empty screen.
+    $anyValue = false;
+    foreach ($values as $v) {
+        if (is_string($v) && trim($v) !== '') {
+            $anyValue = true;
+            break;
+        }
+    }
+    $note = '';
+    if (!$anyValue) {
+        if (!$visionUsed) {
+            $note = xl('Automated extraction is unavailable (the AI model is not configured or did not respond). Fill the form in by hand, then Save.');
+        } elseif ($schemaRejected) {
+            $note = xl('The document was read but the extracted data did not match the expected format. Fill in or correct the fields against the document, then Save.');
+        } else {
+            $note = xl('No values could be read from this document. Fill the form in by hand, then Save.');
+        }
     }
 
     // The uploaded PDF rides through the review page as base64 (shown in the
@@ -88,7 +113,7 @@ if ($action === 'upload') {
     // the round-trip is cheap and the oversize edge is already handled (the 413
     // guard above). The priority for this module is extraction matching and
     // human correction, not large-document scale — so the simpler path wins.
-    renderReview($postUrl, $values, base64_encode($upload->bytes), $upload->mimeType, $upload->filename, []);
+    renderReview($postUrl, $values, base64_encode($upload->bytes), $upload->mimeType, $upload->filename, [], $note);
     exit;
 }
 
@@ -176,7 +201,7 @@ function renderIntakeForm(string $moduleBase, string $webRoot, string $error = '
  * @param array<string, string> $values   field_key => current value
  * @param list<string>          $errors
  */
-function renderReview(string $postUrl, array $values, string $pdfB64, string $pdfMime, string $pdfName, array $errors): void
+function renderReview(string $postUrl, array $values, string $pdfB64, string $pdfMime, string $pdfName, array $errors, string $note = ''): void
 {
     // Build the grouped field view model from the single source of truth that
     // also drives the printable form (so the screen and the PDF always match).
@@ -205,6 +230,7 @@ function renderReview(string $postUrl, array $values, string $pdfB64, string $pd
         'pdf_mime' => $pdfMime,
         'pdf_name' => $pdfName,
         'sex_options' => ['Male', 'Female', 'Unknown', 'Other'],
+        'extraction_note' => $note,
     ]);
 }
 

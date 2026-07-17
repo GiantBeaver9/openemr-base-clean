@@ -50,19 +50,33 @@ final class ExtractionSchemaTest extends TestCase
         self::assertSame([], ExtractionSchema::validate(DocType::IntakeForm, $payload));
     }
 
-    public function testMissingPageIsRejectedBecauseCitationIsRequired(): void
+    public function testIntakeDoesNotRequireCitationsSoAValuedFieldWithoutOneValidates(): void
     {
-        $payload = ['fields' => [['field_key' => 'first_name', 'value' => 'Ada', 'quote' => 'Ada']]];
-        $errors = ExtractionSchema::validate(DocType::IntakeForm, $payload);
+        // Intake prefills a form beside the PDF — it has no click-to-source
+        // overlay — so citations are not required. A valued field with no
+        // page/quote must NOT reject the extraction (that blanked the form).
+        $payload = ['fields' => [
+            ['field_key' => 'first_name', 'value' => 'Ada'],
+            ['field_key' => 'last_name', 'value' => 'Lovelace'],
+        ]];
+
+        self::assertSame([], ExtractionSchema::validate(DocType::IntakeForm, $payload));
+    }
+
+    public function testLabMissingPageIsRejectedBecauseCitationIsRequired(): void
+    {
+        // Labs drive the bbox overlay, so a valued result MUST cite its page.
+        $payload = ['fields' => [['field_key' => 'A1c', 'value' => '7.2', 'quote' => 'A1c 7.2']]];
+        $errors = ExtractionSchema::validate(DocType::LabPdf, $payload);
 
         self::assertNotSame([], $errors);
         self::assertStringContainsString('page', implode(' ', $errors));
     }
 
-    public function testMissingQuoteIsRejectedBecauseCitationIsRequired(): void
+    public function testLabMissingQuoteIsRejectedBecauseCitationIsRequired(): void
     {
-        $payload = ['fields' => [['field_key' => 'first_name', 'value' => 'Ada', 'page' => 1]]];
-        $errors = ExtractionSchema::validate(DocType::IntakeForm, $payload);
+        $payload = ['fields' => [['field_key' => 'A1c', 'value' => '7.2', 'page' => 1]]];
+        $errors = ExtractionSchema::validate(DocType::LabPdf, $payload);
 
         self::assertNotSame([], $errors);
         self::assertStringContainsString('quote', implode(' ', $errors));
