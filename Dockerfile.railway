@@ -14,9 +14,24 @@ ENV FLEX_REPOSITORY=https://github.com/GiantBeaver9/openemr-base-clean.git \
 # connects to a SEPARATE Postgres, but the stock flex image is MySQL-only and
 # ships no Postgres driver — without this the module sees its env yet cannot
 # connect (isAvailable() is false) and silently falls back to the offline corpus.
-# Auto-detect the image's PHP version; fail the build loudly if it can't install.
-RUN apk add --no-cache "php$(php -r 'echo PHP_MAJOR_VERSION, PHP_MINOR_VERSION;')-pdo_pgsql" \
-    && php -m | grep -qi pdo_pgsql
+#
+# Install it for EVERY PHP version present on the image, not just the `php` CLI's.
+# The previous version installed only for `php -r PHP_MAJOR.PHP_MINOR` — the CLI's
+# version — but the Apache/mod_php web SAPI can run a different minor version, so
+# the driver loaded for the CLI (seeding, check.php both pass) yet was absent from
+# the web process where a live chat/RAG request actually runs. On Alpine each
+# version keeps its own `/etc/phpNN/conf.d`, so loop over `/etc/php*` and cover
+# whichever version Apache uses. The trailing `php -m` is the CLI hard gate; the
+# app's own status page reports `driver_missing` if the web SAPI still lacks it.
+RUN set -eux; \
+    for php_dir in /etc/php*; do \
+        [ -d "$php_dir" ] || continue; \
+        ver="${php_dir#/etc/php}"; \
+        case "$ver" in ''|*[!0-9]*) continue ;; esac; \
+        apk add --no-cache "php${ver}-pdo_pgsql" || true; \
+    done; \
+    apk add --no-cache "php$(php -r 'echo PHP_MAJOR_VERSION, PHP_MINOR_VERSION;')-pdo_pgsql" || true; \
+    php -m | grep -qi pdo_pgsql
 
 COPY patch-flex-openemr.sh railway-flex-bootstrap.sh railway-preinstall-db.sh railway-ensure-ssl.sh railway-configure-apache.sh railway-install-copilot.sh railway-entrypoint.sh /tmp/railway/
 RUN chmod 755 /tmp/railway/*.sh \
