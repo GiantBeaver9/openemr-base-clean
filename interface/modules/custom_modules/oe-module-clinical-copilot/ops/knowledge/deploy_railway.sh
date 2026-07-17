@@ -8,10 +8,18 @@
 # PHI-free knowledge database; it must never point at OpenEMR's MySQL or anything
 # holding patient data.
 #
+# By default this ensures pgvector (schema.sql runs CREATE EXTENSION vector) AND
+# seeds the in-repo corpus, so a fresh Postgres is deploy-ready in one command.
+#
 # Usage (from anywhere):
 #   ops/knowledge/deploy_railway.sh "postgresql://user:pass@host:5432/db?sslmode=require"
 #   ops/knowledge/deploy_railway.sh              # reads CLINICAL_COPILOT_KNOWLEDGE_DATABASE_URL
-#   ops/knowledge/deploy_railway.sh --seed ...   # also load the in-repo corpus (needs php + pdo_pgsql)
+#   ops/knowledge/deploy_railway.sh --schema-only ...   # skip the corpus seed (extension + tables only)
+#
+# The corpus seed needs php + the pdo_pgsql extension. If those aren't on the box
+# you run this from (e.g. your laptop), the schema/extension still apply and the
+# seed is skipped with a note -- run seed_from_corpus.php inside the app container
+# instead (it has pdo_pgsql), which is the recommended deploy hook anyway.
 #
 # psql resolution: uses host `psql` if present, otherwise a throwaway
 # pgvector/pgvector:pg16 container (so no host Postgres client is required, just
@@ -25,6 +33,7 @@
 set -euo pipefail
 
 log()  { printf '\n\033[1;36m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m%s\033[0m\n' "$*" >&2; }
 die()  { printf '\n\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,13 +41,14 @@ SCHEMA_SQL="$SCRIPT_DIR/schema.sql"
 SEED_PHP="$SCRIPT_DIR/seed_from_corpus.php"
 [ -f "$SCHEMA_SQL" ] || die "schema.sql not found next to this script"
 
-SEED=0
+SEED=1
 URL=""
 for arg in "$@"; do
     case "$arg" in
-        --seed) SEED=1 ;;
-        --*)    die "unknown flag: $arg" ;;
-        *)      URL="$arg" ;;
+        --seed)        SEED=1 ;;
+        --schema-only) SEED=0 ;;
+        --*)           die "unknown flag: $arg" ;;
+        *)             URL="$arg" ;;
     esac
 done
 URL="${URL:-${CLINICAL_COPILOT_KNOWLEDGE_DATABASE_URL:-}}"
@@ -65,10 +75,14 @@ fi
 log "Schema applied."
 
 if [ "$SEED" = "1" ]; then
-    [ -f "$SEED_PHP" ] || die "seed_from_corpus.php not found"
-    command -v php >/dev/null 2>&1 || die "--seed needs php on PATH (with the pdo_pgsql extension)"
-    log "Seeding the in-repo corpus (full-text; vector-index later via the UI/CLI ingest)..."
-    CLINICAL_COPILOT_KNOWLEDGE_DATABASE_URL="$URL" php "$SEED_PHP"
+    if [ -f "$SEED_PHP" ] && command -v php >/dev/null 2>&1 && php -r 'exit(in_array("pgsql",PDO::getAvailableDrivers(),true)?0:1);' 2>/dev/null; then
+        log "Seeding the in-repo corpus (full-text; vector-index later via the UI/CLI ingest)..."
+        CLINICAL_COPILOT_KNOWLEDGE_DATABASE_URL="$URL" php "$SEED_PHP"
+    else
+        warn "Skipping the corpus seed: php with the pdo_pgsql extension is not available here."
+        warn "The schema + pgvector extension were applied. Seed from inside the app container instead:"
+        warn "  php <module>/ops/knowledge/seed_from_corpus.php   (with CLINICAL_COPILOT_KNOWLEDGE_DATABASE_URL set)"
+    fi
 fi
 
 cat <<EOF

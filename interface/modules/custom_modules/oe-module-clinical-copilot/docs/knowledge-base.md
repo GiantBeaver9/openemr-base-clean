@@ -139,23 +139,45 @@ Two things the stock OpenEMR image lacks are handled for you: the overlay
 image ships the **`vector`** extension `schema.sql` enables. Tear down with
 `knowledge-up.sh --down` (the data volume is kept).
 
-### Promoting to Railway (or any Postgres)
+### Deploying to Railway (or any Postgres)
 
-The same schema goes to a deployed instance with one script — point it at the
-**separate** Railway Postgres (its own service, never OpenEMR's DB):
+The knowledge store is **self-seeding on deploy**. One command both **ensures
+pgvector** (`schema.sql` runs `CREATE EXTENSION IF NOT EXISTS vector` + creates
+the table/indexes) and **loads the in-repo corpus**, so a fresh Postgres is
+query-ready with no manual steps:
 
 ```bash
-# Grab the PUBLIC connection URL from Railway's Postgres "Connect" tab.
-interface/modules/custom_modules/oe-module-clinical-copilot/ops/knowledge/deploy_railway.sh \
-    "postgresql://user:pass@host.proxy.rlwy.net:5432/railway?sslmode=require"
-
-#   --seed  also loads the in-repo corpus (full-text; vector-index via the UI/CLI).
+php interface/modules/custom_modules/oe-module-clinical-copilot/ops/knowledge/seed_from_corpus.php
+#   with CLINICAL_COPILOT_KNOWLEDGE_DATABASE_URL set (or the discrete DB_* vars)
 ```
 
-It applies `schema.sql` idempotently using your host `psql`, or a throwaway
-`pgvector/pgvector:pg16` container if you have no host client — only Docker is
-required. Then set `CLINICAL_COPILOT_KNOWLEDGE_DATABASE_URL` on the deployed
-OpenEMR service (and ensure its image carries `pdo_pgsql`).
+**Wire it as your Railway deploy step.** Set it as the OpenEMR service's
+**pre-deploy / release command** so every deploy guarantees the extension +
+corpus. It runs *inside the app container*, which already has `pdo_pgsql`, and is
+idempotent (extension `IF NOT EXISTS`, corpus upserted by id) — safe to run on
+every deploy. It ensures pgvector, applies the schema, and seeds `endocrinology.json`.
+
+From a laptop instead (no in-container php), use the wrapper, which applies the
+schema via host `psql` or a throwaway `pgvector/pgvector:pg16` container and then
+seeds if `php`+`pdo_pgsql` are present:
+
+```bash
+# PUBLIC URL from Railway's Postgres "Connect" tab.
+interface/modules/custom_modules/oe-module-clinical-copilot/ops/knowledge/deploy_railway.sh \
+    "postgresql://user:pass@host.proxy.rlwy.net:5432/railway?sslmode=require"
+#   --schema-only   ensures pgvector + tables but skips the corpus seed
+```
+
+> **pgvector must exist in the Postgres image.** `CREATE EXTENSION vector`
+> only succeeds if the server ships the pgvector binaries. Railway's current
+> Postgres image does; if `CREATE EXTENSION` errors with
+> `could not open extension control file`, deploy Railway's **pgvector** database
+> template (same `pgvector/pgvector` image used locally) and point the env at it.
+> Also ensure the OpenEMR image carries `pdo_pgsql` (see `ops/local/knowledge/Dockerfile`).
+
+The corpus seeds **full-text** rows (embeddings are added when documents are
+ingested through the UI/CLI); retrieval is vector-first with full-text fallback,
+so a seeded-but-unembedded corpus is still searched.
 
 ## Adding a document (chunk-and-store, no code change)
 
