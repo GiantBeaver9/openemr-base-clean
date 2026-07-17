@@ -10,6 +10,14 @@ ENV FLEX_REPOSITORY=https://github.com/GiantBeaver9/openemr-base-clean.git \
     FLEX_REPOSITORY_BRANCH=main \
     NODE_OPTIONS=--max-old-space-size=4096
 
+# Bake in the pdo_pgsql PHP driver. The Clinical Co-Pilot knowledge store (RAG)
+# connects to a SEPARATE Postgres, but the stock flex image is MySQL-only and
+# ships no Postgres driver — without this the module sees its env yet cannot
+# connect (isAvailable() is false) and silently falls back to the offline corpus.
+# Auto-detect the image's PHP version; fail the build loudly if it can't install.
+RUN apk add --no-cache "php$(php -r 'echo PHP_MAJOR_VERSION, PHP_MINOR_VERSION;')-pdo_pgsql" \
+    && php -m | grep -qi pdo_pgsql
+
 COPY patch-flex-openemr.sh railway-flex-bootstrap.sh railway-preinstall-db.sh railway-ensure-ssl.sh railway-configure-apache.sh railway-install-copilot.sh railway-entrypoint.sh /tmp/railway/
 RUN chmod 755 /tmp/railway/*.sh \
     && cp /tmp/railway/railway-flex-bootstrap.sh /usr/local/bin/railway-flex-bootstrap.sh \

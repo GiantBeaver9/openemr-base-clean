@@ -139,4 +139,26 @@ else
     log "CLINICAL_COPILOT_SEED_DEMO=0 -- demo seeding disabled by the operator. The module is installed but no synthetic patients were added."
 fi
 
+# Ensure the external knowledge store (RAG) is deploy-ready WHEN it is configured.
+# seed_from_corpus.php runs CREATE EXTENSION vector + the schema + upserts the
+# in-repo corpus, idempotently. It has its own autoloader (no OpenEMR bootstrap /
+# RootCliGuard), so it runs as-is with the service env intact -- no su needed.
+# Best-effort: a knowledge-store hiccup must never fail the deploy (retrieval
+# falls back to the offline corpus).
+KNOWLEDGE_SEED="${OPENEMR_ROOT}/${MODULE_REL}/ops/knowledge/seed_from_corpus.php"
+if [ -n "${CLINICAL_COPILOT_KNOWLEDGE_DATABASE_URL:-}" ] || [ -n "${CLINICAL_COPILOT_KNOWLEDGE_DB_HOST:-}" ]; then
+    if [ -f "${KNOWLEDGE_SEED}" ]; then
+        log "knowledge store configured -- ensuring pgvector + seeding the corpus."
+        if php "${KNOWLEDGE_SEED}" >> "${COPILOT_LOG}" 2>&1; then
+            log "knowledge store ready (pgvector ensured, corpus seeded)."
+        else
+            log "knowledge seed FAILED (non-fatal -- retrieval falls back to the offline corpus). See ${COPILOT_LOG}." >&2
+        fi
+    else
+        log "knowledge DB configured but seed_from_corpus.php not found at ${KNOWLEDGE_SEED}; skipping." >&2
+    fi
+else
+    log "no knowledge DB configured (CLINICAL_COPILOT_KNOWLEDGE_* unset); using the offline corpus."
+fi
+
 log "done."
