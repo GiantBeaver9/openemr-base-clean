@@ -194,10 +194,21 @@ final class AttachAndExtract
 
             return [$outcome, true, false];
         } catch (LlmUnavailableException $e) {
+            // Log the real reason: "unavailable" here covers both "no client
+            // configured" AND a provider/transport failure on the (multimodal)
+            // call — without this the intake form just blanks with no clue why.
+            (new SystemLogger())->warning('ClinicalCopilot: vision extraction unavailable', [
+                'doc_type' => $docType->value,
+                'exception' => $e,
+            ]);
             $this->recordChild($parent, $correlationId, 'vision_extract', $childStart, $t0, 'degraded', $pid, null);
 
             return [$this->outcome(ExtractionSchema::blankExtraction($docType), null), false, false];
         } catch (SchemaValidationException $e) {
+            (new SystemLogger())->warning('ClinicalCopilot: vision extraction rejected by schema', [
+                'doc_type' => $docType->value,
+                'exception' => $e,
+            ]);
             $this->recordChild($parent, $correlationId, 'vision_extract', $childStart, $t0, 'error', $pid, null);
 
             return [$this->outcome(ExtractionSchema::blankExtraction($docType), null), false, true];
