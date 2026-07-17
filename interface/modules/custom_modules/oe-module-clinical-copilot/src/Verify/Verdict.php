@@ -52,4 +52,17 @@ final readonly class Verdict
     {
         return new self($checkId, false, [$reason], true);
     }
+
+    /**
+     * @return array{check: string, passed: bool, skipped: bool, findings: list<string>}
+     */
+    public function toArray(): array
+    {
+        return [
+            'check' => $this->checkId->value,
+            'passed' => $this->passed,
+            'skipped' => $this->skipped,
+            'findings' => $this->findings,
+        ];
+    }
 }
