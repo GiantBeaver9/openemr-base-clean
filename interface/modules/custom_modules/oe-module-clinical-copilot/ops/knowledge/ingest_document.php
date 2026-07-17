@@ -33,6 +33,11 @@ use OpenEMR\Modules\ClinicalCopilot\Knowledge\DocumentMetadata;
 use OpenEMR\Modules\ClinicalCopilot\Knowledge\KnowledgeDocumentIngestor;
 use OpenEMR\Modules\ClinicalCopilot\Knowledge\TagInput;
 
+if (PHP_SAPI !== 'cli') {
+    fwrite(STDERR, "ingest_document.php is CLI-only\n");
+    exit(1);
+}
+
 $ignoreAuth = true;
 $_GET['site'] = $_GET['site'] ?? 'default';
 require_once __DIR__ . '/../../../../../globals.php';

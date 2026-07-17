@@ -8,6 +8,22 @@
 
 ---
 
+## Resolution status (post-audit)
+
+Tracked disposition of the findings acted on since this report was written. Fixes land as `fix(clinical-copilot): …` commits; docs-only reconciliations update ARCHITECTURE.md / this file in place. Findings not listed here remain open with the disposition described in their entry below.
+
+| # | Sev | Disposition | Where |
+|---|-----|-------------|-------|
+| 1 | CRITICAL | **Deferred by decision** — verify gate stays OFF while the checks are retuned; the module does not yet serve enough live traffic for it to matter. Re-enable with `CLINICAL_COPILOT_VERIFY_ENFORCE=1` (one-line flip) before serving real traffic. | `src/Verify/VerificationPolicy.php:46` |
+| 3 | HIGH | **Fixed** — scrubber switched from a capitalization blacklist to a clinical-term allowlist (`CLINICAL_TERMS` + analyte-code regex); lowercase names no longer leak. Regression test added. | commit `804f2b1` / `KnowledgeQueryScrubber` |
+| 4 | HIGH | **Documented as accepted** — chart-wide ACL matches stock OpenEMR's own chart-access model; per-patient/care-team scoping is a deliberate non-goal for v1, with the controller layer named as the extension point if the fork ever tightens it. Reconciled in ARCHITECTURE.md §4. | ARCHITECTURE.md §4 |
+| 5 | HIGH | **Fixed** — `span.error_detail` now renders through `\|text` on the dashboard. | commit `9214a3c` / `dashboard.html.twig:406` |
+| 6 | HIGH | **Fixed** — `extraction_review.php` binds `extraction_id` to the session patient context via `IngestController::extractionPatientId()`; mismatch → 403 + logged warning. | commit `804f2b1` |
+| 18 | MEDIUM | **Fixed** — added the `PHP_SAPI !== 'cli'` guard, matching sibling ops scripts, so a direct HTTP request can no longer boot the bootstrap with `$ignoreAuth = true`. | `ops/knowledge/ingest_document.php` |
+| 20 | MEDIUM | **Documented as as-built gap** — the SELECT-only MySQL user is a planned defense-in-depth *target*, not wired; the enforced read-only control is the module-scoped PHPStan write-forbidding rule (layer 1). A real split needs two DB roles because `ChartWriter`/`mod_copilot_*` legitimately write. Reconciled in ARCHITECTURE.md §4. | ARCHITECTURE.md §4 |
+
+---
+
 ## CRITICAL
 
 ### 1. The V1–V6 clinical-safety verification gate is disabled by default

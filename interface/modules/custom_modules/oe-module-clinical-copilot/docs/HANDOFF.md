@@ -69,16 +69,30 @@ finding #1). We don't feed it enough data to matter right now.
 
 ## Known open items / next candidates (from docs/SECURITY.md)
 
-- Verify gate is off (finding #1) — intentional, re-enable when ready.
-- Chart-wide ACL, no care-team scoping (finding #4) — matches stock OpenEMR;
-  document as accepted or add scoping if this fork wants stricter.
-- `{{ span.error_detail }}` unescaped in a dashboard template (finding #5) —
-  add `|text`.
-- SELECT-only MySQL user is documented but not provisioned by deploy
-  (`railway-preinstall-db.sh` grants ALL) — finding #20.
-- `ops/knowledge/ingest_document.php` missing the `PHP_SAPI !== 'cli'` guard
-  (finding #18).
-- Full audit + residuals: `docs/SECURITY.md`, `docs/REPORT.md`.
+Closed in the handoff-review-completion pass (see `docs/SECURITY.md` →
+"Resolution status"):
+
+- ✅ **#5** — `{{ span.error_detail }}` now renders through `|text`
+  (was already fixed in `9214a3c`; the handoff entry was stale).
+- ✅ **#18** — `ops/knowledge/ingest_document.php` now has the
+  `PHP_SAPI !== 'cli'` guard, matching its sibling ops scripts.
+- ✅ **#4** — chart-wide ACL documented as accepted (matches stock OpenEMR),
+  with the controller layer named as the extension point for stricter
+  scoping. ARCHITECTURE.md §4.
+- ✅ **#20** — SELECT-only MySQL user reconciled to as-built: it's a planned
+  defense-in-depth *target*, not wired; the enforced read-only control is the
+  module-scoped PHPStan write-forbidding rule. A real split needs two DB roles
+  (`ChartWriter`/`mod_copilot_*` legitimately write). ARCHITECTURE.md §4.
+
+Still open by decision / bigger than a doc-close:
+
+- **Verify gate is off (finding #1)** — intentional; re-enable with
+  `CLINICAL_COPILOT_VERIFY_ENFORCE=1` when the retuning is done. One-line flip.
+- If this fork ever wants stricter-than-stock authz, implement the care-team
+  check (#4) and the two-DB-role split (#20) — deliberately deferred, not
+  today-sized.
+- Full audit + residuals: `docs/SECURITY.md`, `docs/REPORT.md`; deferred
+  backlog with product decisions in `docs/known-issues.md` (BL-1…BL-12).
 
 ## Known runtime note
 
