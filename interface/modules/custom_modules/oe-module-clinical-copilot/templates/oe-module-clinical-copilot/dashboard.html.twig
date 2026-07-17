@@ -72,6 +72,9 @@
                 {% elseif knowledge.state == 'unreachable' %}
                     <span class="badge badge-warning">{{ "unreachable"|xlt }}</span>
                     <span class="text-muted small">{{ "configured but not responding — evidence degrades to empty"|xlt }}</span>
+                {% elseif knowledge.state == 'driver_missing' %}
+                    <span class="badge badge-warning">{{ "driver missing"|xlt }}</span>
+                    <span class="text-muted small">{{ "configured, but pdo_pgsql is not loaded in the web SAPI — enable it for Apache/mod_php"|xlt }}</span>
                 {% else %}
                     <span class="badge badge-secondary">{{ "offline corpus"|xlt }}</span>
                     <span class="text-muted small">{{ "no external DB configured — using the in-repo guideline corpus"|xlt }}</span>

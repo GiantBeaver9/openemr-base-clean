@@ -28,6 +28,8 @@
             <div class="alert alert-info py-2">{{ "Knowledge store connected"|xlt }} &middot; {{ knowledge.chunk_count }} {{ "chunks currently loaded"|xlt }}.</div>
         {% elseif knowledge.state == 'unreachable' %}
             <div class="alert alert-warning py-2">{{ "The knowledge store is configured but not responding. Ingestion will fail until it is reachable."|xlt }}</div>
+        {% elseif knowledge.state == 'driver_missing' %}
+            <div class="alert alert-warning py-2">{{ "The knowledge database IS configured, but the PostgreSQL PHP driver (pdo_pgsql) is not loaded in the web server process. It is likely enabled only for the CLI (so seeding and check.php pass) but not for Apache/mod_php. Enable pdo_pgsql for the web SAPI and reload — no env change is needed."|xlt }}</div>
         {% else %}
             <div class="alert alert-warning py-2">{{ "No knowledge database is configured, so there is nowhere to write. Set CLINICAL_COPILOT_KNOWLEDGE_DATABASE_URL first (see docs/knowledge-base.md)."|xlt }}</div>
         {% endif %}

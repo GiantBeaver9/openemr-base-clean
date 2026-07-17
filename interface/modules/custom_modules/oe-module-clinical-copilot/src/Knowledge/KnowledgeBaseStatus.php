@@ -41,12 +41,23 @@ final class KnowledgeBaseStatus
     }
 
     /**
-     * @return array{state: 'not_configured'|'unreachable'|'ok', configured: bool, chunk_count: int|null}
+     * @return array{state: 'not_configured'|'driver_missing'|'unreachable'|'ok', configured: bool, chunk_count: int|null}
      */
     public function snapshot(): array
     {
-        if (!$this->config->isConfigured() || !$this->runner->isAvailable()) {
-            return ['state' => 'not_configured', 'configured' => $this->config->isConfigured(), 'chunk_count' => null];
+        if (!$this->config->isConfigured()) {
+            return ['state' => 'not_configured', 'configured' => false, 'chunk_count' => null];
+        }
+
+        // Configured, but the runner still reports unavailable. The connection's
+        // isAvailable() is (isConfigured AND the pdo_pgsql driver is loaded in
+        // THIS SAPI); config is already true here, so the missing factor is the
+        // driver — classically pdo_pgsql is present for the CLI (so check.php and
+        // deploy-time seeding pass) but not for the Apache/web process, which is
+        // where a chat/RAG request actually runs. Report that distinctly instead
+        // of the misleading "no database configured — set DATABASE_URL".
+        if (!$this->runner->isAvailable()) {
+            return ['state' => 'driver_missing', 'configured' => true, 'chunk_count' => null];
         }
 
         $table = $this->config->table;
