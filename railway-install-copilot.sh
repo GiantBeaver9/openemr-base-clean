@@ -65,6 +65,28 @@ fi
 
 log "OpenEMR base install detected."
 
+# The web (Apache/php) process does not reliably inherit the container env the
+# shell sees (php-fpm clear_env, mod_php env scoping) — so intake extraction and
+# synthesis silently saw NO LLM key even though it is set on the service, and the
+# UI showed "the AI model is not configured." LlmEnv reads
+# ops/local/gemini.local.env as a per-request fallback for exactly this, so
+# materialize the LLM credentials there from the container env we CAN see here.
+# Written every boot; ephemeral (never committed); only the vars that are set.
+LLM_ENV_FILE="${OPENEMR_ROOT}/${MODULE_REL}/ops/local/gemini.local.env"
+if [ -d "$(dirname "${LLM_ENV_FILE}")" ]; then
+    {
+        for _v in CLINICAL_COPILOT_GEMINI_API_KEY CLINICAL_COPILOT_GEMINI_API_KEY_BACKUP \
+                  CLINICAL_COPILOT_GEMINI_API_MODEL CLINICAL_COPILOT_GCP_PROJECT_ID \
+                  CLINICAL_COPILOT_GCP_LOCATION; do
+            eval "_val=\${${_v}:-}"
+            [ -n "${_val}" ] && printf '%s=%s\n' "${_v}" "${_val}"
+        done
+    } > "${LLM_ENV_FILE}" 2>/dev/null \
+        && chmod 644 "${LLM_ENV_FILE}" 2>/dev/null \
+        && log "wrote LLM credentials to ops/local/gemini.local.env for the web process." \
+        || log "could not write ${LLM_ENV_FILE} (non-fatal)." >&2
+fi
+
 # The base install hammers MySQL (hundreds of CREATE TABLEs + reference-data
 # inserts). On a small Railway MySQL that pushes it to the edge -- "MySQL server
 # has gone away", lock-wait timeouts, even a restart. Do NOT pile the module
