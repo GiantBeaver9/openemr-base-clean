@@ -91,12 +91,21 @@ final class ExtractionSchema
                 $errors[] = "{$at}.value must be a string or null";
             }
 
-            if (!isset($field['page']) || !is_int($field['page']) || $field['page'] < 1) {
-                $errors[] = "{$at}.page must be a positive integer (citation is required)";
-            }
+            // A citation (page + quote) is required only for a field that HAS a
+            // value — you cannot cite a source for a value that is not there. An
+            // intake form legitimately has many blank fields (the model returns
+            // them as value:null with no citation); requiring a citation on those
+            // would reject the whole extraction and blank the form. Labs always
+            // carry a value, so this keeps every real result cited.
+            $hasValue = array_key_exists('value', $field) && is_string($field['value']) && $field['value'] !== '';
+            if ($hasValue) {
+                if (!isset($field['page']) || !is_int($field['page']) || $field['page'] < 1) {
+                    $errors[] = "{$at}.page must be a positive integer (citation is required for a value)";
+                }
 
-            if (!isset($field['quote']) || !is_string($field['quote']) || $field['quote'] === '') {
-                $errors[] = "{$at}.quote must be a non-empty string (citation is required)";
+                if (!isset($field['quote']) || !is_string($field['quote']) || $field['quote'] === '') {
+                    $errors[] = "{$at}.quote must be a non-empty string (citation is required for a value)";
+                }
             }
 
             if (isset($field['confidence'])) {

@@ -160,12 +160,16 @@ class Bootstrap
      */
     private function buildMaintenanceMenu(): stdClass
     {
+        // A top-level dropdown CONTAINER: it must match the shape of core's
+        // top-level menus (File/View/…) — label + menu_id + children + requirement
+        // and NO `url`/`target`. Setting `url` (even '') or `target` on a parent
+        // makes the nav treat it as a leaf link (navigate to the empty URL) instead
+        // of opening the submenu, so clicking it does nothing and the children
+        // never load. The children carry the url/target.
         $menu = new stdClass();
         $menu->requirement = 0;
-        $menu->target = 'cpmaint';
         $menu->menu_id = 'cpmaint';
         $menu->label = xlt('Co-Pilot Maintenance');
-        $menu->url = '';
         $menu->children = [
             $this->buildMaintenanceItem('cpmaint_kb', xlt('Knowledge Base (RAG)'), '/public/knowledge_upload.php'),
             $this->buildMaintenanceItem('cpmaint_obs', xlt('Observability Dashboard'), '/public/dashboard.php'),
