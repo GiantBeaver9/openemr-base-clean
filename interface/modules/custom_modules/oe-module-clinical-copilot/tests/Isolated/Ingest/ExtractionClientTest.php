@@ -49,6 +49,47 @@ final class ExtractionClientTest extends TestCase
         self::assertSame('7.2', $outcome->extraction->fields[0]->value);
     }
 
+    public function testIntakeExtractionSucceedsWithoutPerFieldCitations(): void
+    {
+        // Regression: intake prefills a form with no click-to-source overlay, so
+        // it must NOT require a page/quote citation per field. Previously the
+        // shared lab-style contract forced one, so the model — asked to cite every
+        // blank demographic field — produced output that failed the request and
+        // degraded to "extraction unavailable". A key+value payload must now parse.
+        $json = json_encode(['fields' => [
+            ['field_key' => 'first_name', 'value' => 'Jane'],
+            ['field_key' => 'last_name', 'value' => 'Doe'],
+            ['field_key' => 'middle_name', 'value' => null],
+        ]], JSON_THROW_ON_ERROR);
+
+        $client = new ExtractionClient(
+            StubLlmClient::up(new LlmResponse($json, 'gemini-2.5-pro', 300, 20, 120)),
+            'gemini-2.5-pro',
+        );
+
+        $outcome = $client->extract(DocType::IntakeForm, 'PDFBYTES', 'application/pdf', 'upload');
+
+        self::assertCount(3, $outcome->extraction->fields);
+        self::assertSame('Jane', $outcome->extraction->fields[0]->value);
+        self::assertNull($outcome->extraction->fields[0]->citation);
+    }
+
+    public function testCitationClauseIsSentForLabsButNotIntake(): void
+    {
+        $json = json_encode(['fields' => []], JSON_THROW_ON_ERROR);
+        $stub = StubLlmClient::up(new LlmResponse($json, 'gemini-2.5-pro', 1, 1, 1));
+        $client = new ExtractionClient($stub, 'gemini-2.5-pro');
+
+        $client->extract(DocType::LabPdf, 'PDFBYTES', 'application/pdf', 'upload');
+        $client->extract(DocType::IntakeForm, 'PDFBYTES', 'application/pdf', 'upload');
+
+        $labPrompt = $stub->calls()[0]->systemInstructions;
+        $intakePrompt = $stub->calls()[1]->systemInstructions;
+
+        self::assertStringContainsString('bounding box', $labPrompt);
+        self::assertStringNotContainsString('bounding box', $intakePrompt);
+    }
+
     public function testModelOutputThatFailsTheSchemaIsRejected(): void
     {
         // value present but no page/quote — fails the citation-required contract.

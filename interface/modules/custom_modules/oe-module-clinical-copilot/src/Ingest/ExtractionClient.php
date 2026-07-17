@@ -36,13 +36,22 @@ final class ExtractionClient
 {
     private const PROMPT_VERSION = 'ingest-extract-v1';
 
-    private const SYSTEM_INSTRUCTIONS =
+    private const SYSTEM_INSTRUCTIONS_BASE =
         "You are a careful clinical document transcriber. Read the attached document and "
         . "extract ONLY values that are literally present. Never infer, complete, or invent a "
-        . "value: if a field is blank, illegible, or absent, return its value as null. For every "
-        . "field you MUST return the 1-based page it appears on, the exact source text as `quote`, "
-        . "and a bounding box `[x0,y0,x1,y1]` normalized to 0-1000. Return output strictly matching "
-        . "the provided JSON schema and nothing else.";
+        . "value: if a field is blank, illegible, or absent, return its value as null. ";
+
+    // Labs drive a click-to-source bbox overlay on the review screen, so each result must
+    // cite where it was read from. Intake does NOT: its values prefill a plain form beside
+    // the PDF with no overlay, so demanding a page/quote/bbox for every demographic field
+    // (including the blank ones) only over-constrains the model and fails an otherwise-good
+    // read — the exact "extraction unavailable" degrade seen on intake. Only labs get it.
+    private const SYSTEM_INSTRUCTIONS_CITATION =
+        "For every field you MUST return the 1-based page it appears on, the exact source "
+        . "text as `quote`, and a bounding box `[x0,y0,x1,y1]` normalized to 0-1000. ";
+
+    private const SYSTEM_INSTRUCTIONS_TAIL =
+        "Return output strictly matching the provided JSON schema and nothing else.";
 
     public function __construct(
         private readonly LlmClientInterface $llm,
@@ -59,7 +68,7 @@ final class ExtractionClient
     public function extract(DocType $docType, string $documentBytes, string $mimeType, string $sourceId): ExtractionOutcome
     {
         $request = new PromptRequest(
-            systemInstructions: self::SYSTEM_INSTRUCTIONS,
+            systemInstructions: $this->systemInstructions($docType),
             userContent: $this->userInstruction($docType),
             responseSchema: ExtractionSchema::responseSchema($docType),
             model: $this->model,
@@ -88,6 +97,22 @@ final class ExtractionClient
             tokensOut: $response->tokensOut,
             latencyMs: $response->latencyMs,
         );
+    }
+
+    /**
+     * The transcriber system prompt, tailored per doc type. Labs require a
+     * per-field citation (they drive the click-to-source overlay); intake does
+     * not, so its prompt omits the citation clause — matching the intake schema,
+     * which no longer requires page/quote either.
+     */
+    private function systemInstructions(DocType $docType): string
+    {
+        $citation = match ($docType) {
+            DocType::LabPdf => self::SYSTEM_INSTRUCTIONS_CITATION,
+            DocType::IntakeForm => '',
+        };
+
+        return self::SYSTEM_INSTRUCTIONS_BASE . $citation . self::SYSTEM_INSTRUCTIONS_TAIL;
     }
 
     private function userInstruction(DocType $docType): string
