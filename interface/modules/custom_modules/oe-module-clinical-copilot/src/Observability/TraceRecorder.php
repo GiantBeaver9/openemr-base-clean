@@ -39,10 +39,12 @@ final class TraceRecorder implements TraceRecorderInterface
     private const ALLOWED_KINDS = [
         'extract', 'digest', 'cache_lookup', 'llm_reduce', 'chat_turn',
         'tool_call', 'verify', 'render', 'warm', 'alert_eval',
-        // Week 2 document ingestion + write-back. `ingest` wraps one upload;
+        // Week 2 document ingestion + write-back. `ingest` wraps one committed
+        // upload; `preview` wraps the deferred-save intake extract (extract-only,
+        // persists nothing, until the human confirms on the review screen);
         // `vision_extract` is the VLM call child span; `chart_commit` is the
         // ChartWriter write (and carries the extraction-accuracy summary).
-        'ingest', 'vision_extract', 'chart_commit',
+        'ingest', 'preview', 'vision_extract', 'chart_commit',
         // Week 2 deterministic orchestration. `supervisor` is the router span;
         // each `worker` is a child span (an inspectable handoff); `retrieve` is
         // the evidence-retrieval sub-call inside the evidence worker.
