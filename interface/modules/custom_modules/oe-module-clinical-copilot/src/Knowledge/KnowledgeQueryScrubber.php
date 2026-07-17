@@ -24,19 +24,20 @@ namespace OpenEMR\Modules\ClinicalCopilot\Knowledge;
  *   1. The structured analyte/topic {@see $tags} are the PRIMARY signal — they
  *      are derived deterministically from the chart's out-of-range facts and are
  *      non-PHI by construction ("a1c", "ldl", "tsh"). They are always kept.
- *   2. Free text is kept only as clinical KEYWORDS, filtered hard:
- *        - any token containing a digit is dropped (MRN, SSN, phone, dates,
- *          "9.4", "500mg" — the value is PHI or irrelevant to guideline lookup),
- *        - any token containing "@" is dropped (emails),
- *        - any mixed-case Capitalized token is dropped (likely a proper noun /
- *          patient or provider name); lowercase clinical words ("cholesterol")
- *          and ALL-CAPS acronyms ("LDL", "TSH") survive,
- *        - stopwords and sub-3-character noise are dropped.
+ *   2. Free text is kept only as clinical KEYWORDS, on an ALLOWLIST — a token
+ *      survives only if it is a recognized clinical term (an analyte code like
+ *      "a1c"/"b12", or a word in {@see self::CLINICAL_TERMS}). Everything else is
+ *      dropped, including any name. This is deliberately an allowlist, not a
+ *      "drop things that look like names" blacklist: a blacklist keyed on
+ *      capitalization let a lowercase name ("why is jane's a1c high" → "janes")
+ *      leak straight through to the non-BAA store. With an allowlist, an
+ *      unrecognized token — lowercase name, nickname, misspelling, free-text PHI
+ *      of any shape — cannot pass, because it is not on the list.
  *
- * The result is a space-joined bag of safe keywords (possibly empty). It is a
- * conservative filter, deliberately biased toward dropping a borderline term
- * rather than leaking one — recall loss on the external store is acceptable; a
- * PHI leak to a non-BAA database is not.
+ * The result is a space-joined bag of safe keywords (possibly empty). Recall on
+ * the external store is bounded to the clinical vocabulary + the structured tags,
+ * which is the intended trade: recall loss is acceptable; a PHI leak to a non-BAA
+ * database is not.
  */
 final class KnowledgeQueryScrubber
 {
@@ -50,11 +51,36 @@ final class KnowledgeQueryScrubber
      */
     private const ANALYTE_CODE = '/^[a-z]{1,6}\d{1,3}[a-z]?$/i';
 
-    /** Common English/question stopwords that carry no retrieval signal. */
-    private const STOPWORDS = [
-        'the', 'and', 'for', 'with', 'why', 'what', 'how', 'was', 'were', 'are',
-        'his', 'her', 'their', 'this', 'that', 'from', 'has', 'have', 'had',
-        'should', 'would', 'could', 'about', 'into', 'out', 'off', 'per',
+    /**
+     * The free-text allowlist: a plain lowercase word survives only if it is one
+     * of these recognized, non-PHI clinical/care terms. Anything else is dropped
+     * — a name in any casing is not on the list, so it cannot leak. Scoped to the
+     * endocrinology/diabetes domain the module serves plus general lab/care
+     * vocabulary; recall is intentionally bounded to this set + the structured
+     * tags (see the class docblock). Extend here as the domain grows.
+     *
+     * @var list<string>
+     */
+    private const CLINICAL_TERMS = [
+        // analytes / labs
+        'a1c', 'hba1c', 'glucose', 'cholesterol', 'ldl', 'hdl', 'lipid', 'lipids',
+        'triglyceride', 'triglycerides', 'acr', 'microalbumin', 'albumin', 'creatinine',
+        'egfr', 'gfr', 'potassium', 'sodium', 'tsh', 'thyroid', 'vitamin', 'ferritin',
+        'hemoglobin', 'hematocrit', 'platelet', 'platelets', 'weight', 'bmi', 'pressure',
+        'blood', 'panel', 'level', 'levels', 'range', 'reference', 'value', 'result', 'results',
+        // conditions
+        'diabetes', 'diabetic', 'hypertension', 'hyperlipidemia', 'dyslipidemia',
+        'kidney', 'renal', 'nephropathy', 'retinopathy', 'neuropathy', 'cardiovascular',
+        'obesity', 'prediabetes', 'ckd',
+        // medications / classes
+        'metformin', 'insulin', 'glipizide', 'glyburide', 'sitagliptin', 'empagliflozin',
+        'dapagliflozin', 'liraglutide', 'semaglutide', 'sulfonylurea', 'sglt2', 'statin',
+        'statins', 'aspirin', 'dose', 'dosage', 'therapy', 'medication', 'medications',
+        // care / guideline vocabulary (generic, never patient-identifying)
+        'target', 'targets', 'goal', 'goals', 'guideline', 'guidelines', 'screening',
+        'monitoring', 'management', 'control', 'treatment', 'fasting', 'abnormal',
+        'elevated', 'high', 'low', 'overdue', 'followup', 'recommendation',
+        'recommendations', 'reasonable', 'threshold',
     ];
 
     /**
@@ -117,9 +143,6 @@ final class KnowledgeQueryScrubber
         if (preg_match('/\d/', $trimmed) === 1) {
             return null; // MRN, SSN, phone, date, lab value, dosage
         }
-        if ($this->looksLikeProperNoun($trimmed)) {
-            return null; // "Jane", "Dr", "Smith" — keep names off the external store
-        }
 
         $keyword = strtolower($trimmed);
         $keyword = preg_replace('/[^a-z-]/', '', $keyword) ?? '';
@@ -128,26 +151,11 @@ final class KnowledgeQueryScrubber
         if (mb_strlen($keyword) < 3) {
             return null;
         }
-        if (in_array($keyword, self::STOPWORDS, true)) {
-            return null;
-        }
 
-        return $keyword;
-    }
-
-    /**
-     * A mixed-case Capitalized token (first letter upper, at least one later
-     * letter lower) reads as a proper noun. ALL-CAPS acronyms (LDL, TSH, HbA1c
-     * screened out earlier by the digit rule) and all-lowercase clinical terms
-     * are NOT proper nouns and pass.
-     */
-    private function looksLikeProperNoun(string $token): bool
-    {
-        $letters = preg_replace('/[^A-Za-z]/', '', $token) ?? '';
-        if (mb_strlen($letters) < 2) {
-            return false;
-        }
-
-        return ctype_upper($letters[0]) && $letters !== strtoupper($letters);
+        // Allowlist, not blacklist: a plain word crosses to the non-BAA store
+        // ONLY if it is a recognized clinical term. Anything unrecognized — a
+        // name in any casing, a nickname, a misspelling — is dropped, so free
+        // text cannot leak PHI regardless of how it was typed.
+        return in_array($keyword, self::CLINICAL_TERMS, true) ? $keyword : null;
     }
 }

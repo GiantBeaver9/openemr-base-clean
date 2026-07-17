@@ -61,13 +61,27 @@ final class KnowledgeQueryScrubberTest extends TestCase
         self::assertNotContains('2/3', $out);
     }
 
-    public function testKeepsAllCapsAcronymsButDropsMixedCaseNames(): void
+    public function testKeepsClinicalTermsButDropsNamesAndNonClinicalWords(): void
     {
-        $out = explode(' ', $this->scrubber->scrub('LDL for patient Smith', []));
+        $out = explode(' ', $this->scrubber->scrub('LDL cholesterol for patient Smith', []));
 
-        self::assertContains('ldl', $out);        // ALL-CAPS acronym survives (lowercased)
-        self::assertContains('patient', $out);     // lowercase clinical word survives
-        self::assertNotContains('smith', $out);    // mixed-case proper noun dropped
+        self::assertContains('ldl', $out);          // clinical term survives (lowercased)
+        self::assertContains('cholesterol', $out);  // clinical term survives
+        self::assertNotContains('smith', $out);     // name dropped
+        self::assertNotContains('patient', $out);   // non-clinical word dropped (allowlist)
+    }
+
+    public function testLowercaseNamesAreDroppedByTheAllowlist(): void
+    {
+        // The regression this fix closes: the old capitalization blacklist let a
+        // LOWERCASE name ("jane's" -> "janes") leak straight to the non-BAA store.
+        // The allowlist drops anything that is not a recognized clinical term.
+        $out = $this->scrubber->scrub("why is jane's a1c high", []);
+        $tokens = explode(' ', $out);
+
+        self::assertContains('a1c', $tokens);
+        self::assertContains('high', $tokens);
+        self::assertStringNotContainsString('jane', strtolower($out));
     }
 
     public function testTagsAreAlwaysKeptAndComeFirst(): void

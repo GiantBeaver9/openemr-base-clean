@@ -55,6 +55,23 @@ if ($extractionId <= 0) {
 $controller = IngestController::createDefault();
 $reviewUrl = $moduleBase . '/extraction_review.php?extraction_id=' . $extractionId;
 
+// Per-patient authorization. The module ACL check above is chart-wide; without
+// this, extraction_id is an IDOR handle — any user with copilot access could
+// view/edit/LOCK (commit to the chart) another patient's staged extraction by
+// enumerating ids. Bind to the caller's active patient context (the session
+// pid, set by the lab/intake entry points), and refuse a mismatch.
+$sessionPid = (int)($session->get('pid') ?? 0);
+$extractionPid = $controller->extractionPatientId($extractionId);
+if ($extractionPid === null || $sessionPid <= 0 || $extractionPid !== $sessionPid) {
+    (new \OpenEMR\Common\Logging\SystemLogger())->warning(
+        'ClinicalCopilot: extraction access denied (patient-context mismatch)',
+        ['extraction_id' => $extractionId, 'session_pid' => $sessionPid, 'extraction_pid' => $extractionPid],
+    );
+    http_response_code(403);
+    echo xlt('Access denied');
+    exit;
+}
+
 if ($isPost) {
     $action = $_POST['action'] ?? '';
     try {

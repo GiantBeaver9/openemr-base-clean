@@ -126,6 +126,17 @@ final class IngestController
     }
 
     /**
+     * The patient (pid) an extraction belongs to, or null if it does not exist.
+     * The endpoint uses this to authorize access PER PATIENT — an extraction_id is
+     * otherwise an IDOR handle onto another patient's staged extraction (view,
+     * edit, or lock-to-chart).
+     */
+    public function extractionPatientId(int $extractionId): ?int
+    {
+        return $this->store->findHeader($extractionId)?->pid;
+    }
+
+    /**
      * Adds a hand-entered lab result row to a draft extraction (the manual
      * Labs-tab path). Refused once the extraction is locked unless the actor is
      * elevated. `vlmValue` is null, so a hand-entered row never counts toward
