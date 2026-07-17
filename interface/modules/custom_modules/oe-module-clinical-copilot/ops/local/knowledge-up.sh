@@ -7,9 +7,12 @@
 # pdo_pgsql driver, waits for Postgres health, applies the schema idempotently,
 # and prints how to reach it + what to do next. Idempotent: safe to re-run.
 #
+# It brings up the stack, wires the env, applies the schema, AND seeds the in-repo
+# corpus by default — query-ready with zero manual steps.
+#
 # Usage (from anywhere in the repo):
 #   interface/modules/custom_modules/oe-module-clinical-copilot/ops/local/knowledge-up.sh
-#   ...  --seed     # also load the in-repo corpus (full-text; see the note below)
+#   ...  --no-seed  # bring up + wire + schema, but skip loading the in-repo corpus
 #   ...  --down     # tear the whole stack down (keeps the data volume)
 #
 # Embeddings (vector search) use CLINICAL_COPILOT_GEMINI_API_KEY -- export it (or
@@ -73,13 +76,14 @@ done
 log "Applying schema.sql (idempotent)..."
 "${DC[@]}" exec -T knowledge_db psql -U copilot -d knowledge -v ON_ERROR_STOP=1 < "$SCHEMA_SQL" >/dev/null
 
-if [ "${1:-}" = "--seed" ]; then
-    log "Seeding the in-repo corpus (full-text only; vector-index via the UI/CLI ingest)..."
-    # Run the seeder inside the app container, where pdo_pgsql now lives and the
-    # module env (CLINICAL_COPILOT_KNOWLEDGE_DB_*) is set.
+if [ "${1:-}" != "--no-seed" ]; then
+    log "Seeding the in-repo corpus (full-text; vector-index via the UI/CLI ingest)..."
+    # Run the seeder inside the app container, where pdo_pgsql lives and the module
+    # env (CLINICAL_COPILOT_KNOWLEDGE_DB_*) is already set by the overlay — so this
+    # needs no manual configuration.
     "${DC[@]}" exec -T openemr \
         php /var/www/localhost/htdocs/openemr/interface/modules/custom_modules/oe-module-clinical-copilot/ops/knowledge/seed_from_corpus.php \
-        || warn "Seed step failed -- the store is up regardless; you can seed later."
+        || warn "Seed step failed -- the store is up regardless; re-run or seed later."
 fi
 
 cat <<EOF
