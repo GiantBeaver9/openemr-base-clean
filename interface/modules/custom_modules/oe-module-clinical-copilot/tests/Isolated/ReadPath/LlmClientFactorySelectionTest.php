@@ -1,7 +1,7 @@
 <?php
 
 /**
- * LlmClientFactory: T23's three-way env-var precedence (Vertex > Gemini API key > Unavailable).
+ * LlmClientFactory: env-var selection (Gemini API key, else Unavailable).
  *
  * @package   OpenEMR\Modules\ClinicalCopilot
  * @link      https://www.open-emr.org
@@ -17,19 +17,16 @@ namespace OpenEMR\Modules\ClinicalCopilot\Tests\Isolated\ReadPath;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\LlmClientFactory;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\UnavailableLlmClient;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\GeminiApiLlmClient;
-use OpenEMR\Modules\ClinicalCopilot\Reduce\VertexLlmClient;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Failure mode guarded: a misordered or missed env-var check here would
- * silently swap the production Vertex path for the dev/test-only Gemini
- * API-key fast-path (or vice versa) -- exactly the kind of config-surface
- * regression docs/configuration.md warns is NOT HIPAA-eligible if it happens
- * to the wrong site. Only `getenv()` is stubbed (via `putenv()`); the
- * constructed client's concrete type is asserted without ever making a
- * network call, since all three implementations validate their constructor
- * arguments synchronously and none contact a provider until
- * `generateStructured()` is called.
+ * The Vertex/ADC path was removed — this deployment uses the Gemini API key
+ * exclusively. So selection is two-way: a key present => {@see GeminiApiLlmClient},
+ * otherwise {@see UnavailableLlmClient} (facts-only degrade), and any leftover
+ * GCP project id is ignored. Only `getenv()` is stubbed (via `putenv()`); the
+ * constructed client's concrete type is asserted without a network call, since
+ * both implementations validate constructor arguments synchronously and neither
+ * contacts a provider until `generateStructured()` is called.
  */
 final class LlmClientFactorySelectionTest extends TestCase
 {
@@ -60,21 +57,24 @@ final class LlmClientFactorySelectionTest extends TestCase
         self::assertInstanceOf(GeminiApiLlmClient::class, LlmClientFactory::create());
     }
 
-    public function testVertexProjectIdAloneSelectsVertex(): void
+    public function testAGcpProjectIdAloneNoLongerSelectsAClient(): void
     {
+        // Vertex removed: a GCP project id with no API key degrades to Unavailable.
         putenv('CLINICAL_COPILOT_GCP_PROJECT_ID=test-project');
         putenv('CLINICAL_COPILOT_GCP_LOCATION');
         putenv('CLINICAL_COPILOT_GEMINI_API_KEY');
 
-        self::assertInstanceOf(VertexLlmClient::class, LlmClientFactory::create());
+        self::assertInstanceOf(UnavailableLlmClient::class, LlmClientFactory::create());
     }
 
-    public function testVertexWinsOverGeminiApiKeyWhenBothAreConfigured(): void
+    public function testTheApiKeyPathIsUsedEvenWhenAGcpProjectIdIsSet(): void
     {
+        // Vertex removed: the Gemini API key is the only provider, selected
+        // regardless of any leftover GCP project id.
         putenv('CLINICAL_COPILOT_GCP_PROJECT_ID=test-project');
         putenv('CLINICAL_COPILOT_GCP_LOCATION=us-central1');
         putenv('CLINICAL_COPILOT_GEMINI_API_KEY=test-ai-studio-key');
 
-        self::assertInstanceOf(VertexLlmClient::class, LlmClientFactory::create());
+        self::assertInstanceOf(GeminiApiLlmClient::class, LlmClientFactory::create());
     }
 }
