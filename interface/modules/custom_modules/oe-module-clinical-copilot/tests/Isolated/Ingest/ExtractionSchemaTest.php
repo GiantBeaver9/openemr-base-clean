@@ -35,6 +35,21 @@ final class ExtractionSchemaTest extends TestCase
         self::assertSame([], ExtractionSchema::validate(DocType::IntakeForm, $payload));
     }
 
+    public function testBlankFieldsWithoutACitationDoNotRejectTheExtraction(): void
+    {
+        // A comprehensive intake form has many blank fields; the model returns
+        // them as value:null with an empty quote (nothing to cite). These must NOT
+        // reject the whole extraction (which would blank the review form) — a
+        // citation is only meaningful for a field that actually has a value.
+        $payload = ['fields' => [
+            ['field_key' => 'first_name', 'value' => 'Ada', 'page' => 1, 'quote' => 'Name: Ada'],
+            ['field_key' => 'middle_name', 'value' => null, 'page' => 0, 'quote' => ''],
+            ['field_key' => 'ssn', 'value' => null, 'quote' => ''],
+        ]];
+
+        self::assertSame([], ExtractionSchema::validate(DocType::IntakeForm, $payload));
+    }
+
     public function testMissingPageIsRejectedBecauseCitationIsRequired(): void
     {
         $payload = ['fields' => [['field_key' => 'first_name', 'value' => 'Ada', 'quote' => 'Ada']]];
