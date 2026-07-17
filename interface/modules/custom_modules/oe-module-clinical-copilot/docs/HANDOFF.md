@@ -112,6 +112,17 @@ Still open by decision / bigger than a doc-close:
   ops/knowledge/check.php` runs on the **CLI**, which *does* see the env, so it
   reports PASS while the web path fails — verify from an actual chat request /
   the dashboard, not just check.php.
+- **"No knowledge database is configured" on the web even though env is set** —
+  the RAG status now distinguishes causes. `KnowledgeBaseStatus::snapshot()`
+  returns a distinct `driver_missing` state: env is present but `pdo_pgsql` is
+  not loaded in the Apache/web SAPI (classically it's enabled only for the CLI,
+  so `check.php` and deploy-time seeding pass while chat/RAG requests fail).
+  The knowledge-upload page and dashboard now say which it is — "set
+  DATABASE_URL" (env missing) vs "enable pdo_pgsql for the web SAPI" (driver
+  missing) — instead of collapsing both into the env message. `Dockerfile.railway`
+  installs `pdo_pgsql` and verifies it with `php -m`, which only proves the CLI;
+  if the dashboard shows `driver missing`, the extension isn't enabled for
+  Apache/mod_php.
 
 ## How to run checks
 
