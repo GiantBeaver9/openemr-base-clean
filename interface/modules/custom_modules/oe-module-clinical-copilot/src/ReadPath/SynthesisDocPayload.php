@@ -78,12 +78,7 @@ final readonly class SynthesisDocPayload
             'verify_status' => $verifyStatus->value,
             'degraded_reason' => $degradedReason,
             'degraded_message' => $degradedMessage,
-            'verdicts' => array_map(static fn (Verdict $v): array => [
-                'check' => $v->checkId->value,
-                'passed' => $v->passed,
-                'skipped' => $v->skipped,
-                'findings' => $v->findings,
-            ], $verdicts),
+            'verdicts' => array_map(static fn (Verdict $v): array => $v->toArray(), $verdicts),
             'attempts' => $attempts,
         ];
     }

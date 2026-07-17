@@ -403,7 +403,7 @@
                             <td>{{ span.status|text }}</td>
                             <td>{{ span.model ?? '-' }}</td>
                             <td>{{ span.tokens_in ?? '-' }}/{{ span.tokens_out ?? '-' }}</td>
-                            <td>{{ span.error_detail ?? '' }}</td>
+                            <td>{{ (span.error_detail ?? '')|text }}</td>
                             <td>
                                 {% if span.payload_ref %}
                                     <a href="{{ dashboard_url|attr }}?correlation_id={{ correlation_id|url_encode }}&payload_ref={{ span.payload_ref|url_encode }}">{{ "view"|xlt }}</a>

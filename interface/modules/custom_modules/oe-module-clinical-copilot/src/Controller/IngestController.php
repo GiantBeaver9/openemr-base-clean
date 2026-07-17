@@ -16,6 +16,7 @@ namespace OpenEMR\Modules\ClinicalCopilot\Controller;
 
 use OpenEMR\Modules\ClinicalCopilot\Ingest\AttachAndExtract;
 use OpenEMR\Modules\ClinicalCopilot\Ingest\ChartWriter;
+use OpenEMR\Modules\ClinicalCopilot\Ingest\ExtractedField;
 use OpenEMR\Modules\ClinicalCopilot\Ingest\ExtractionClient;
 use OpenEMR\Modules\ClinicalCopilot\Ingest\ExtractionReview;
 use OpenEMR\Modules\ClinicalCopilot\Ingest\ExtractionStore;
@@ -162,7 +163,7 @@ final class IngestController
             throw new \DomainException('A test name is required');
         }
 
-        $this->store->insertField($extractionId, new \OpenEMR\Modules\ClinicalCopilot\Ingest\ExtractedField(
+        $this->store->insertField($extractionId, new ExtractedField(
             fieldKey: $fieldKey,
             vlmValue: null,
             value: $value,

@@ -41,7 +41,7 @@ final class ReadyCheck
 
     /**
      * @return array{
-     *     status: string, db: string, tables_writable: string,
+     *     ready: bool, status: string, db: string, tables_writable: string,
      *     llm: string, worker_heartbeat: string, breaker: string
      * }
      */
@@ -66,6 +66,13 @@ final class ReadyCheck
         }
 
         return [
+            // Explicit "is the service ready to serve?" -- true whenever the hard
+            // dependencies (DB + writable tables) are sound, INDEPENDENT of the
+            // LLM. An external LLM outage (Gemini down) leaves ready=true with
+            // status='degraded': reads still serve and chat degrades to a facts
+            // browser, so an uptime probe / grader sees the service is up, not
+            // failed. Mirrors the HTTP code (200 unless status==='error').
+            'ready' => $db === 'ok' && $tablesWritable === 'ok',
             'status' => $status,
             'db' => $db,
             'tables_writable' => $tablesWritable,

@@ -105,7 +105,7 @@ if ($isPost) {
                 break;
         }
     } catch (\Throwable $e) {
-        (new \OpenEMR\Common\Logging\SystemLogger())->error('ClinicalCopilot: review action failed', ['error' => $e->getMessage()]);
+        (new \OpenEMR\Common\Logging\SystemLogger())->error('ClinicalCopilot: review action failed', ['exception' => $e]);
         header('Location: ' . $reviewUrl . '&err=1');
         exit;
     }

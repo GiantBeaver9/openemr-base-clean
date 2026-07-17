@@ -54,7 +54,7 @@ final class PatientIdentifierLookup
             return null;
         }
 
-        $name = self::collapseSpaces(
+        $name = TextNormalizer::collapseSpaces(
             (string)($row['fname'] ?? '') . ' ' . (string)($row['mname'] ?? '') . ' ' . (string)($row['lname'] ?? '')
         );
 
@@ -65,16 +65,11 @@ final class PatientIdentifierLookup
 
         $dob = (string)($row['DOB'] ?? '');
 
-        $cityStateZip = self::collapseSpaces(
+        $cityStateZip = TextNormalizer::collapseSpaces(
             (string)($row['city'] ?? '') . ' ' . (string)($row['state'] ?? '') . ' ' . (string)($row['postal_code'] ?? '')
         );
         $address = trim(implode(', ', array_filter([trim((string)($row['street'] ?? '')), $cityStateZip])));
 
         return new PatientIdentifiers($name, $mrn, $dob, $address);
-    }
-
-    private static function collapseSpaces(string $value): string
-    {
-        return trim((string)preg_replace('/\s+/', ' ', $value));
     }
 }

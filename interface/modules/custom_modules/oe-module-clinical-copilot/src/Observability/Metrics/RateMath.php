@@ -62,6 +62,9 @@ final class RateMath
         return (float)$sorted[$index];
     }
 
+    /**
+     * @param list<float> $values
+     */
     public static function average(array $values): float
     {
         if ($values === []) {

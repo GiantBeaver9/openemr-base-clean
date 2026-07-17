@@ -72,8 +72,10 @@ final class FailoverLlmClient implements LlmClientInterface
             }
         }
 
-        throw $lastFailure ?? LlmUnavailableException::providerError(
-            new \RuntimeException('no LLM providers were available'),
-        );
+        // Every element of $clients is non-empty (constructor-enforced), and
+        // every loop iteration either returns on success or assigns
+        // $lastFailure in its catch block (any other throwable propagates
+        // immediately, unchanged) -- so $lastFailure is always set here.
+        throw $lastFailure;
     }
 }

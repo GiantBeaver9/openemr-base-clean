@@ -64,6 +64,7 @@ use OpenEMR\Modules\ClinicalCopilot\ReadPath\TraceSpan;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\PatientIdentifiers;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\PromptContext;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\Redactor;
+use OpenEMR\Modules\ClinicalCopilot\Verify\Verdict;
 use OpenEMR\Modules\ClinicalCopilot\Verify\Verifier;
 use OpenEMR\Services\PrescriptionService;
 use Ramsey\Uuid\Uuid;
@@ -653,12 +654,7 @@ final class ChatController
             'confidence_label' => $confidence->label,
         ];
 
-        $verdictOut = array_map(static fn ($v): array => [
-            'check' => $v->checkId->value,
-            'passed' => $v->passed,
-            'skipped' => $v->skipped,
-            'findings' => $v->findings,
-        ], $answer->verdicts);
+        $verdictOut = array_map(static fn (Verdict $v): array => $v->toArray(), $answer->verdicts);
 
         $this->turnStore->insert(new NewChatTurn(
             $session->id,
@@ -768,12 +764,7 @@ final class ChatController
             'confidence_label' => $confidence->label,
             'degraded_message' => $answer->degradedMessage,
             'claims' => self::rehydratedClaimsArray($answer),
-            'verdicts' => array_map(static fn ($v): array => [
-                'check' => $v->checkId->value,
-                'passed' => $v->passed,
-                'skipped' => $v->skipped,
-                'findings' => $v->findings,
-            ], $answer->verdicts),
+            'verdicts' => array_map(static fn (Verdict $v): array => $v->toArray(), $answer->verdicts),
             'tool_calls' => array_map(static fn ($entry): array => [
                 'tool' => $entry->request->name,
                 'ok' => $entry->outcome->ok,
