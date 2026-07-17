@@ -23,14 +23,28 @@ ENV FLEX_REPOSITORY=https://github.com/GiantBeaver9/openemr-base-clean.git \
 # version keeps its own `/etc/phpNN/conf.d`, so loop over `/etc/php*` and cover
 # whichever version Apache uses. The trailing `php -m` is the CLI hard gate; the
 # app's own status page reports `driver_missing` if the web SAPI still lacks it.
+# Primary path (this image): Alpine + apk. Install pdo_pgsql for EVERY installed
+# PHP version so the Apache/web SAPI is covered, not just the `php` CLI — the two
+# can differ by minor version on this flex image, which is why the driver loaded
+# for the CLI (seeding, check.php) but not for a live web RAG request.
+# Fallback path (only if this is ever rebased onto an official php:* image):
+# apk installs nothing, so build the extension with the docker-php helper. Both
+# guarded so neither can fire on the wrong base. `php -m` is the CLI hard gate;
+# note pgvector itself is a POSTGRES extension (CREATE EXTENSION vector, handled
+# by ops/knowledge/schema.sql) — PHP only needs pdo_pgsql to connect.
 RUN set -eux; \
+    installed_any=0; \
     for php_dir in /etc/php*; do \
         [ -d "$php_dir" ] || continue; \
         ver="${php_dir#/etc/php}"; \
         case "$ver" in ''|*[!0-9]*) continue ;; esac; \
-        apk add --no-cache "php${ver}-pdo_pgsql" || true; \
+        if apk add --no-cache "php${ver}-pdo_pgsql"; then installed_any=1; fi; \
     done; \
-    apk add --no-cache "php$(php -r 'echo PHP_MAJOR_VERSION, PHP_MINOR_VERSION;')-pdo_pgsql" || true; \
+    if apk add --no-cache "php$(php -r 'echo PHP_MAJOR_VERSION, PHP_MINOR_VERSION;')-pdo_pgsql"; then installed_any=1; fi; \
+    if [ "$installed_any" = "0" ] && command -v docker-php-ext-install >/dev/null 2>&1; then \
+        if command -v apt-get >/dev/null 2>&1; then apt-get update && apt-get install -y libpq-dev && rm -rf /var/lib/apt/lists/*; fi; \
+        docker-php-ext-install pdo_pgsql; \
+    fi; \
     php -m | grep -qi pdo_pgsql
 
 COPY patch-flex-openemr.sh railway-flex-bootstrap.sh railway-preinstall-db.sh railway-ensure-ssl.sh railway-configure-apache.sh railway-install-copilot.sh railway-entrypoint.sh /tmp/railway/
