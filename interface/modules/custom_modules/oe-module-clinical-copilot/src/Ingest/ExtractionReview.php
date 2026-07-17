@@ -76,7 +76,7 @@ final class ExtractionReview
      * extraction to `locked`. Idempotent: a second lock of the same extraction
      * commits nothing new.
      */
-    public function lock(int $extractionId, int $actorUserId, int $providerId): void
+    public function lock(int $extractionId, int $actorUserId, int $providerId, ?string $collectionDate = null): void
     {
         $header = $this->requireHeader($extractionId);
         if ($header->isLocked()) {
@@ -90,7 +90,7 @@ final class ExtractionReview
         if ($header->docType === DocType::IntakeForm) {
             $this->commitIntake($header, $fields);
         } else {
-            $this->commitLabs($header, $providerId, $fields);
+            $this->commitLabs($header, $providerId, $fields, $collectionDate);
         }
 
         $this->store->markLocked($extractionId, $actorUserId, $this->accuracy($fields));
@@ -152,14 +152,14 @@ final class ExtractionReview
     /**
      * @param list<ExtractedFieldRow> $fields
      */
-    private function commitLabs(ExtractionRow $header, int $providerId, array $fields): void
+    private function commitLabs(ExtractionRow $header, int $providerId, array $fields, ?string $collectionDate = null): void
     {
         $committed = $this->chartWriter->commitLabResults(
             $header->pid,
             $header->sourceDocumentId,
             $providerId,
             $fields,
-            null,
+            $collectionDate,
         );
 
         foreach ($committed as $fieldId => $resultId) {
