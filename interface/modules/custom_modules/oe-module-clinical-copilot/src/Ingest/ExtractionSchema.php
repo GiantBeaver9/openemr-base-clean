@@ -91,14 +91,15 @@ final class ExtractionSchema
                 $errors[] = "{$at}.value must be a string or null";
             }
 
-            // A citation (page + quote) is required only for a field that HAS a
-            // value — you cannot cite a source for a value that is not there. An
-            // intake form legitimately has many blank fields (the model returns
-            // them as value:null with no citation); requiring a citation on those
-            // would reject the whole extraction and blank the form. Labs always
-            // carry a value, so this keeps every real result cited.
+            // A citation (page + quote) is required only for a LAB field that has
+            // a value: labs drive the click-to-source bbox overlay, so every real
+            // result must cite its page. INTAKE does NOT use citations at all (the
+            // review screen prefills a form beside the PDF — no overlay), so
+            // requiring them there only risks rejecting the whole extraction and
+            // blanking the form when the model returns a value without a clean
+            // page/quote. And a field with no value has nothing to cite either.
             $hasValue = array_key_exists('value', $field) && is_string($field['value']) && $field['value'] !== '';
-            if ($hasValue) {
+            if ($hasValue && $docType === DocType::LabPdf) {
                 if (!isset($field['page']) || !is_int($field['page']) || $field['page'] < 1) {
                     $errors[] = "{$at}.page must be a positive integer (citation is required for a value)";
                 }

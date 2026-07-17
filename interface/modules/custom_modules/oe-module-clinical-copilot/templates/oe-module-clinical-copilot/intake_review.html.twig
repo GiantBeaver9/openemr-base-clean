@@ -38,6 +38,14 @@
         </div>
     {% endif %}
 
+    {# Why did nothing prefill? Only shown when extraction yielded no values, so a
+       blank form is self-explanatory (model off / read-but-rejected / unreadable). #}
+    {% if extraction_note is defined and extraction_note %}
+        <div class="alert alert-warning py-2">
+            <i class="fa fa-exclamation-triangle mr-1"></i>{{ extraction_note|text }}
+        </div>
+    {% endif %}
+
     <form method="POST" action="{{ post_url|attr }}" id="ccpIntakeForm">
         {{ csrfToken('default', 'csrf_token_form') }}
         <input type="hidden" name="action" value="save">
