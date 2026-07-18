@@ -41,12 +41,14 @@ final class ExtractionStore
         ?int $tokensOut,
         ?float $costUsd,
         ?int $createdBy,
+        ?string $collectionDate = null,
     ): int {
         return QueryUtils::sqlInsert(
             'INSERT INTO `mod_copilot_extraction`
                 (`pid`, `doc_type`, `source_document_id`, `status`, `model`, `prompt_version`,
-                 `correlation_id`, `latency_ms`, `tokens_in`, `tokens_out`, `cost_usd`, `created_by`)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                 `correlation_id`, `latency_ms`, `tokens_in`, `tokens_out`, `cost_usd`, `created_by`,
+                 `collection_date`)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
                 $pid,
                 $docType->value,
@@ -60,6 +62,7 @@ final class ExtractionStore
                 $tokensOut,
                 $costUsd,
                 $createdBy,
+                $collectionDate,
             ],
         );
     }
@@ -230,6 +233,7 @@ final class ExtractionStore
                 isset($row['identity_status']) && $row['identity_status'] !== null ? (string)$row['identity_status'] : null,
             ),
             identityDetail: isset($row['identity_detail']) && $row['identity_detail'] !== null ? (string)$row['identity_detail'] : null,
+            collectionDate: isset($row['collection_date']) && $row['collection_date'] !== null ? (string)$row['collection_date'] : null,
         );
     }
 

@@ -88,7 +88,7 @@ Upload → extract each discrete result (test/value/unit/range/flag + citation) 
 | L2 | Extraction degraded (no/failed LLM) | empty draft, **zero rows** | staff get a blank table; no explicit "extraction unavailable" framing | **Med** |
 | L3 | Lock DB failure mid-chain | order/report inserted, then a result insert throws (not transactional) | partial orphan rows; caught → `&err=1` banner; re-lock makes a **second** order | **Med** |
 | L4 | Model misreads a value but row is schema-valid | verified value defaults to model value; if unedited, wrong result committed | incorrect lab in chart | **Med** |
-| L5 | `collection_date` never passed to commit | defaults to today (`ChartWriter.php:199`) | result dated today, not specimen date | **Low** |
+| L5 | `collection_date` not printed on the report (or unparseable) | parsed date now flows end-to-end (W5): `ExtractionSchema::parse` reads the printed date (strict Y-m-d, garbage degrades to null), it persists on the extraction header, prefills the review draw-date field, and backs the lock/commit; only when absent AND the reviewer leaves the field untouched does `ChartWriter` fall back to today | result dated today only in the no-printed-date, no-override case | **guarded** |
 | L6 | `provider_id` = actor for all commits | verifying user recorded as ordering provider | attribution imprecise | **Low** |
 | L7 | Report uploaded onto the **wrong chart** (name/DOB differ) | `recordLabIdentity` records `mismatch`; review shows a red "identity does not match" banner and the reviewer must confirm before locking | **PHI mix-up caught before it reaches the chart** | **guarded** |
 

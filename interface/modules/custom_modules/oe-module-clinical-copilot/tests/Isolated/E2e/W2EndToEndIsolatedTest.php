@@ -105,6 +105,7 @@ final class W2EndToEndIsolatedTest extends TestCase
         self::assertNotNull($extracted->citation, 'a valued lab field must carry its click-to-source citation');
         self::assertSame(1, $extracted->citation->pageOrSection);
         self::assertSame('Synthetic Patient', $outcome->extraction->patientName);
+        self::assertSame('2026-01-10', $outcome->extraction->collectionDate, 'the printed specimen date must survive the parse (W5) — it prefills the review draw-date field');
 
         // ---- Stage 2: the in-memory chart boundary -- the extracted value
         // becomes the committed, citable Fact (the Db test's ChartWriter

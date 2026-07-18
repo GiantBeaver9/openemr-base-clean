@@ -90,7 +90,12 @@ final class ExtractionReview
         if ($header->docType === DocType::IntakeForm) {
             $this->commitIntake($header, $fields);
         } else {
-            $this->commitLabs($header, $providerId, $fields, $collectionDate);
+            // Fallback chain for the specimen date: the reviewer's explicit
+            // form value wins; absent that, the collection date parsed off the
+            // printed report at ingest (W5); ChartWriter's own last resort is
+            // today. The review screen prefills the form field from the same
+            // parsed date, so on the human path these usually agree.
+            $this->commitLabs($header, $providerId, $fields, $collectionDate ?? $header->collectionDate);
         }
 
         $this->store->markLocked($extractionId, $actorUserId, $this->accuracy($fields));

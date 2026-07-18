@@ -159,6 +159,60 @@ final class ExtractionSchemaTest extends TestCase
         self::assertNotNull($field->citation->bbox);
     }
 
+    public function testParseCarriesThePrintedCollectionDateThrough(): void
+    {
+        // Failure mode guarded (W5): the schema + prompt request the printed
+        // specimen collection_date, but parse() used to drop it — so the
+        // review screen's draw-date field always defaulted to today and the
+        // committed procedure rows were dated on upload day, not draw day.
+        $payload = [
+            'collection_date' => '2026-01-10',
+            'fields' => [
+                ['field_key' => 'Hemoglobin A1c', 'value' => '7.2', 'unit' => '%', 'page' => 1, 'quote' => 'A1c 7.2 %'],
+            ],
+        ];
+
+        self::assertSame([], ExtractionSchema::validate(DocType::LabPdf, $payload));
+        $parsed = ExtractionSchema::parse(DocType::LabPdf, $payload, 'extraction:7');
+
+        self::assertSame('2026-01-10', $parsed->collectionDate);
+        self::assertCount(1, $parsed->fields, 'the result fields must be untouched by the header date');
+    }
+
+    public function testMissingOrGarbageCollectionDateDegradesToNullWithoutRejectingTheExtraction(): void
+    {
+        // Failure mode guarded (W5): a bad header date must NOT reject the
+        // whole extraction (which would blank every result the model DID read
+        // correctly). Like its header siblings patient_name/patient_dob,
+        // collection_date is advisory prefill metadata the reviewer can always
+        // override — so anything that is not a real calendar date in strict
+        // Y-m-d degrades to null and the review screen falls back to today.
+        // Contrast with `page` (W1b), where a bad value breaks a citation's
+        // integrity and rightly rejects.
+        $garbage = [null, '', 12345, 2026.0, true, '01/10/2026', 'Jan 10, 2026', '2026-1-9', '2026-13-45', '2026-02-30', ['2026-01-10']];
+        foreach ($garbage as $bad) {
+            $payload = [
+                'collection_date' => $bad,
+                'fields' => [
+                    ['field_key' => 'Hemoglobin A1c', 'value' => '7.2', 'unit' => '%', 'page' => 1, 'quote' => 'A1c 7.2 %'],
+                ],
+            ];
+
+            self::assertSame([], ExtractionSchema::validate(DocType::LabPdf, $payload), 'collection_date ' . var_export($bad, true) . ' must not reject the extraction');
+            $parsed = ExtractionSchema::parse(DocType::LabPdf, $payload, 'extraction:7');
+            self::assertNull($parsed->collectionDate, 'collection_date ' . var_export($bad, true) . ' must degrade to null');
+            self::assertCount(1, $parsed->fields, 'the result fields must survive a garbage header date');
+        }
+
+        // The key being entirely absent (intake schemas have no such key) is
+        // the same null, not an error.
+        $payload = ['fields' => [
+            ['field_key' => 'Hemoglobin A1c', 'value' => '7.2', 'unit' => '%', 'page' => 1, 'quote' => 'A1c 7.2 %'],
+        ]];
+        self::assertSame([], ExtractionSchema::validate(DocType::LabPdf, $payload));
+        self::assertNull(ExtractionSchema::parse(DocType::LabPdf, $payload, 'extraction:7')->collectionDate);
+    }
+
     public function testBlankIntakeExtractionSeedsEveryEnumKey(): void
     {
         $blank = ExtractionSchema::blankExtraction(DocType::IntakeForm);

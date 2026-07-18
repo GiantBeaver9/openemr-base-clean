@@ -265,6 +265,7 @@ CREATE TABLE IF NOT EXISTS `mod_copilot_extraction` (
     `field_accuracy` DECIMAL(5,4) DEFAULT NULL COMMENT 'observability: accepted-unchanged / total fields, computed on lock; a rate, never a clinical value (no PHI)',
     `identity_status` VARCHAR(16) DEFAULT NULL COMMENT 'lab_pdf only: match | mismatch | unknown — did the document-header patient name/DOB match this chart (PHI-mixing guard); NULL when no vision run or non-lab',
     `identity_detail` TEXT DEFAULT NULL COMMENT 'lab_pdf only: human-readable name/DOB comparison shown on the review banner; PHI, stays in the module MySQL protection domain (T16), never crosses to the knowledge boundary',
+    `collection_date` DATE DEFAULT NULL COMMENT 'lab_pdf only: printed specimen collection date parsed from the document header (strict Y-m-d, W5); NULL when not printed/parseable — the review screen then defaults to today; the reviewer can always override before lock',
     `created_by` BIGINT(20) DEFAULT NULL COMMENT 'references users.id; the uploader',
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `locked_at` DATETIME DEFAULT NULL,
@@ -486,4 +487,16 @@ ALTER TABLE `mod_copilot_extraction` ADD COLUMN `identity_status` VARCHAR(16) DE
 
 #IfMissingColumn mod_copilot_extraction identity_detail
 ALTER TABLE `mod_copilot_extraction` ADD COLUMN `identity_detail` TEXT DEFAULT NULL COMMENT 'lab_pdf only: name/DOB comparison for the review banner';
+#EndIf
+
+-- ============================================================================
+-- Extracted collection date (W5, added after initial Week 2 release). The
+-- CREATE TABLE block above carries this for fresh installs; this
+-- #IfMissingColumn guard adds it to databases installed before the parsed
+-- collection_date was carried end-to-end, so the review screen's draw-date
+-- field can prefill from the printed specimen date instead of today.
+-- Idempotent.
+-- ============================================================================
+#IfMissingColumn mod_copilot_extraction collection_date
+ALTER TABLE `mod_copilot_extraction` ADD COLUMN `collection_date` DATE DEFAULT NULL COMMENT 'lab_pdf only: printed specimen collection date (strict Y-m-d), review-screen prefill';
 #EndIf

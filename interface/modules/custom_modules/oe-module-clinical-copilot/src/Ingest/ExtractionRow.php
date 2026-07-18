@@ -29,6 +29,7 @@ final readonly class ExtractionRow
         public ?int $lockedBy,
         public ?LabIdentityStatus $identityStatus = null,
         public ?string $identityDetail = null,
+        public ?string $collectionDate = null,
     ) {
     }
 

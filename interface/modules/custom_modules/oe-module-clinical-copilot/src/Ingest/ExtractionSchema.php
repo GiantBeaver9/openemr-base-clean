@@ -197,7 +197,34 @@ final class ExtractionSchema
         $patientName = is_string($payload['patient_name'] ?? null) ? $payload['patient_name'] : null;
         $patientDob = is_string($payload['patient_dob'] ?? null) ? $payload['patient_dob'] : null;
 
-        return new ParsedExtraction($docType, $fields, $patientName, $patientDob);
+        return new ParsedExtraction(
+            $docType,
+            $fields,
+            $patientName,
+            $patientDob,
+            self::normalizeCollectionDate($payload['collection_date'] ?? null),
+        );
+    }
+
+    /**
+     * The printed specimen collection date, or null. Like its header siblings
+     * (`patient_name`/`patient_dob`), `collection_date` is deliberately NOT
+     * checked in {@see self::validate()}: it is advisory metadata the reviewer
+     * can always override on the review screen, so a garbage date must degrade
+     * to null (the screen then defaults to today) rather than reject the whole
+     * extraction and blank every lab result the model DID read correctly. The
+     * `page` citation check (W1b) is the deliberate contrast — a bad page makes
+     * a citation uncheckable, which is a per-field integrity failure, not
+     * prefill metadata. Only a strict, real calendar date in Y-m-d (the format
+     * the schema and prompt request) survives; everything else is null.
+     */
+    private static function normalizeCollectionDate(mixed $raw): ?string
+    {
+        if (!is_string($raw) || preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $raw, $m) !== 1) {
+            return null;
+        }
+
+        return checkdate((int)$m[2], (int)$m[3], (int)$m[1]) ? $raw : null;
     }
 
     /**

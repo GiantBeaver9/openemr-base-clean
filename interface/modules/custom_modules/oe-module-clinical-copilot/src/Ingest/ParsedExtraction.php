@@ -25,14 +25,18 @@ final readonly class ParsedExtraction
 {
     /**
      * @param list<ExtractedField> $fields
-     * @param string|null          $patientName document-header patient name (labs only; null otherwise)
-     * @param string|null          $patientDob  document-header patient DOB (labs only; null otherwise)
+     * @param string|null          $patientName    document-header patient name (labs only; null otherwise)
+     * @param string|null          $patientDob     document-header patient DOB (labs only; null otherwise)
+     * @param string|null          $collectionDate printed specimen collection date, normalized to strict
+     *                                             Y-m-d (labs only); null when not printed, not parseable,
+     *                                             or non-lab — the review screen then defaults to today
      */
     public function __construct(
         public DocType $docType,
         public array $fields,
         public ?string $patientName = null,
         public ?string $patientDob = null,
+        public ?string $collectionDate = null,
     ) {
     }
 

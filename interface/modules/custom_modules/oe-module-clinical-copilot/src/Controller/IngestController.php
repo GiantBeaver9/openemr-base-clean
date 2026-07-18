@@ -224,6 +224,10 @@ final class IngestController
             // banner that alerts the uploader to a possible PHI mix-up.
             'identity_status' => $header->identityStatus?->value,
             'identity_detail' => $header->identityDetail,
+            // Printed specimen collection date parsed at ingest (labs; null
+            // when not printed / not parseable). The endpoint prefers this as
+            // the draw-date prefill, falling back to today.
+            'collection_date' => $header->collectionDate,
             'fields' => $fields,
         ];
     }

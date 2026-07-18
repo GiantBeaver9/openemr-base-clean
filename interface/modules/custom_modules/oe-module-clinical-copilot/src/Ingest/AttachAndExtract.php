@@ -235,6 +235,10 @@ final class AttachAndExtract
             tokensOut: $visionUsed ? $outcome->tokensOut : null,
             costUsd: null,
             createdBy: $userId,
+            // Parsed printed specimen date (labs; null when absent/garbage) —
+            // persisted on the header so the review screen can prefill the
+            // draw-date field with it instead of today (W5).
+            collectionDate: $outcome->extraction->collectionDate,
         );
 
         foreach ($outcome->extraction->fields as $field) {

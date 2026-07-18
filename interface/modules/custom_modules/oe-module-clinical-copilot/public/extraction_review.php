@@ -138,9 +138,14 @@ $vm['source_view_url'] = (isset($vm['source_document_id'], $vm['pid']) && $vm['s
 // iframe viewer below stays in place untouched.
 $vm['pdfjs_url'] = $moduleBase . '/assets/pdf.min.mjs';
 $vm['pdfjs_worker_url'] = $moduleBase . '/assets/pdf.worker.min.mjs';
-// Draw/collection date field default (labs). Prefilled to today; the reviewer
-// sets the real specimen date before locking.
-$vm['collection_date'] = date('Y-m-d');
+// Draw/collection date field default (labs). Prefer the specimen date the VLM
+// read off the printed report (parsed + persisted at ingest, W5); fall back to
+// today when none was printed/parseable. The reviewer can always override
+// before locking.
+$parsedCollectionDate = $vm['collection_date'] ?? null;
+$vm['collection_date'] = is_string($parsedCollectionDate) && $parsedCollectionDate !== ''
+    ? $parsedCollectionDate
+    : date('Y-m-d');
 
 $twig = (new TwigContainer(dirname(__DIR__) . '/templates', OEGlobalsBag::getInstance()->getKernel()))->getTwig();
 echo $twig->render('oe-module-clinical-copilot/extraction_review.html.twig', $vm);
