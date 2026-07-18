@@ -33,3 +33,30 @@ php ops/demo/run-demo.php
 The full-stack variant (driving the real UI through Selenium against the dev
 stack) is described in the top-level `README.md` / `CLAUDE.md`; this script is
 the stack-free version that runs anywhere and produces a durable transcript.
+
+## Live multi-agent endpoint (deployed stack)
+
+The supervisor graph itself is wired into the running app at
+`public/agent.php` — the live counterpart of step 3 above, and the fastest
+way to show supervisor routing with logged handoffs on the deployed demo:
+
+1. **Hit the endpoint** — run `06 - Week 2 Agent / 1 - Ask the Agent` in the
+   Bruno collection (`ops/bruno/`, after `00 - Auth Bootstrap`), or POST
+   `pid`, `question` (optionally `tags`, and `doc_type` + `document` to also
+   exercise the intake-extractor worker) with `csrf_token_form` to
+   `public/agent.php`. The JSON response carries `routed` (which workers the
+   supervisor invoked, in order), the critic-gated `claims` + `verdicts` —
+   every clinical claim citing the chart facts it is grounded in
+   (`citation_ids`) — separate cited guideline `evidence`, and a
+   `correlation_id`.
+2. **Show the handoff tree** — open
+   `public/dashboard.php?correlation_id=<that id>` (admin ACL): the span
+   waterfall shows the `supervisor` root span, one `worker` child per routed
+   worker (evidence retrieval, and intake extraction when a document was
+   attached), and the critic's `verify` span — the whole
+   supervisor → worker(s) → critic handoff graph reconstructed from the one
+   correlation id.
+3. **Show the hard gate** — a question the model cannot ground (or a draft
+   with an uncited/unsafe claim) comes back as
+   `answer_status: "refused"` with the module's standard refusal message and
+   the failing verdicts on record; the rejected draft's text never surfaces.

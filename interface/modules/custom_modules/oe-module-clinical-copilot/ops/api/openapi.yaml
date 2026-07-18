@@ -10,7 +10,8 @@ info:
     the `patients/med` and `clinical_copilot/copilot_access` ACLs. State-changing
     POSTs require the `csrf_token_form` field (obtain it from an authenticated
     session). This spec is kept in sync with the implementation; the Bruno
-    collection under `ops/bruno/05 - Week 2 Ingestion` exercises every operation.
+    collections under `ops/bruno/05 - Week 2 Ingestion` and
+    `ops/bruno/06 - Week 2 Agent` exercise every operation.
 servers:
   - url: https://localhost:9300
     description: Local dev stack
@@ -18,7 +19,76 @@ tags:
   - name: ingestion
   - name: review
   - name: evidence
+  - name: agent
 paths:
+  /interface/modules/custom_modules/oe-module-clinical-copilot/public/agent.php:
+    get:
+      tags: [agent]
+      summary: Method guard -- the agent endpoint is POST-only
+      responses:
+        "405": { description: "POST only.", content: { application/json: { schema: { type: object } } } }
+    post:
+      tags: [agent]
+      summary: Run the Week 2 multi-agent graph (supervisor -> workers -> critic) for one patient question
+      description: >
+        One request = one full supervisor run: the deterministic supervisor
+        routes to the evidence-retriever worker (always, for a question) and
+        the intake-extractor worker (when a document is attached), the
+        LLM-backed composer drafts a §2.1 claims answer over chart facts its
+        tools fetched, and the critic (deterministic V1-V6 verifier) hard-gates
+        the draft -- a rejected draft degrades to `answer_status: refused` and
+        its text never surfaces. The whole handoff graph is recorded as one
+        correlation-id-linked span tree (`supervisor` root -> `worker` children
+        -> `verify`); paste the returned `correlation_id` into
+        `dashboard.php?correlation_id=...` for the waterfall. `answer_status`
+        null with `degraded_reason` set means the composer LLM was unavailable
+        (facts/evidence-only degrade); guideline `evidence` and any document
+        `extraction` are returned in their own deterministically-cited
+        sections, never merged into the claims.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [pid, question, csrf_token_form]
+              properties:
+                pid: { type: integer }
+                question:
+                  type: string
+                  description: The clinical question to ground and answer (max 4000 chars).
+                tags:
+                  type: string
+                  description: >
+                    Optional comma-separated evidence topics (closed vocabulary,
+                    same as evidence.php: a1c, lipids, kidney, blood_pressure,
+                    medications, hypoglycemia). Unknown keys are dropped.
+                csrf_token_form: { type: string }
+                doc_type:
+                  type: string
+                  enum: [intake_form, lab_pdf]
+                  description: Required when `document` is uploaded; ignored otherwise.
+                document:
+                  type: string
+                  format: binary
+                  description: >
+                    Optional source document (application/pdf, image/png,
+                    image/jpeg, image/webp) routed to the intake-extractor
+                    worker; extracted fields are returned for answering only,
+                    never committed to the chart (the human-gated lock flow
+                    owns write-back).
+      responses:
+        "200":
+          description: >
+            The supervisor result: `routed` worker list, `correlation_id`,
+            critic-gated `claims`+`verdicts` (or `refusal_message`), cited
+            guideline `evidence`, and any document `extraction`.
+          content:
+            application/json:
+              schema: { type: object }
+        "400": { description: "Invalid input (missing/invalid pid, empty or oversized question, document without a valid doc_type).", content: { application/json: { schema: { type: object } } } }
+        "403": { description: "CSRF or ACL denied.", content: { application/json: { schema: { type: object } } } }
+        "404": { description: "Patient not found.", content: { application/json: { schema: { type: object } } } }
   /interface/modules/custom_modules/oe-module-clinical-copilot/public/intake_upload.php:
     get:
       tags: [ingestion]

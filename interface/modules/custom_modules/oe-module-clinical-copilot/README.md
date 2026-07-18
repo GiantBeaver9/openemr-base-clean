@@ -115,6 +115,7 @@ auth model — ARCHITECTURE.md §1.3):
 | `/copilot/ready` | `public/ready.php` | GET | **unauthenticated but redacted** (status enums only, per-IP rate-limited) |
 | *(dashboard, not in the case-study's four)* | `public/dashboard.php` | GET (view), POST (breaker actions, CSRF) | session + ACL, **admin-gated** |
 | *(UI telemetry ping)* | `public/event.php` | POST only, CSRF | session + ACL |
+| *(Week 2 multi-agent run)* | `public/agent.php` | POST only, CSRF (spec: `ops/api/openapi.yaml`) | session + ACL |
 
 Every authenticated page bootstraps `interface/globals.php` at the correct
 relative depth (`__DIR__ . '/../../../../globals.php'` from `public/`), then

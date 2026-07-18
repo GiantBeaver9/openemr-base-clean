@@ -63,7 +63,15 @@ final class Supervisor
     ) {
     }
 
-    public static function createDefault(): self
+    /**
+     * The production composition root. `$answerComposer` is per-request
+     * state (the {@see AgentLoopAnswerComposer} wraps a pid/correlation-id
+     * bound AgentLoop), so the caller that owns the request builds it and
+     * passes it in -- see
+     * {@see \OpenEMR\Modules\ClinicalCopilot\Controller\AgentController};
+     * omitting it wires the gather-only graph (no composition, no critic).
+     */
+    public static function createDefault(?AnswerComposerInterface $answerComposer = null): self
     {
         $tracer = new TraceRecorder();
         $extractionClient = new ExtractionClient(LlmClientFactory::create(), LlmRuntimeConfig::synthesisModel());
@@ -73,6 +81,7 @@ final class Supervisor
             new EvidenceRetrieverWorker(GuidelineRetrieverFactory::createDefault(), $tracer),
             new CriticWorker(new Verifier(), $tracer),
             $tracer,
+            $answerComposer,
         );
     }
 
