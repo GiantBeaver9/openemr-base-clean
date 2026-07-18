@@ -15,6 +15,7 @@ declare(strict_types=1);
 namespace OpenEMR\Modules\ClinicalCopilot\Tests\Isolated\Agent;
 
 use OpenEMR\Modules\ClinicalCopilot\Agent\AgentRequest;
+use OpenEMR\Modules\ClinicalCopilot\Agent\CriticWorker;
 use OpenEMR\Modules\ClinicalCopilot\Agent\EvidenceRetrieverWorker;
 use OpenEMR\Modules\ClinicalCopilot\Agent\IntakeExtractorWorker;
 use OpenEMR\Modules\ClinicalCopilot\Agent\Supervisor;
@@ -26,6 +27,7 @@ use OpenEMR\Modules\ClinicalCopilot\Rag\SparseRetriever;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\NullTraceRecorder;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\LlmResponse;
 use OpenEMR\Modules\ClinicalCopilot\Tests\Isolated\Reduce\StubLlmClient;
+use OpenEMR\Modules\ClinicalCopilot\Verify\Verifier;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -44,7 +46,7 @@ final class SupervisorTest extends TestCase
             $tracer,
         );
 
-        return new Supervisor($extractor, $retriever, $tracer);
+        return new Supervisor($extractor, $retriever, new CriticWorker(new Verifier(), $tracer), $tracer);
     }
 
     private function labResponse(): LlmResponse

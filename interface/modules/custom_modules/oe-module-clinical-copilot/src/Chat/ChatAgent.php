@@ -119,12 +119,12 @@ final class ChatAgent
             return ChatAnswer::frozen($loopResult, $verification->verdicts, self::sev1Signal($correlationId, $pid, $verification->find(CheckId::PatientIdentity)), self::usage($loopResult), 1);
         }
 
-        // TEMP (QA): verifier content gate disabled -- return the produced
-        // answer as-is rather than gating, running the fail-closed LLM retry,
-        // and degrading to "couldn't produce a verifiable answer". The verifier
-        // still ran above (verdicts recorded) and the sev-1 wrong-patient
-        // freeze above still applies. Re-enable via VerificationPolicy
-        // (CLINICAL_COPILOT_VERIFY_ENFORCE=1 or flip its default).
+        // QA-only relaxation (CLINICAL_COPILOT_VERIFY_ENFORCE=0): return the
+        // produced answer as-is rather than gating, running the fail-closed
+        // LLM retry, and degrading to "couldn't produce a verifiable answer".
+        // The gate is ENFORCED by default (VerificationPolicy); even when
+        // relaxed, the verifier still ran above (verdicts recorded) and the
+        // sev-1 wrong-patient freeze above still applies.
         if (!VerificationPolicy::gateEnforced()) {
             return ChatAnswer::passed($loopResult, $verification->claims ?? [], $verification->verdicts, self::usage($loopResult), 1);
         }

@@ -43,7 +43,7 @@ final class PromptInjectionIgnoredTest extends TestCase
     protected function setUp(): void
     {
         // Asserts the verifier GATE rejects an injected/ungrounded answer, so
-        // pin it enforced regardless of the (currently-disabled) runtime
+        // pin it enforced regardless of the runtime (enforced by default since FINAL_REVIEW)
         // default -- see OpenEMR\Modules\ClinicalCopilot\Verify\VerificationPolicy.
         putenv('CLINICAL_COPILOT_VERIFY_ENFORCE=1');
     }

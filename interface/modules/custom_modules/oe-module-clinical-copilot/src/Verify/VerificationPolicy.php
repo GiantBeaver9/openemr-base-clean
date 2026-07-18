@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Runtime toggle for the deterministic V1-V6 verifier GATE (temporary QA switch).
+ * Runtime toggle for the deterministic V1-V6 verifier GATE (enforced by default).
  *
  * @package   OpenEMR
  * @link      https://www.open-emr.org
@@ -17,14 +17,18 @@ namespace OpenEMR\Modules\ClinicalCopilot\Verify;
 use OpenEMR\Modules\ClinicalCopilot\Config\LlmEnv;
 
 /**
- * TEMPORARILY DISABLED for QA: the deterministic V1-V6 verifier gate was
- * rejecting otherwise-usable model answers ("couldn't produce a verifiable
- * answer") while it is being retuned. When the gate is NOT enforced,
- * {@see \OpenEMR\Modules\ClinicalCopilot\Chat\ChatAgent} and
- * {@see VerifiedGeneration} return the produced answer as-is instead of
- * gating, running the fail-closed LLM retry, and degrading.
+ * ENFORCED BY DEFAULT: the deterministic V1-V6 verifier gate blocks, retries
+ * (once), and degrades any answer that fails verification -- uncited or unsafe
+ * output is never rendered. {@see \OpenEMR\Modules\ClinicalCopilot\Chat\ChatAgent},
+ * {@see VerifiedGeneration}, and the supervisor critic stage
+ * ({@see \OpenEMR\Modules\ClinicalCopilot\Agent\CriticWorker} via
+ * {@see \OpenEMR\Modules\ClinicalCopilot\Agent\Supervisor}) all consult this
+ * one policy.
  *
- * Two things intentionally stay ON even when the gate is off:
+ * For QA/retuning ONLY, the gate can be temporarily relaxed by setting
+ * `CLINICAL_COPILOT_VERIFY_ENFORCE=0` (any non-truthy value; truthy values are
+ * 1/true/yes/on). Two things intentionally stay ON even when the gate is
+ * relaxed:
  *   1. The verifier still RUNS and records its verdicts (observability -- so
  *      the ledger shows what WOULD have failed).
  *   2. The V3 patient-identity (sev-1) freeze -- a cited fact whose pid does
@@ -32,18 +36,18 @@ use OpenEMR\Modules\ClinicalCopilot\Config\LlmEnv;
  *      PHI guard, categorically different from ordinary content strictness, and
  *      must never be silently off in a chart tool.
  *
- * Re-enable the full gate by setting `CLINICAL_COPILOT_VERIFY_ENFORCE=1`
- * (truthy: 1/true/yes/on) or by flipping {@see self::GATE_ENFORCED_DEFAULT}
- * back to true. This is a deliberately small, greppable switch so the gate can
- * be restored in one edit.
+ * This is a deliberately small, greppable switch; see docs/SECURITY.md
+ * finding #1 for the history (the gate was temporarily off by default during
+ * retuning and re-enabled for the Week-2 submission).
  */
 final class VerificationPolicy
 {
     private const ENV_ENFORCE = 'CLINICAL_COPILOT_VERIFY_ENFORCE';
 
-    // TEMP: default OFF while the verifier is retuned. Flip to true (or delete
-    // this class and its two call sites) to restore fail-closed gating.
-    private const GATE_ENFORCED_DEFAULT = false;
+    // Fail-closed gating out of the box. Set CLINICAL_COPILOT_VERIFY_ENFORCE=0
+    // to relax for QA/retuning only -- never in an environment serving real
+    // traffic.
+    private const GATE_ENFORCED_DEFAULT = true;
 
     private function __construct()
     {
@@ -51,10 +55,12 @@ final class VerificationPolicy
     }
 
     /**
-     * True when the V1-V6 content gate should block/retry/degrade a failing
-     * answer; false (the current default) when a produced answer flows through
-     * unblocked. The sev-1 patient-identity freeze is NOT governed by this --
-     * callers enforce it unconditionally.
+     * True (the default) when the V1-V6 content gate should block/retry/degrade
+     * a failing answer; false only when explicitly relaxed via
+     * `CLINICAL_COPILOT_VERIFY_ENFORCE=0` (QA). The env override works in BOTH
+     * directions: any non-empty value that is not 1/true/yes/on disables, a
+     * truthy value (re-)enables. The sev-1 patient-identity freeze is NOT
+     * governed by this -- callers enforce it unconditionally.
      */
     public static function gateEnforced(): bool
     {

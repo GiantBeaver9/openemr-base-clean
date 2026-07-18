@@ -120,11 +120,12 @@ final class VerifiedGeneration
             return AttemptOutcome::sev1($verification->verdicts, $signal, $usage);
         }
 
-        // TEMP (QA): verifier content gate disabled -- accept the produced
-        // claims as-is instead of gating, retrying (a second LLM call), and
-        // degrading. The verifier still ran (verdicts recorded) and the sev-1
-        // wrong-patient freeze above still applies. Re-enable via
-        // VerificationPolicy (CLINICAL_COPILOT_VERIFY_ENFORCE=1 or flip default).
+        // QA-only relaxation (CLINICAL_COPILOT_VERIFY_ENFORCE=0): accept the
+        // produced claims as-is instead of gating, retrying (a second LLM
+        // call), and degrading. The gate is ENFORCED by default
+        // (VerificationPolicy); even when relaxed, the verifier still ran
+        // (verdicts recorded) and the sev-1 wrong-patient freeze above still
+        // applies.
         if (!VerificationPolicy::gateEnforced()) {
             return AttemptOutcome::passed(
                 $verification->verdicts,

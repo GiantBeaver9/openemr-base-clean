@@ -46,7 +46,7 @@ final class VerifiedGenerationTest extends TestCase
     protected function setUp(): void
     {
         // This suite asserts the verifier GATE's behaviour, so pin it enforced
-        // regardless of the (currently-disabled) runtime default -- see
+        // regardless of the runtime default (enforced by default since FINAL_REVIEW) -- see
         // OpenEMR\Modules\ClinicalCopilot\Verify\VerificationPolicy.
         putenv('CLINICAL_COPILOT_VERIFY_ENFORCE=1');
     }

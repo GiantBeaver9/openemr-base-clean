@@ -4,7 +4,7 @@
 
 **Method:** read-only fan-out audit, one agent per subtree (Chat/Agent/Verify, Ingest/Doc, Knowledge/Rag, Controller/ReadPath/Fact/Capability, Config/Observability/Worker/Reduce/Lab, public/templates, ops/sql/deploy), each sampling entry points, auth, query construction, file handling, and secrets, then reduced into this report. No source was modified and nothing was exploited — every finding below describes the unsafe construct, not a working payload.
 
-**Posture summary:** This module is unusually disciplined for its size — parameterized queries throughout, no hardcoded secrets, consistent PSR-3 logging, and a real architectural separation between the PHI-bearing OpenEMR MySQL and the non-BAA knowledge Postgres. The one **CRITICAL** finding is not an injection or auth-bypass bug in the traditional sense: it's that the module's own headline safety control — the LLM output verification gate — is turned off by default in the code currently on this branch. Two **HIGH** findings are IDOR-shaped (cross-patient data access via ID enumeration), one is a stored-XSS gap on an admin page, and two are gaps in the PHI-mixing / PHI-scrubbing guards that are described elsewhere as hard protections but currently fail open. The **MEDIUM** and **LOW** findings are mostly defense-in-depth gaps and deploy-script hygiene rather than directly exploitable bugs.
+**Posture summary:** This module is unusually disciplined for its size — parameterized queries throughout, no hardcoded secrets, consistent PSR-3 logging, and a real architectural separation between the PHI-bearing OpenEMR MySQL and the non-BAA knowledge Postgres. The one **CRITICAL** finding is not an injection or auth-bypass bug in the traditional sense: it's that the module's own headline safety control — the LLM output verification gate — was turned off by default in the code at audit time (since fixed on FINAL_REVIEW: enforced by default, see Resolution status). Two **HIGH** findings are IDOR-shaped (cross-patient data access via ID enumeration), one is a stored-XSS gap on an admin page, and two are gaps in the PHI-mixing / PHI-scrubbing guards that are described elsewhere as hard protections but currently fail open. The **MEDIUM** and **LOW** findings are mostly defense-in-depth gaps and deploy-script hygiene rather than directly exploitable bugs.
 
 ---
 
@@ -14,7 +14,7 @@ Tracked disposition of the findings acted on since this report was written. Fixe
 
 | # | Sev | Disposition | Where |
 |---|-----|-------------|-------|
-| 1 | CRITICAL | **Deferred by decision** — verify gate stays OFF while the checks are retuned; the module does not yet serve enough live traffic for it to matter. Re-enable with `CLINICAL_COPILOT_VERIFY_ENFORCE=1` (one-line flip) before serving real traffic. | `src/Verify/VerificationPolicy.php:46` |
+| 1 | CRITICAL | **Fixed (FINAL_REVIEW)** — `GATE_ENFORCED_DEFAULT` flipped back to `true`: the V1–V6 gate blocks/retries/degrades by default on the chat, synthesis, **and** supervisor multi-agent paths (new `CriticWorker` stage). The earlier "off for QA retuning" rationale no longer applies for the Week-2 submission. `CLINICAL_COPILOT_VERIFY_ENFORCE=0` remains a QA-only relaxation; V3 sev-1 stays unconditional. | `src/Verify/VerificationPolicy.php`, `src/Agent/CriticWorker.php` |
 | 3 | HIGH | **Fixed** — scrubber switched from a capitalization blacklist to a clinical-term allowlist (`CLINICAL_TERMS` + analyte-code regex); lowercase names no longer leak. Regression test added. | commit `804f2b1` / `KnowledgeQueryScrubber` |
 | 4 | HIGH | **Documented as accepted** — chart-wide ACL matches stock OpenEMR's own chart-access model; per-patient/care-team scoping is a deliberate non-goal for v1, with the controller layer named as the extension point if the fork ever tightens it. Reconciled in ARCHITECTURE.md §4. | ARCHITECTURE.md §4 |
 | 5 | HIGH | **Fixed** — `span.error_detail` now renders through `\|text` on the dashboard. | commit `9214a3c` / `dashboard.html.twig:406` |
@@ -39,6 +39,8 @@ This directly contradicts the module's own architecture doc (`ARCHITECTURE.md`, 
 **Fix:** flip `GATE_ENFORCED_DEFAULT` back to `true` (or set `CLINICAL_COPILOT_VERIFY_ENFORCE=1` in every environment that serves live traffic) before this branch reaches anything other than the QA retuning it was disabled for. The switch is deliberately small and greppable — this is a one-line, low-risk revert once the retuning is done; the risk is only in leaving it off past that.
 
 **Confidence:** firm.
+
+**Resolution (FINAL_REVIEW):** `GATE_ENFORCED_DEFAULT` is now `true` — the gate is enforced out of the box, and the "for QA" rationale above no longer applies to the Week-2 submission. The same policy also gates the Supervisor multi-agent path: a new critic stage (`src/Agent/CriticWorker.php`, recorded as a `verify` child span of the supervisor span) runs the V1–V6 verifier over any composed answer and degrades a rejected draft to a refusal instead of emitting it. `CLINICAL_COPILOT_VERIFY_ENFORCE=0` remains available as an explicit, QA-only relaxation (verdicts still recorded; V3 sev-1 freeze still unconditional).
 
 ---
 

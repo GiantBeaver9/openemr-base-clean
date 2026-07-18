@@ -15,12 +15,14 @@ declare(strict_types=1);
 namespace OpenEMR\Modules\ClinicalCopilot\Agent;
 
 /**
- * Exactly the two workers the Week 2 spec names — intake-extractor and
- * evidence-retriever. The backing value is what lands in the `worker` trace
- * span so a routing decision is inspectable from the trace alone.
+ * The two gather workers the Week 2 spec names — intake-extractor and
+ * evidence-retriever — plus the critic that hard-gates any composed answer
+ * ({@see CriticWorker}). The backing value is what lands in the trace span
+ * so a routing decision is inspectable from the trace alone.
  */
 enum WorkerName: string
 {
     case IntakeExtractor = 'intake_extractor';
     case EvidenceRetriever = 'evidence_retriever';
+    case Critic = 'critic';
 }

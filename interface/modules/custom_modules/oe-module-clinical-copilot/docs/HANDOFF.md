@@ -26,9 +26,13 @@ Last updated after the Week-2 security-audit fixes landed on `main`.
    Gemini-API-key *as-built (v1)*; the Vertex code branch was removed from
    `LlmClientFactory` / `ChatLlmClientFactory`.
 
-**Deliberately NOT done (deferred by decision):** the verification gate stays
-OFF. Re-enable later with `CLINICAL_COPILOT_VERIFY_ENFORCE=1` (SECURITY.md
-finding #1). We don't feed it enough data to matter right now.
+**Update (FINAL_REVIEW):** the verification gate is now ENFORCED BY DEFAULT
+(`VerificationPolicy::GATE_ENFORCED_DEFAULT = true`) — the earlier
+"off for QA retuning" deferral no longer applies for the Week-2 submission
+(SECURITY.md finding #1, resolved). A critic stage (`CriticWorker`) also
+hard-gates the Supervisor multi-agent path. For QA only, relax with
+`CLINICAL_COPILOT_VERIFY_ENFORCE=0`; never in an environment serving real
+traffic.
 
 ## Deployment (Railway via GitLab runner)
 
@@ -65,7 +69,8 @@ finding #1). We don't feed it enough data to matter right now.
 - `CLINICAL_COPILOT_GEMINI_API_KEY_BACKUP` (optional failover key)
 - `CLINICAL_COPILOT_KNOWLEDGE_*` (host/port/db/user/password for the pgvector
   Postgres — see `ops/knowledge/railway.env.example`)
-- `CLINICAL_COPILOT_VERIFY_ENFORCE=1` — only when turning the verify gate on
+- `CLINICAL_COPILOT_VERIFY_ENFORCE` — optional; the verify gate is now ON by
+  default. Set `=0` only for QA retuning (`=1` force-enables, redundantly)
 
 ## Known open items / next candidates (from docs/SECURITY.md)
 
@@ -86,8 +91,9 @@ Closed in the handoff-review-completion pass (see `docs/SECURITY.md` →
 
 Still open by decision / bigger than a doc-close:
 
-- **Verify gate is off (finding #1)** — intentional; re-enable with
-  `CLINICAL_COPILOT_VERIFY_ENFORCE=1` when the retuning is done. One-line flip.
+- ~~**Verify gate is off (finding #1)**~~ — CLOSED on FINAL_REVIEW: enforced
+  by default in code (`VerificationPolicy`), including a critic stage on the
+  supervisor path. QA-only relax: `CLINICAL_COPILOT_VERIFY_ENFORCE=0`.
 - If this fork ever wants stricter-than-stock authz, implement the care-team
   check (#4) and the two-DB-role split (#20) — deliberately deferred, not
   today-sized.
