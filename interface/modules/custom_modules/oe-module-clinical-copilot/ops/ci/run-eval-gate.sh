@@ -8,14 +8,13 @@
 # required -- every case supplies the model output verbatim, so this runs in CI
 # without API access (spec: "these tests must pass in CI without live API").
 #
-# Wire this into whatever CI workflow builds a Clinical Co-Pilot branch,
-# alongside the additivity and forbidden-write gates. It cannot add a
-# .github/workflows file itself without violating the additivity invariant it
-# lives beside, so the invocation is documented here rather than shipped as a
-# core-workflow diff. Example GitHub Actions step:
+# Wired into PR-blocking CI by .github/workflows/w2-eval-gate.yml (the one
+# intentional core-workflow addition, whitelisted by check-additivity.sh),
+# which runs this script alongside the additivity gate and the module's
+# isolated PHPUnit suite:
 #
-#   - name: Clinical Co-Pilot Week 2 eval gate
-#     run: interface/modules/custom_modules/oe-module-clinical-copilot/ops/ci/run-eval-gate.sh
+#   - name: Week 2 eval gate (blocking)
+#     run: bash interface/modules/custom_modules/oe-module-clinical-copilot/ops/ci/run-eval-gate.sh
 #
 # To re-baseline after an intentional behaviour change (review the diff first):
 #   php interface/modules/custom_modules/oe-module-clinical-copilot/ops/eval/run-evals.php --update-baseline

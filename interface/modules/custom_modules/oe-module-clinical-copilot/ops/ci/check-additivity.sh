@@ -24,16 +24,11 @@
 # that has moved on since this branch forked does not produce false positives
 # for commits that landed on the base branch after the fork point.
 #
-# CI invocation -- this module cannot edit core .github/workflows/ (that
-# would itself violate the very invariant this script enforces), so wiring
-# this into CI is host-side, documented here rather than shipped as a diff:
-# add a step to whatever workflow builds/tests a Clinical Co-Pilot branch,
-# e.g. in a GitHub Actions job:
-#
-#   - name: Clinical Co-Pilot additivity gate
-#     run: interface/modules/custom_modules/oe-module-clinical-copilot/ops/ci/check-additivity.sh "origin/${{ github.base_ref }}"
-#
-# or locally, from the repo root, before opening a PR:
+# CI invocation -- this gate is wired into PR-blocking CI by
+# .github/workflows/w2-eval-gate.yml, the one intentional core-workflow
+# addition (itself whitelisted in ALLOWED_SPEC_DOCS below so it does not
+# trip the very invariant it enforces). To also run it locally, from the
+# repo root, before opening a PR:
 #
 #   interface/modules/custom_modules/oe-module-clinical-copilot/ops/ci/check-additivity.sh origin/master
 #
@@ -68,6 +63,16 @@ ALLOWED_SPEC_DOCS=(
   "ARCHITECTURE_COMPLETE.txt"
   # Repo tooling that maintains the .txt copies above (not a deliverable).
   "scripts/sync-txt.sh"
+  # Railway deploy layer -- the blessed root-level deploy artifacts (the
+  # remediation plan allows "the existing root railway-*/Dockerfile.railway
+  # deploy layer").
+  ".dockerignore"
+  ".gitattributes"
+  "Dockerfile.railway"
+  "railway-install-copilot.sh"
+  # The PR-blocking eval-gate workflow -- the one intentional core-workflow
+  # addition (W1a); everything else under .github/ stays off-limits.
+  ".github/workflows/w2-eval-gate.yml"
 )
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
