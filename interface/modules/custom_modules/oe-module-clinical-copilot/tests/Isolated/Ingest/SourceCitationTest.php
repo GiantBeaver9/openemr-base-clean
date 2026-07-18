@@ -49,6 +49,34 @@ final class SourceCitationTest extends TestCase
         self::assertSame([100, 200, 400, 260], $restored->bbox->toArray());
     }
 
+    /**
+     * Failure mode guarded: a guideline citation losing its section/url
+     * provenance on serialization — `page_or_section` must carry a section
+     * LABEL (string) for guideline sources just as it carries a page NUMBER
+     * (int) for documents, and `url` must survive the round trip.
+     */
+    public function testGuidelineRoundTripPreservesSectionLabelAndUrl(): void
+    {
+        $citation = new SourceCitation(
+            SourceType::Guideline,
+            'ADA (summary)',
+            'Glycemic Targets',
+            'ada-a1c-target',
+            'For most non-pregnant adults an A1c below 7% is reasonable.',
+            null,
+            'https://diabetes.org/standards',
+        );
+
+        $restored = SourceCitation::fromArray($citation->toArray());
+
+        self::assertSame(SourceType::Guideline, $restored->sourceType);
+        self::assertSame('ADA (summary)', $restored->sourceId);
+        self::assertSame('Glycemic Targets', $restored->pageOrSection);
+        self::assertSame('ada-a1c-target', $restored->fieldOrChunkId);
+        self::assertSame('https://diabetes.org/standards', $restored->url);
+        self::assertNull($restored->bbox);
+    }
+
     public function testEmptyQuoteIsRejected(): void
     {
         $this->expectException(\DomainException::class);

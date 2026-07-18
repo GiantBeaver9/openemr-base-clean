@@ -36,15 +36,20 @@ final readonly class EvidenceSnippet
 
     public static function forChunk(GuidelineChunk $chunk, float $score): self
     {
+        // Full guideline provenance on the citation itself: source + section +
+        // chunk id + quote + url — so a consumer of the citation alone (wire
+        // responses, exports) can attribute the evidence without reaching back
+        // into the chunk.
         return new self(
             $chunk,
             $score,
             new SourceCitation(
                 sourceType: SourceType::Guideline,
                 sourceId: $chunk->source,
-                pageOrSection: null,
+                pageOrSection: $chunk->section !== '' ? $chunk->section : null,
                 fieldOrChunkId: $chunk->id,
                 quoteOrValue: $chunk->excerpt(),
+                url: $chunk->url,
             ),
         );
     }

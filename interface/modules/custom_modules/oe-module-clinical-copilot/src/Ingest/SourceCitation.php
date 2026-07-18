@@ -17,7 +17,11 @@ namespace OpenEMR\Modules\ClinicalCopilot\Ingest;
 /**
  * The spec's minimum citation shape — {source_type, source_id, page_or_section,
  * field_or_chunk_id, quote_or_value} — plus the page bounding box that powers
- * the required visual overlay. This is deliberately a SEPARATE value object
+ * the required visual overlay. `page_or_section` carries either a page NUMBER
+ * (document extractions) or a section LABEL (guideline chunks, e.g. "Glycemic
+ * Targets"), and `url` is the optional guideline source link — so a guideline
+ * citation is fully provenanced: source, section, chunk id, quote, url.
+ * This is deliberately a SEPARATE value object
  * from the Week 1 {@see \OpenEMR\Modules\ClinicalCopilot\Fact\Citation} (which
  * points at a live core-table row and whose `table`/`pk > 0` invariants a
  * document source cannot satisfy). Once a locked lab commits to
@@ -29,10 +33,11 @@ final readonly class SourceCitation
     public function __construct(
         public SourceType $sourceType,
         public string $sourceId,
-        public ?int $pageOrSection,
+        public int|string|null $pageOrSection,
         public ?string $fieldOrChunkId,
         public string $quoteOrValue,
         public ?BoundingBox $bbox = null,
+        public ?string $url = null,
     ) {
         if ($sourceId === '') {
             throw new \DomainException('SourceCitation.sourceId must not be empty');
@@ -44,7 +49,7 @@ final readonly class SourceCitation
     }
 
     /**
-     * @return array{source_type: string, source_id: string, page_or_section: int|null, field_or_chunk_id: string|null, quote_or_value: string, bbox: list<int>|null}
+     * @return array{source_type: string, source_id: string, page_or_section: int|string|null, field_or_chunk_id: string|null, quote_or_value: string, bbox: list<int>|null, url: string|null}
      */
     public function toArray(): array
     {
@@ -55,6 +60,7 @@ final readonly class SourceCitation
             'field_or_chunk_id' => $this->fieldOrChunkId,
             'quote_or_value' => $this->quoteOrValue,
             'bbox' => $this->bbox?->toArray(),
+            'url' => $this->url,
         ];
     }
 
@@ -78,14 +84,20 @@ final readonly class SourceCitation
             throw new \InvalidArgumentException('SourceCitation.quote_or_value must be a string');
         }
 
+        // A page NUMBER (documents) or a section LABEL (guidelines) — both legal.
         $page = $data['page_or_section'] ?? null;
-        if ($page !== null && !is_int($page)) {
-            throw new \InvalidArgumentException('SourceCitation.page_or_section must be an int or null');
+        if ($page !== null && !is_int($page) && !is_string($page)) {
+            throw new \InvalidArgumentException('SourceCitation.page_or_section must be an int, a string, or null');
         }
 
         $fieldOrChunk = $data['field_or_chunk_id'] ?? null;
         if ($fieldOrChunk !== null && !is_string($fieldOrChunk)) {
             throw new \InvalidArgumentException('SourceCitation.field_or_chunk_id must be a string or null');
+        }
+
+        $url = $data['url'] ?? null;
+        if ($url !== null && !is_string($url)) {
+            throw new \InvalidArgumentException('SourceCitation.url must be a string or null');
         }
 
         $bbox = null;
@@ -101,6 +113,7 @@ final readonly class SourceCitation
             $fieldOrChunk,
             $quote,
             $bbox,
+            $url,
         );
     }
 }

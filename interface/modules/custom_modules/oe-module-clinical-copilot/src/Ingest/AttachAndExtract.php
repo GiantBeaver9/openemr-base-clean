@@ -59,7 +59,7 @@ final class AttachAndExtract
      * intake citations are never required, so an extraction with none is still
      * fully successful.
      *
-     * @return array{fields: array<string, string|null>, citations: array<string, array{page: int|null, quote: string}>, vision_used: bool, schema_rejected: bool}
+     * @return array{fields: array<string, string|null>, citations: array<string, array{page: int|string|null, quote: string}>, vision_used: bool, schema_rejected: bool}
      */
     public function previewIntake(string $bytes, string $mimeType, string $correlationId): array
     {
@@ -306,7 +306,7 @@ final class AttachAndExtract
      * simply absent, never an error (blank extractions have no citations, and
      * that is the normal case, not a degraded one).
      *
-     * @return array<string, array{page: int|null, quote: string}> field_key => citation
+     * @return array<string, array{page: int|string|null, quote: string}> field_key => citation
      */
     private function citationsFrom(ExtractionOutcome $outcome): array
     {

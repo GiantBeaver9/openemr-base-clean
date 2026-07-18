@@ -84,6 +84,30 @@ final class HybridRagFrameworkTest extends TestCase
         self::assertSame('strong', $out[0]->chunk->id, 'full query-term coverage outranks a high raw score');
     }
 
+    /**
+     * Failure mode guarded: `forChunk()` dropping the chunk's section/url on
+     * the citation (the pre-fix behaviour passed `pageOrSection: null`), which
+     * left guideline citations without the spec's source+section+chunk-id+quote
+     * provenance for any consumer that only sees the citation.
+     */
+    public function testForChunkCarriesSectionAndUrlIntoTheCitation(): void
+    {
+        $snippet = EvidenceSnippet::forChunk(
+            new GuidelineChunk('ada-a1c-target', 'A1c goal', 'ADA (summary)', 'Glycemic Targets', 'An A1c below 7% is reasonable.', ['a1c'], 'https://diabetes.org/standards'),
+            0.5,
+        );
+
+        self::assertSame('ADA (summary)', $snippet->citation->sourceId);
+        self::assertSame('Glycemic Targets', $snippet->citation->pageOrSection);
+        self::assertSame('ada-a1c-target', $snippet->citation->fieldOrChunkId);
+        self::assertSame('https://diabetes.org/standards', $snippet->citation->url);
+
+        // A chunk with no section and no url degrades to nulls, never ''.
+        $bare = EvidenceSnippet::forChunk(new GuidelineChunk('x', 'T', 'SRC', '', 'Body text.'), 0.1);
+        self::assertNull($bare->citation->pageOrSection);
+        self::assertNull($bare->citation->url);
+    }
+
     public function testDefaultHybridPipelineSurfacesTheRightGuidelinePerTopic(): void
     {
         $hybrid = HybridRetriever::createDefault();

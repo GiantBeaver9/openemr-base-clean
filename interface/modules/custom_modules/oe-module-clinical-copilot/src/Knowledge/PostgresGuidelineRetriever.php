@@ -16,6 +16,8 @@ namespace OpenEMR\Modules\ClinicalCopilot\Knowledge;
 
 use OpenEMR\Modules\ClinicalCopilot\Rag\EvidenceSnippet;
 use OpenEMR\Modules\ClinicalCopilot\Rag\GuidelineChunk;
+use OpenEMR\Modules\ClinicalCopilot\Rag\HeuristicReranker;
+use OpenEMR\Modules\ClinicalCopilot\Rag\RerankerInterface;
 use OpenEMR\Modules\ClinicalCopilot\Rag\RetrieverInterface;
 
 /**
@@ -37,23 +39,45 @@ use OpenEMR\Modules\ClinicalCopilot\Rag\RetrieverInterface;
  * fixed boost for chunks whose `tags` overlap the requested analytes — the same
  * "ground THIS out-of-range fact" behaviour the offline retriever gives, but
  * over a store that can grow past what ships in the repo.
+ *
+ * Like the offline {@see \OpenEMR\Modules\ClinicalCopilot\Rag\HybridRetriever},
+ * first-stage SQL ranking is followed by a second-stage rerank: candidates are
+ * over-fetched ({@see self::candidateLimit()}) from BOTH the vector and the
+ * full-text stage, merged/deduped by id, and passed through the configured
+ * {@see RerankerInterface} (default {@see HeuristicReranker} — runs in-process,
+ * so nothing beyond the already-scrubbed query is involved) which reorders by
+ * cross-pair relevance and truncates to topK.
  */
 final class PostgresGuidelineRetriever implements RetrieverInterface
 {
     /** Boost added to a chunk's text-rank when its tags overlap the query tags. */
     private const TAG_OVERLAP_BOOST = 0.5;
 
+    /** Over-fetch multiplier: rerank sees up to this many × topK candidates. */
+    private const CANDIDATE_FACTOR = 3;
+
+    /** Floor / ceiling for the over-fetched candidate pool. */
+    private const CANDIDATE_MIN = 8;
+    private const CANDIDATE_MAX = 50;
+
     private readonly EmbeddingClientInterface $embedder;
+
+    private readonly RerankerInterface $reranker;
 
     public function __construct(
         private readonly KnowledgeQueryRunner $runner,
         private readonly KnowledgeQueryScrubber $scrubber,
         private readonly string $table = 'guideline_chunks',
         ?EmbeddingClientInterface $embedder = null,
+        ?RerankerInterface $reranker = null,
     ) {
         KnowledgeTableName::assertValid($this->table);
         // No embedder ⇒ full-text search only (the vector path is skipped).
         $this->embedder = $embedder ?? new UnavailableEmbeddingClient();
+        // Default to the offline cross-pair rerank — the same second stage the
+        // offline HybridRetriever applies, so production ordering quality does
+        // not silently regress to raw ts_rank/cosine order.
+        $this->reranker = $reranker ?? new HeuristicReranker();
     }
 
     /**
@@ -73,7 +97,8 @@ final class PostgresGuidelineRetriever implements RetrieverInterface
             return [];
         }
 
-        $limit = max(1, min(50, $topK));
+        $limit = max(1, min(self::CANDIDATE_MAX, $topK));
+        $candidateLimit = $this->candidateLimit($limit);
 
         // VECTOR-FIRST, HYBRID: embed the scrubbed (non-PHI) query and rank by
         // pgvector cosine similarity, boosted by tag overlap. Vector search only
@@ -81,18 +106,34 @@ final class PostgresGuidelineRetriever implements RetrieverInterface
         // seeded corpus with NULL embeddings alongside embedded uploads) we top up
         // the remaining slots from full-text — otherwise the non-embedded rows
         // would be silently unreachable. With no embeddings configured (or the
-        // query embed fails), it is full-text only.
+        // query embed fails), it is full-text only. Both stages fetch up to
+        // $candidateLimit (not $limit) so the reranker has a real pool to reorder.
         $queryVector = $this->embedder->isAvailable() && $safeQuery !== '' ? $this->embedder->embed($safeQuery) : null;
         if ($queryVector !== null) {
-            $vectorRows = $this->vectorSearch($queryVector, $safeTags, $limit);
-            if (count($vectorRows) >= $limit) {
-                return $this->mapRows($vectorRows);
+            $rows = $this->vectorSearch($queryVector, $safeTags, $candidateLimit);
+            if (count($rows) < $candidateLimit) {
+                $rows = $this->mergeById($rows, $this->fullTextSearch($safeQuery, $safeTags, $candidateLimit), $candidateLimit);
             }
-
-            return $this->mapRows($this->mergeById($vectorRows, $this->fullTextSearch($safeQuery, $safeTags, $limit), $limit));
+        } else {
+            $rows = $this->fullTextSearch($safeQuery, $safeTags, $candidateLimit);
         }
 
-        return $this->mapRows($this->fullTextSearch($safeQuery, $safeTags, $limit));
+        // Second-stage rerank over the SCRUBBED query (the terms actually
+        // searched): reorders best-first and truncates to $limit. With fewer
+        // candidates than topK the reranker just returns them all, reordered;
+        // an empty scrubbed query (tags-only request) degrades to the blended
+        // first-stage score, preserving the SQL order.
+        return $this->reranker->rerank($safeQuery, $this->mapRows($rows), $limit);
+    }
+
+    /**
+     * Over-fetch size for the rerank candidate pool: CANDIDATE_FACTOR × topK,
+     * floored at CANDIDATE_MIN (a tiny topK still deserves a pool worth
+     * reordering) and capped at CANDIDATE_MAX (bounds SQL work and payload).
+     */
+    private function candidateLimit(int $limit): int
+    {
+        return min(self::CANDIDATE_MAX, max($limit * self::CANDIDATE_FACTOR, self::CANDIDATE_MIN));
     }
 
     /**
