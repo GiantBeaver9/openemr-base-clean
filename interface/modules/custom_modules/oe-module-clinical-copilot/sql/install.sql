@@ -9,7 +9,7 @@
 -- @license   https://github.com/openemr/openemr/blob/master/LICENSE GNU General Public License 3
 --
 -- All existing OpenEMR tables are read-only to this module (I9 additivity).
--- Only the five mod_copilot_* tables below are module-owned/writable, plus
+-- Only the ten mod_copilot_* tables below are module-owned/writable, plus
 -- one background_services row registered here and managed (activated /
 -- deactivated) by ModuleManagerListener on enable/disable.
 --

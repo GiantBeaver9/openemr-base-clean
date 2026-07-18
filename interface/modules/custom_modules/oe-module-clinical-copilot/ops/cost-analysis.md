@@ -331,3 +331,48 @@ against once `ops/load/` is extended to the Week 2 endpoints.
 - **Documents per patient per visit** — the ingestion frequency; low by nature.
 - **Dense/rerank on or off** — off is free and offline; on trades a small cost
   for retrieval quality on a larger corpus.
+
+## Actual development spend
+
+The rubric asks for actual dev spend, not just the projection above. The repo
+does not contain billing records, so this section gives (a) what the repo's
+own artifacts prove cost **nothing**, (b) a **clearly-labelled ledger-derived
+estimate** of the metered dev usage with its methodology, and (c) the marker
+where the real console figure belongs. **Do not read the estimate as a bill.**
+
+**Provably $0 (deterministic, no live model):**
+
+- Every eval-gate run — the 50-case golden set (`ops/eval/run-evals.php`)
+  feeds recorded model outputs through the real code; no API call, in local
+  runs or in `w2-eval-gate.yml` CI.
+- Every load/baseline capture — `ops/load/RESULTS.md` Part A
+  (captured 2026-07-13) runs module compute only: no DB, no LLM.
+- The entire isolated PHPUnit suite (509 tests) — a hand-written
+  `LlmClientInterface` stub stands in for the model.
+
+**Metered dev usage (Gemini API key, synthetic data only):** manual
+exercising of synthesis, chat, and vision extraction against the seeded
+synthetic patients during development and on the Railway demo, plus one-time
+embedding of the small guideline corpus (`gemini-embedding-001`).
+
+**Ledger-derived estimate — methodology and figure.** Using the module's own
+measured per-call costs above (synthesis reduce ≈ $0.0107, chat turn ≈
+$0.0046, vision extraction ≈ $0.0065, at Gemini 2.5 Pro list rates), even a
+generous assumption of the dev period's manual traffic — order of hundreds of
+synthesis regenerations, hundreds of chat turns, and tens of document
+extractions across dev/debug/demo cycles — prices out at roughly
+**$1–10 for the whole development period**, i.e. low single digits at the
+central estimate. Corpus embedding is negligible (a small committed corpus at
+embedding rates measured in cents per million tokens). Two honest caveats:
+(1) the call volumes are recollection-based, not instrumented — the
+`tokens_in`/`tokens_out` columns on `mod_copilot_doc`/`mod_copilot_chat_turn`
+exist but no dev-period export of them is committed; (2) some or all AI Studio
+API-key traffic may have fallen under the free tier, in which case the billed
+figure is lower still. Worst-case exposure was bounded throughout by the
+module's own spend breakers (defaults: $50/day, $10/hour —
+`docs/configuration.md`).
+
+> **Console-reported spend for the dev period: $\_\_\_\_ — fill from the
+> Google Cloud / AI Studio billing console (project owner action).** Until
+> that figure is pasted here, the $1–10 band above is a repo-derived
+> estimate, not a measured bill.

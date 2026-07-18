@@ -29,6 +29,22 @@ prepping for a follow-up visit. The chart has structured data, but the key
 recent info is in a scanned lab PDF and an intake form. She asks: *what changed,
 what should I pay attention to, and what evidence supports the recommendation?*
 
+### 2.1 Traceability — every W2 capability back to the Week 1 user
+
+Same discipline as Week 1's UC1–UC6 mapping in `USERS.md`: each capability
+names the moment in the endocrinologist's follow-up-visit prep it serves.
+
+| Capability | The moment in the physician-prep workflow it serves |
+|---|---|
+| Lab PDF ingestion (`lab_pdf`) | The scanned lab that arrived since the last visit becomes verified, cited `procedure_result` rows the Week 1 synthesis can read — instead of a PDF she'd have to eyeball mid-clinic. |
+| Intake form ingestion (`intake_form`) | The front-desk intake form becomes a chart (patient + demographics, reviewed and corrected) before the first visit, so prep starts from structured data, not paper. |
+| Medication-list ingestion (`medication_list`) | An outside med list (discharge list, pharmacy printout) is transcribed exactly as printed, human-verified, and frozen for reference while she preps regimen questions — chart reconciliation deliberately stays a manual clinical step. *(Added after this PRD's original two-type scope; design in `W2_ARCHITECTURE.md` §1–2.)* |
+| Hybrid RAG + rerank | Answers her third question — *what evidence supports the recommendation?* — with cited guideline snippets kept separate from patient facts. |
+| Supervisor + workers graph | One pre-visit question can gather document facts and guideline evidence in a single traced run (`agent.php`), instead of her chaining tools by hand. |
+| Critic | Any drafted answer is verified (V1–V6) before she sees it — a rejected draft becomes a refusal, never uncited or unsafe prose in the 90-second prep window. |
+| Eval gate | The flows above cannot silently regress between her clinic days — a >5% rubric regression blocks the PR. |
+| Dashboard / observability | When a prep answer looks wrong, the full run is reconstructable by correlation id, and extraction accuracy per doc type is tracked without exposing PHI. |
+
 ## 3. Goals / non-goals
 
 **Goals**

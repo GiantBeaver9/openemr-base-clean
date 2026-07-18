@@ -321,6 +321,51 @@ Every test guards a documented failure mode.
 - **Static (PR-blocking)** — the additivity gate and the forbidden-write
   PHPStan rule run on every change.
 
+### What is not tested, and why
+
+An honest inventory of the coverage gaps, each with the reason and what
+compensates (sources: module README "Honest gaps", `ops/load/RESULTS.md`):
+
+- **Full-stack HTTP load (Part B of `ops/load/RESULTS.md`) — not captured.**
+  Why: it needs a reachable, seeded Apache + PHP-FPM + MySQL + LLM stack,
+  which does not exist in the cloud build environment. Compensates: Part A
+  in-process baseline + load *is* captured (real CPU/memory/latency/throughput
+  of retrieval, extraction validation, verification, and prompt assembly at
+  concurrency 1/10/50), and the Part B capture is a committed dev-stack
+  runbook (`baseline/capture-baseline.sh` + `k6/*.js`), not an unwritten idea.
+- **DB-backed suites run only in the dev container, not in CI.** Why: the
+  `tests/Db/` suite (`AttachAndExtract` e2e, `ChartWriter` idempotency,
+  lock/unlock ACL, `W2EndToEndTest`) needs the live OpenEMR schema, which CI
+  does not provision. Compensates: the isolated end-to-end test
+  (`tests/Isolated/E2e/W2EndToEndIsolatedTest.php`) exercises the same
+  fixture-PDF → cited-answer flow with stubs and *is* PR-blocking; the DB
+  suite is a documented pre-merge dev-stack step.
+- **No live-model call in any automated suite, so extraction accuracy is only
+  measured on the vision path in real use (§11).** Why: a live multimodal
+  call in CI would be non-deterministic, credentialed, and paid. Compensates:
+  a hand-written `LlmClientInterface` stub drives every extraction test
+  through the real schema gate, and the accuracy metric itself
+  (`vlm_value` vs human-verified `value`, computed at lock) measures the
+  vision path continuously wherever a key is configured; the manual-entry
+  degrade path simply produces no accuracy signal, by construction.
+- **Document-fixture breadth: one committed PDF fixture, no stored form-image
+  fixtures.** Why: `tests/fixtures/lab-report-a1c.pdf` is the only binary
+  document fixture; intake-form and medication-list extraction are tested
+  over JSON payloads against their schemas, not scanned images (keeping
+  binary fixtures out of the repo and the suites deterministic). Compensates:
+  the strict schemas — not the model — are the contract, and
+  `ExtractionSchemaTest` covers all three schemas' failure modes; the eval
+  golden set supplies model output verbatim, so rubric coverage does not
+  depend on fixture images.
+- **The `/ready` reranker probe is static configured state, not a live
+  check.** Why: the production reranker (`HeuristicReranker`) is in-process
+  PHP behind `RerankerInterface` — there is no remote dependency to probe, so
+  `ReadyCheck::RERANKER_STATE` reports the constant `in-process`.
+  Compensates: an in-process reranker fails as code (caught by the isolated
+  retrieval tests), not as a network dependency; swapping in a hosted
+  reranker behind the same seam would require adding a real reachability
+  probe, and `ReadyCheck` documents exactly that.
+
 ---
 
 ## 11. Risks and tradeoffs
@@ -404,6 +449,43 @@ themselves are documented per flow:
   `docs/W2_BACKUP_RECOVERY.md` (§12 above); write-path recovery is idempotent
   re-commit with lineage (§3), so a failed or repeated lock never duplicates
   or orphans chart rows.
+
+### Runbook: supervisor routing error
+
+*(Same shape as the per-flow entries in module
+`docs/ingestion-failure-modes.md`: how to identify, then how to recover.)*
+
+**Identify.** Every supervisor run writes a `supervisor` span to
+`mod_copilot_trace` with status `ok`, `degraded`, or `error`
+(`src/Agent/Supervisor.php` sets `error` when the critic freezes a sev-1
+wrong-patient citation, ~line 132, and `degraded` when a drafted answer is
+rejected and refused, ~line 146); each worker records its own `worker` child
+span with its own status. So a routing problem is visible entirely from the
+trace tree:
+
+1. Take the request's correlation id (returned in the `agent.php` response
+   and stamped on every span).
+2. Open the waterfall for that correlation id on `public/dashboard.php` (or
+   query `mod_copilot_trace` by `correlation_id` directly) and read the
+   `supervisor` span and its children.
+3. The routing-error signatures: an **expected worker child span is missing**
+   (e.g. a document request with no `worker` span for the intake-extractor),
+   an **unexpected worker ran**, or the `supervisor` span itself is
+   `error`/`degraded`. Because the route is a pure function of the request
+   shape (`hasDocument()` → intake-extractor, `needsEvidence()` →
+   evidence-retriever, §6), a wrong route means the request-shape flags were
+   wrong at the parse boundary (`AgentAskRequest`), not that a router
+   "decided" badly — there is no LLM in the routing decision.
+
+**Recover.** The supervisor only gathers — it never writes to the chart (§6)
+— so a misrouted run leaves no state to clean up beyond its trace rows.
+Because routing is deterministic, replaying the same request reproduces the
+same route: fix the request payload (or, if the shape predicate itself is
+wrong, the predicate — covered by `SupervisorTest`), re-POST to
+`public/agent.php`, and confirm the new correlation id's waterfall shows the
+expected `supervisor → worker → …` tree. A `degraded` supervisor span with a
+refusal is the critic working as designed (§6), not a routing failure —
+investigate the verifier verdicts on the `verify` child span instead.
 
 ---
 

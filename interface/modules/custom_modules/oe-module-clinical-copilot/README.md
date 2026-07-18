@@ -61,7 +61,7 @@ oe-module-clinical-copilot/
 ├── composer.json, info.txt, version.php                     -- module metadata
 ├── openemr.bootstrap.php, src/Bootstrap.php                 -- event subscription, menu, ACL gate
 ├── ModuleManagerListener.php                                 -- install/enable/disable/uninstall hooks
-├── table.sql, sql/install.sql, sql/uninstall.sql             -- the 8 mod_copilot_* tables + background_services row
+├── table.sql, sql/install.sql, sql/uninstall.sql             -- the 10 mod_copilot_* tables + background_services row
 ├── src/                                                       -- PSR-4 OpenEMR\Modules\ClinicalCopilot\
 │   ├── Fact/, Lab/, Capability/                              -- U3-U5: fact model, lab contract, capabilities
 │   ├── DocStore.php, ReadPath/, Controller/DocController.php -- U6, U8: append-only doc store + read path
@@ -82,7 +82,7 @@ Standard OpenEMR Module Manager flow — no manual SQL required:
 
 1. **Install:** Modules → Manage Modules → find "Clinical Co-Pilot" →
    Install. Runs `sql/install.sql` (idempotent `#IfNotTable`/`#IfNotRow`
-   guards — the 8 `mod_copilot_*` tables plus the `clinical_copilot_worker`
+   guards — the 10 `mod_copilot_*` tables plus the `clinical_copilot_worker`
    `background_services` row), then `ModuleManagerListener` registers the
    module's own ACL section (`clinical_copilot` / `copilot_access`, via
    `AclExtended`).
@@ -91,7 +91,7 @@ Standard OpenEMR Module Manager flow — no manual SQL required:
    `background_services.active` flag on.
 3. **Disable:** deactivates the menu item and the worker row (`active = 0`)
    without dropping any data — re-enabling resumes cleanly.
-4. **Uninstall:** runs `sql/uninstall.sql` — drops exactly the 8
+4. **Uninstall:** runs `sql/uninstall.sql` — drops exactly the 10
    `mod_copilot_*` tables and deletes the `clinical_copilot_worker`
    `background_services` row. **This is destructive and irreversible for
    the append-only ledgers** (`mod_copilot_doc`, `mod_copilot_chat_turn`,
@@ -296,11 +296,14 @@ Everything else checked out clean:
   `ModuleManagerListener`'s own constant.
 - The menu URL in `src/Bootstrap.php` points at the real, existing
   `public/doc.php`.
-- `table.sql`'s 8 `#IfNotTable mod_copilot_*` blocks, `sql/uninstall.sql`'s
-  8 `DROP TABLE` statements, and `ModuleManagerListener::OWNED_TABLES` all
-  list the exact same 8 tables (`mod_copilot_doc`, `mod_copilot_cadence`,
-  `mod_copilot_chat_session`, `mod_copilot_chat_turn`, `mod_copilot_trace`,
-  `mod_copilot_qa`, `mod_copilot_trace_payload`, `mod_copilot_ui_event`).
+- `table.sql`'s `#IfNotTable mod_copilot_*` blocks, `sql/uninstall.sql`'s
+  `DROP TABLE` statements, and `ModuleManagerListener::OWNED_TABLES` all
+  list the exact same tables — 8 at the time of this U13 sweep
+  (`mod_copilot_doc`, `mod_copilot_cadence`, `mod_copilot_chat_session`,
+  `mod_copilot_chat_turn`, `mod_copilot_trace`, `mod_copilot_qa`,
+  `mod_copilot_trace_payload`, `mod_copilot_ui_event`); now 10, after Week 2
+  added `mod_copilot_extraction` + `mod_copilot_extracted_fact` to all four
+  schema mirrors.
 - `version.php` (0.1.0) and `info.txt` ("Clinical Co-Pilot v0.1.0") agree.
 - `moduleConfig.php` was removed: OpenEMR's Module Manager iframes that file
   directly as the "Configure" button's content when it exists

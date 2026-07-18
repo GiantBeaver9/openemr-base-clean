@@ -12,6 +12,7 @@ Last updated after the Week-2 security-audit fixes landed on `main`.
   - `Merge origin/main into clinical-copilot-week2-prd (kind-hypatia + Vertex removal + deploy fixes)`
   - `fix(clinical-copilot): close IDOR on extraction review and PHI-scrubber name leak`
 - Deploy fetches **branch `main`** (`Dockerfile.railway` → `railway-install-copilot.sh`), so anything to deploy must be on `main`.
+- **Currency note:** later Week-2 work (verify-gate default-on, critic stage, medication-list flow, eval gate) landed on `FINAL_REVIEW` and subsequent working branches — the deployed app reflects that work only once `main` is fast-forwarded to it, so verify against `main`'s actual tip before claiming the live URL is Week-2-current.
 
 ## What just shipped (security-audit follow-ups)
 
