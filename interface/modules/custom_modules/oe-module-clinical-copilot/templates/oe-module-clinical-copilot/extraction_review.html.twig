@@ -22,6 +22,18 @@
         .ccp-cite { font-size: 0.85em; }
         .ccp-source-frame { width: 100%; height: 100%; min-height: 520px; border: 1px solid #ced4da; border-radius: .25rem; background: #fff; }
         .ccp-accuracy { font-variant-numeric: tabular-nums; }
+        /* pdf.js citation overlay (progressive upgrade over the iframe viewer) */
+        .ccp-canvas-view { border: 1px solid #ced4da; border-radius: .25rem; background: #e9ecef; padding: 8px; }
+        .ccp-page-wrap { position: relative; margin: 0 auto 10px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+        .ccp-page-wrap:last-child { margin-bottom: 0; }
+        .ccp-page-wrap canvas { display: block; width: 100%; height: auto; }
+        .ccp-page-label { position: absolute; top: 2px; right: 4px; font-size: 11px; color: #6c757d; background: rgba(255,255,255,.75); padding: 0 4px; border-radius: 3px; }
+        .ccp-bbox { position: absolute; border: 2px solid #0d9488; background: rgba(13,148,136,.15); border-radius: 2px; cursor: pointer; }
+        .ccp-bbox-num { position: absolute; top: -2px; left: -2px; font-size: 11px; line-height: 1; padding: 1px 4px; color: #fff; background: #0d9488; border-radius: 2px 0 3px 0; }
+        .ccp-bbox.ccp-hot { border-color: #c17d1a; background: rgba(193,125,26,.35); }
+        .ccp-bbox.ccp-hot .ccp-bbox-num { background: #c17d1a; }
+        tr.ccp-row-hot > td { background-color: #f6ecd7; }
+        .ccp-cite-link { color: inherit; }
         @media (min-width: 992px) {
             .ccp-review-wrap { height: calc(100vh - 220px); }
             .ccp-pane { height: 100%; overflow-y: auto; }
@@ -110,7 +122,12 @@
         </thead>
         <tbody>
         {% for f in fields %}
-            <tr id="ccp-row-{{ f.id|attr }}" data-field-id="{{ f.id|attr }}">
+            {# data-page/data-bbox feed the pdf.js citation overlay: the VLM's
+               normalized 0-1000 page coordinates for the value, drawn on the
+               rendered page in the right pane and linked back to this row. #}
+            <tr id="ccp-row-{{ f.id|attr }}" data-field-id="{{ f.id|attr }}"
+                data-page="{{ (f.page is not null ? f.page : '')|attr }}"
+                data-bbox="{{ (f.bbox ? f.bbox|join(',') : '')|attr }}">
                 <td class="align-middle text-muted">{{ loop.index }}</td>
                 <td class="align-middle"><strong>{{ f.field_key|text }}</strong></td>
                 <td>
@@ -139,9 +156,23 @@
                 </td>
                 <td class="align-middle ccp-cite">
                     {% if f.page is not null %}
-                        <span title="{{ f.quote|attr }}">
-                            <i class="fa fa-file-text-o"></i> {{ "p."|xlt }}{{ f.page|text }}
-                        </span>
+                        {% if source_view_url %}
+                            {# Click-to-source. Default (no JS / no pdf.js): a
+                               #page=N deep link on the raw document URL,
+                               targeted at the named iframe so the native PDF
+                               viewer jumps to the cited page. When the canvas
+                               overlay is active, the script intercepts the
+                               click and scrolls/flashes the field's box. #}
+                            <a class="ccp-cite-link" href="{{ source_view_url|attr }}#page={{ f.page|attr }}"
+                               target="ccpSourceFrame" title="{{ f.quote|attr }}"
+                               data-cite-field-id="{{ f.id|attr }}">
+                                <i class="fa fa-file-text-o"></i> {{ "p."|xlt }}{{ f.page|text }}
+                            </a>
+                        {% else %}
+                            <span title="{{ f.quote|attr }}">
+                                <i class="fa fa-file-text-o"></i> {{ "p."|xlt }}{{ f.page|text }}
+                            </span>
+                        {% endif %}
                     {% else %}
                         <span class="text-muted">{{ "manual"|xlt }}</span>
                     {% endif %}
@@ -173,12 +204,23 @@
 
     </div>{# /left pane #}
 
-    {# RIGHT: the source document, prominent and scrollable (native PDF viewer),
-       always shown so the reviewer reads each value off the page. #}
+    {# RIGHT: the source document, prominent and scrollable, so the reviewer
+       reads each value off the page. Dual-mode: the iframe (native PDF viewer)
+       is the server-rendered default and the no-JS / non-PDF fallback; when
+       the rows carry bbox citations AND the vendored pdf.js loads AND the
+       document parses as a PDF, the script below swaps in the canvas view and
+       draws each citation's bounding box on the real rendered page. #}
     <div class="col-lg-5 ccp-pane ccp-pdf-pane">
-        <div class="font-weight-bold mb-1 small text-muted">{{ "Source document"|xlt }}</div>
+        <div class="d-flex align-items-baseline justify-content-between mb-1">
+            <div class="font-weight-bold small text-muted">{{ "Source document"|xlt }}</div>
+            <div class="ccp-model-said" id="ccp-view-toggle" hidden>
+                <a href="#" id="ccp-view-toggle-link"></a>
+            </div>
+        </div>
         {% if source_view_url %}
-            <iframe class="ccp-source-frame" src="{{ source_view_url|attr }}" title="{{ 'Source document'|attr }}"></iframe>
+            <div class="ccp-canvas-view" id="ccp-canvas-view" hidden></div>
+            <iframe class="ccp-source-frame" id="ccp-source-frame" name="ccpSourceFrame"
+                    src="{{ source_view_url|attr }}" title="{{ 'Source document'|attr }}"></iframe>
         {% else %}
             <div class="alert alert-secondary mb-0">{{ "The source document is not available for this extraction (it may not have been stored). Verify the values against your copy."|xlt }}</div>
         {% endif %}
@@ -223,6 +265,203 @@
             {% endif %}
         </div>
     </div>
+
+    {% if source_view_url %}
+    {# Bounding-box overlay on the REAL rendered page. An ES module so browsers
+       without module support skip it entirely; every failure path (vendored
+       pdf.js missing, source not a PDF, render error) simply returns, leaving
+       the native iframe viewer untouched. When it succeeds, the iframe is
+       swapped for pdf.js canvases and each row's normalized 0-1000 bbox is
+       drawn on its page as a percentage-positioned highlight, numbered to the
+       field rows. Hover a box or row to link them; click a box to jump to its
+       row; click a row's page citation to jump to (and flash) its box. #}
+    <script type="module">
+    (async function () {
+        'use strict';
+
+        var PDFJS_URL = {{ pdfjs_url|json_encode|raw }};
+        var PDFJS_WORKER_URL = {{ pdfjs_worker_url|json_encode|raw }};
+        var DOC_URL = {{ source_view_url|json_encode|raw }};
+        var MAX_RENDER_PAGES = 25;
+        var openViewerLabel = {{ "Open in PDF viewer"|xlt|json_encode|raw }};
+        var showCitationsLabel = {{ "Show citation boxes"|xlt|json_encode|raw }};
+
+        var host = document.getElementById('ccp-canvas-view');
+        var frame = document.getElementById('ccp-source-frame');
+        var toggleWrap = document.getElementById('ccp-view-toggle');
+        var toggleLink = document.getElementById('ccp-view-toggle-link');
+        if (!host || !frame || !toggleWrap || !toggleLink) {
+            return;
+        }
+
+        // Collect the citation geometry the rows carry (data-page/data-bbox).
+        var rows = Array.prototype.slice.call(document.querySelectorAll('tr[data-field-id]'));
+        var items = [];
+        var itemsByPage = {};
+        rows.forEach(function (tr) {
+            var page = parseInt(tr.getAttribute('data-page') || '', 10);
+            if (!(page >= 1)) {
+                return;
+            }
+            var bbox = null;
+            var raw = tr.getAttribute('data-bbox') || '';
+            if (raw !== '') {
+                var c = raw.split(',').map(Number);
+                if (c.length === 4 && !c.some(isNaN) && c[2] > c[0] && c[3] > c[1]) {
+                    bbox = c;
+                }
+            }
+            var firstCell = tr.querySelector('td');
+            var it = {
+                fieldId: tr.getAttribute('data-field-id'),
+                page: page,
+                bbox: bbox,
+                tr: tr,
+                boxEl: null,
+                num: firstCell ? firstCell.textContent.trim() : ''
+            };
+            items.push(it);
+            (itemsByPage[page] = itemsByPage[page] || []).push(it);
+        });
+        // No box geometry at all (e.g. manual entry, or a doc type whose
+        // extraction carries no bboxes): the iframe viewer is already right.
+        if (!items.some(function (it) { return it.bbox !== null; })) {
+            return;
+        }
+
+        var pdfjsLib;
+        var doc;
+        try {
+            pdfjsLib = await import(PDFJS_URL);
+            pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+            doc = await pdfjsLib.getDocument({ url: DOC_URL }).promise;
+        } catch (err) {
+            return; // not a PDF, or pdf.js unavailable: keep the iframe.
+        }
+
+        var canvasMode = false;
+        function setMode(canvas) {
+            canvasMode = canvas;
+            host.hidden = !canvas;
+            frame.hidden = canvas;
+            toggleLink.textContent = canvas ? openViewerLabel : showCitationsLabel;
+        }
+
+        function paint(it, on) {
+            if (it.boxEl) {
+                it.boxEl.classList.toggle('ccp-hot', on);
+            }
+            it.tr.classList.toggle('ccp-row-hot', on);
+        }
+
+        function flash(it) {
+            paint(it, true);
+            setTimeout(function () { paint(it, false); }, 1200);
+        }
+
+        function addBox(wrap, it) {
+            var b = it.bbox;
+            var box = document.createElement('div');
+            box.className = 'ccp-bbox';
+            // Normalized 0-1000 coords → percentages of the rendered page, so
+            // the box tracks the canvas at any width without pixel math.
+            box.style.left = (b[0] / 10) + '%';
+            box.style.top = (b[1] / 10) + '%';
+            box.style.width = (Math.max(8, b[2] - b[0]) / 10) + '%';
+            box.style.height = (Math.max(8, b[3] - b[1]) / 10) + '%';
+            var num = document.createElement('span');
+            num.className = 'ccp-bbox-num';
+            num.textContent = it.num;
+            box.appendChild(num);
+            wrap.appendChild(box);
+            it.boxEl = box;
+            box.addEventListener('mouseenter', function () { paint(it, true); });
+            box.addEventListener('mouseleave', function () { paint(it, false); });
+            box.addEventListener('click', function () {
+                it.tr.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                flash(it);
+            });
+            it.tr.addEventListener('mouseenter', function () { paint(it, true); });
+            it.tr.addEventListener('mouseleave', function () { paint(it, false); });
+        }
+
+        // Render each page to a canvas at the pane's width (measured off the
+        // still-visible iframe), then position that page's boxes over it.
+        var pageWraps = {};
+        var width = Math.max(280, (frame.clientWidth || host.clientWidth || 640) - 18);
+        var pageCount = Math.min(doc.numPages, MAX_RENDER_PAGES);
+        try {
+            for (var p = 1; p <= pageCount; p++) {
+                var page = await doc.getPage(p);
+                var scale = width / page.getViewport({ scale: 1 }).width;
+                var viewport = page.getViewport({ scale: scale });
+                var outputScale = window.devicePixelRatio || 1;
+                var wrap = document.createElement('div');
+                wrap.className = 'ccp-page-wrap';
+                wrap.style.width = Math.floor(viewport.width) + 'px';
+                var canvas = document.createElement('canvas');
+                canvas.width = Math.floor(viewport.width * outputScale);
+                canvas.height = Math.floor(viewport.height * outputScale);
+                wrap.appendChild(canvas);
+                var label = document.createElement('span');
+                label.className = 'ccp-page-label';
+                label.textContent = {{ "p."|xlt|json_encode|raw }} + p;
+                wrap.appendChild(label);
+                host.appendChild(wrap);
+                pageWraps[p] = wrap;
+                await page.render({
+                    canvasContext: canvas.getContext('2d'),
+                    viewport: viewport,
+                    transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null
+                }).promise;
+                (itemsByPage[p] || []).forEach(function (it) {
+                    if (it.bbox) {
+                        addBox(wrap, it);
+                    }
+                });
+                if (p === 1) {
+                    setMode(true); // first page is up: swap the iframe out.
+                    toggleWrap.hidden = false;
+                }
+            }
+        } catch (err) {
+            if (!canvasMode) {
+                return; // nothing usable rendered; the iframe never left.
+            }
+        }
+
+        // Click-to-source: in canvas mode the citation link scrolls to the
+        // cited page and flashes the field's box. Outside canvas mode (or for
+        // a page beyond the render cap) the anchor's native #page=N deep link
+        // drives the iframe viewer instead.
+        items.forEach(function (it) {
+            var link = document.querySelector('a.ccp-cite-link[data-cite-field-id="' + it.fieldId + '"]');
+            if (!link) {
+                return;
+            }
+            link.addEventListener('click', function (ev) {
+                if (!canvasMode) {
+                    return;
+                }
+                if (!pageWraps[it.page]) {
+                    setMode(false); // beyond the cap: hand off to the iframe.
+                    return;
+                }
+                ev.preventDefault();
+                pageWraps[it.page].scrollIntoView({ behavior: 'smooth', block: 'start' });
+                if (it.boxEl) {
+                    flash(it);
+                }
+            });
+        });
+
+        toggleLink.addEventListener('click', function (ev) {
+            ev.preventDefault();
+            setMode(!canvasMode);
+        });
+    })();
+    </script>
+    {% endif %}
 
     {% endif %}
 </div>

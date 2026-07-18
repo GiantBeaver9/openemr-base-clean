@@ -131,6 +131,13 @@ $vm['patient_url'] = isset($vm['pid']) ? $moduleBase . '/doc.php?pid=' . $vm['pi
 $vm['source_view_url'] = (isset($vm['source_document_id'], $vm['pid']) && $vm['source_document_id'])
     ? $webRoot . '/controller.php?document&retrieve&patient_id=' . $vm['pid'] . '&document_id=' . $vm['source_document_id'] . '&as_file=false'
     : '';
+// Vendored pdf.js (public/assets/, see public/assets/README.md) powering the
+// citation overlay: the review page renders the source PDF to canvases and
+// draws each field's bounding box on the real page. The template loads these
+// as ES modules; when they fail (old browser, non-PDF source), the native
+// iframe viewer below stays in place untouched.
+$vm['pdfjs_url'] = $moduleBase . '/assets/pdf.min.mjs';
+$vm['pdfjs_worker_url'] = $moduleBase . '/assets/pdf.worker.min.mjs';
 // Draw/collection date field default (labs). Prefilled to today; the reviewer
 // sets the real specimen date before locking.
 $vm['collection_date'] = date('Y-m-d');
