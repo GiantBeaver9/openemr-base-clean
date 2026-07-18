@@ -17,8 +17,10 @@ namespace OpenEMR\Modules\ClinicalCopilot\Chat\Llm;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
+use OpenEMR\Modules\ClinicalCopilot\Http\RetryingHttpRequester;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\LlmUnavailableException;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\GeminiApiSchemaTranslator;
+use Psr\Log\LoggerInterface;
 
 /**
  * T23 (docs/build-notes.md "dev/test Gemini API-key fast-path"): the chat
@@ -60,15 +62,21 @@ final class GeminiApiChatLlmClient implements ChatLlmClientInterface
 
     private readonly ClientInterface $httpClient;
 
+    private readonly RetryingHttpRequester $requester;
+
     public function __construct(
         private readonly string $apiKey,
         ?ClientInterface $httpClient = null,
+        ?LoggerInterface $logger = null,
     ) {
         if ($this->apiKey === '') {
             throw new \DomainException('GeminiApiChatLlmClient.apiKey must not be empty');
         }
 
         $this->httpClient = $httpClient ?? new Client(['verify' => true]);
+        // Bounded in-provider retry (transport / 429 / 5xx only) BELOW the
+        // FailoverChatLlmClient layer -- see RetryingHttpRequester for the policy.
+        $this->requester = new RetryingHttpRequester($this->httpClient, $logger);
     }
 
     public function converse(ChatLlmRequest $req): ChatLlmResponse
@@ -97,7 +105,7 @@ final class GeminiApiChatLlmClient implements ChatLlmClientInterface
         $startedAt = microtime(true);
 
         try {
-            $httpResponse = $this->httpClient->request('POST', $url, [
+            $httpResponse = $this->requester->post($url, [
                 'headers' => [
                     'Content-Type' => 'application/json',
                     // Key travels in a header, NOT the URL query string, so it
@@ -107,7 +115,7 @@ final class GeminiApiChatLlmClient implements ChatLlmClientInterface
                 ],
                 'json' => $body,
                 'timeout' => self::TIMEOUT_SECONDS,
-            ]);
+            ], 'gemini-api chat generateContent');
         } catch (GuzzleException $e) {
             // Shared with VertexChatLlmClient so both providers classify HTTP
             // errors (provider_error, body preserved) vs. transport failures

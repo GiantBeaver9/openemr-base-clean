@@ -47,19 +47,22 @@ final class ChatLlmClientFactory
 
     public static function create(): ChatLlmClientInterface
     {
+        $logger = new SystemLogger();
         $projectId = LlmEnv::gcpProjectId();
         if ($projectId !== '') {
-            return new VertexChatLlmClient($projectId, LlmEnv::gcpLocation());
+            return new VertexChatLlmClient($projectId, LlmEnv::gcpLocation(), null, $logger);
         }
 
         $apiKey = LlmEnv::geminiApiKey();
         if ($apiKey !== '') {
-            $primary = new GeminiApiChatLlmClient($apiKey);
+            $primary = new GeminiApiChatLlmClient($apiKey, null, $logger);
             $backupKey = LlmEnv::geminiApiKeyBackup();
             if ($backupKey !== '' && $backupKey !== $apiKey) {
                 // Optional second key: fall over to the backup on the primary's
-                // failure before degrading chat to the facts browser.
-                return new FailoverChatLlmClient([$primary, new GeminiApiChatLlmClient($backupKey)], new SystemLogger());
+                // failure before degrading chat to the facts browser. In-provider
+                // transient retries happen first, inside each client
+                // (RetryingHttpRequester).
+                return new FailoverChatLlmClient([$primary, new GeminiApiChatLlmClient($backupKey, null, $logger)], $logger);
             }
 
             return $primary;

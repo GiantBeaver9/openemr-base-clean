@@ -52,13 +52,15 @@ final class LlmClientFactory
             return new UnavailableLlmClient();
         }
 
-        $primary = new GeminiApiLlmClient($apiKey);
+        $logger = new SystemLogger();
+        $primary = new GeminiApiLlmClient($apiKey, null, $logger);
         $backupKey = LlmEnv::geminiApiKeyBackup();
         if ($backupKey !== '' && $backupKey !== $apiKey) {
             // Optional second key: on the primary's failure (bad key, quota,
             // transient provider/transport error) fall over to the backup before
-            // degrading to facts-only.
-            return new FailoverLlmClient([$primary, new GeminiApiLlmClient($backupKey)], new SystemLogger());
+            // degrading to facts-only. In-provider transient retries happen
+            // first, inside each client (RetryingHttpRequester).
+            return new FailoverLlmClient([$primary, new GeminiApiLlmClient($backupKey, null, $logger)], $logger);
         }
 
         return $primary;

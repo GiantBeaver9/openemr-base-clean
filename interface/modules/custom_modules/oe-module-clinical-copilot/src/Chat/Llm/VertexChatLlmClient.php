@@ -19,7 +19,9 @@ use Google\Auth\FetchAuthTokenInterface;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
+use OpenEMR\Modules\ClinicalCopilot\Http\RetryingHttpRequester;
 use OpenEMR\Modules\ClinicalCopilot\Reduce\LlmUnavailableException;
+use Psr\Log\LoggerInterface;
 
 /**
  * T18 (ARCHITECTURE.md "LLM platform"): the SAME Vertex REST contract
@@ -63,10 +65,13 @@ final class VertexChatLlmClient implements ChatLlmClientInterface
 
     private readonly ClientInterface $httpClient;
 
+    private readonly RetryingHttpRequester $requester;
+
     public function __construct(
         private readonly string $projectId,
         private readonly string $location,
         ?ClientInterface $httpClient = null,
+        ?LoggerInterface $logger = null,
     ) {
         if ($this->projectId === '') {
             throw new \DomainException('VertexChatLlmClient.projectId must not be empty');
@@ -77,6 +82,9 @@ final class VertexChatLlmClient implements ChatLlmClientInterface
         }
 
         $this->httpClient = $httpClient ?? new Client(['verify' => true]);
+        // Bounded in-provider retry (transport / 429 / 5xx only) BELOW the
+        // FailoverChatLlmClient layer -- see RetryingHttpRequester for the policy.
+        $this->requester = new RetryingHttpRequester($this->httpClient, $logger);
     }
 
     public function converse(ChatLlmRequest $req): ChatLlmResponse
@@ -88,14 +96,14 @@ final class VertexChatLlmClient implements ChatLlmClientInterface
         $startedAt = microtime(true);
 
         try {
-            $httpResponse = $this->httpClient->request('POST', $url, [
+            $httpResponse = $this->requester->post($url, [
                 'headers' => [
                     'Authorization' => 'Bearer ' . $accessToken,
                     'Content-Type' => 'application/json',
                 ],
                 'json' => $body,
                 'timeout' => self::TIMEOUT_SECONDS,
-            ]);
+            ], 'vertex chat generateContent');
         } catch (GuzzleException $e) {
             // A 4xx/5xx from Vertex (rejected tool schema, missing IAM role,
             // quota exhaustion) arrives WITH a response and is a provider

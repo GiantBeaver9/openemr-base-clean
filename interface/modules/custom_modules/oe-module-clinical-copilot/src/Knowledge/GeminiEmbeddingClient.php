@@ -17,6 +17,7 @@ namespace OpenEMR\Modules\ClinicalCopilot\Knowledge;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
+use OpenEMR\Modules\ClinicalCopilot\Http\RetryingHttpRequester;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -44,6 +45,8 @@ final class GeminiEmbeddingClient implements EmbeddingClientInterface
 
     private readonly ClientInterface $httpClient;
 
+    private readonly RetryingHttpRequester $requester;
+
     public function __construct(
         private readonly string $apiKey,
         private readonly string $model = 'gemini-embedding-001',
@@ -56,6 +59,9 @@ final class GeminiEmbeddingClient implements EmbeddingClientInterface
         }
         // Certificate verification ON, same posture as the generation clients.
         $this->httpClient = $httpClient ?? new Client(['verify' => true]);
+        // Bounded retry (transport / 429 / 5xx only) BEFORE the degrade-to-null
+        // catch below -- see RetryingHttpRequester for the shared policy.
+        $this->requester = new RetryingHttpRequester($this->httpClient, $logger);
     }
 
     public function isAvailable(): bool
@@ -99,14 +105,14 @@ final class GeminiEmbeddingClient implements EmbeddingClientInterface
         );
 
         try {
-            $response = $this->httpClient->request('POST', $this->endpointUrl(), [
+            $response = $this->requester->post($this->endpointUrl(), [
                 'headers' => [
                     'Content-Type' => 'application/json',
                     'x-goog-api-key' => $this->apiKey,
                 ],
                 'json' => ['requests' => $requests],
                 'timeout' => self::TIMEOUT_SECONDS,
-            ]);
+            ], 'gemini-api batchEmbedContents');
         } catch (GuzzleException $e) {
             $this->logger?->warning('Clinical Co-Pilot: embedding request failed', ['exception' => $e]);
 

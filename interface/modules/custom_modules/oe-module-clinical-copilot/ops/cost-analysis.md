@@ -318,7 +318,11 @@ high-value event, unlike per-view synthesis.
 | Eval gate (50 cases, CI) | deterministic, no I/O to models/DB | < ~2 s total |
 
 The vision call is the only step whose latency depends on an external provider;
-it carries the Week 1 LLM client's timeout + retry behavior. The ingestion SLO
+it carries the Week 1 LLM client's 90 s per-attempt timeout plus the shared
+retry policy (`src/Http/RetryingHttpRequester`): up to 2 retries with short
+exponential backoff (200 ms, then 400 ms), taken only on transport errors,
+HTTP 429, and 5xx — other 4xx rejections fail immediately, and provider/key
+failover still sits above the in-provider retries. The ingestion SLO
 and its alert (extraction failure rate, retrieval latency) are tracked as an
 M5 observability item; the numbers above are the targets those SLOs assert
 against once `ops/load/` is extended to the Week 2 endpoints.

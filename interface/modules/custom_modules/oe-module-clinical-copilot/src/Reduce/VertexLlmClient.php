@@ -19,6 +19,8 @@ use Google\Auth\FetchAuthTokenInterface;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
+use OpenEMR\Modules\ClinicalCopilot\Http\RetryingHttpRequester;
+use Psr\Log\LoggerInterface;
 
 /**
  * T18 (docs/clinical-copilot-tradeoffs.md, ARCHITECTURE.md "LLM platform"):
@@ -70,10 +72,13 @@ final class VertexLlmClient implements LlmClientInterface
 
     private readonly ClientInterface $httpClient;
 
+    private readonly RetryingHttpRequester $requester;
+
     public function __construct(
         private readonly string $projectId,
         private readonly string $location,
         ?ClientInterface $httpClient = null,
+        ?LoggerInterface $logger = null,
     ) {
         if ($this->projectId === '') {
             throw new \DomainException('VertexLlmClient.projectId must not be empty');
@@ -89,6 +94,9 @@ final class VertexLlmClient implements LlmClientInterface
         // here is the module's own default, not something an injected
         // client is required to set.
         $this->httpClient = $httpClient ?? new Client(['verify' => true]);
+        // Bounded in-provider retry (transport / 429 / 5xx only) BELOW the
+        // FailoverLlmClient layer -- see RetryingHttpRequester for the policy.
+        $this->requester = new RetryingHttpRequester($this->httpClient, $logger);
     }
 
     public function generateStructured(PromptRequest $req): LlmResponse
@@ -100,14 +108,14 @@ final class VertexLlmClient implements LlmClientInterface
         $startedAt = microtime(true);
 
         try {
-            $httpResponse = $this->httpClient->request('POST', $url, [
+            $httpResponse = $this->requester->post($url, [
                 'headers' => [
                     'Authorization' => 'Bearer ' . $accessToken,
                     'Content-Type' => 'application/json',
                 ],
                 'json' => $body,
                 'timeout' => self::TIMEOUT_SECONDS,
-            ]);
+            ], 'vertex generateContent');
         } catch (GuzzleException $e) {
             // A 4xx/5xx from Vertex (rejected schema, missing IAM role, quota
             // exhaustion) arrives here WITH a response and must be classified
