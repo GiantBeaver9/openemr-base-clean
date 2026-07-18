@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Shared eval-gate engine: runs the 50-case boolean-rubric golden set and
+ * Shared eval-gate engine: runs the 54-case boolean-rubric golden set and
  * returns structured results. Used by BOTH the CLI runner (ops/eval/run-evals.php,
  * which keeps the exit-code gate for CI) and the observability dashboard's
  * "Run evals" button (public/dashboard.php), so the two can never diverge.
@@ -75,7 +75,8 @@ final class EvalGate
      *     regressions: list<string>,
      *     failures: list<string>,
      *     passed: bool,
-     *     case_count: int
+     *     case_count: int,
+     *     cases: list<array{id: string, category: string, rubrics: array<string, bool>}>
      * }
      */
     public function run(): array
@@ -91,18 +92,25 @@ final class EvalGate
         $tally = [];
         /** @var list<string> $failures */
         $failures = [];
+        // Per-case rubric outcomes: ids, categories, and booleans ONLY — never
+        // case inputs or model output — so the report stays PHI-free even when
+        // real documents ever join the (currently fully synthetic) golden set.
+        /** @var list<array{id: string, category: string, rubrics: array<string, bool>}> $caseResults */
+        $caseResults = [];
 
         foreach ($cases as $case) {
             if (!is_array($case)) {
                 continue;
             }
             $id = (string)($case['id'] ?? '?');
+            $category = (string)($case['category'] ?? '');
             try {
                 $results = $this->evaluateCase($case, $retriever);
             } catch (\Throwable $e) {
-                $results = array_fill_keys($this->rubricsForCategory((string)($case['category'] ?? '')), false);
+                $results = array_fill_keys($this->rubricsForCategory($category), false);
                 $failures[] = "{$id} :: threw " . $e::class;
             }
+            $caseResults[] = ['id' => $id, 'category' => $category, 'rubrics' => $results];
             foreach ($results as $rubric => $passed) {
                 $tally[$rubric] ??= ['pass' => 0, 'total' => 0];
                 $tally[$rubric]['total']++;
@@ -141,6 +149,7 @@ final class EvalGate
             'failures' => $failures,
             'passed' => $regressions === [],
             'case_count' => count($cases),
+            'cases' => $caseResults,
         ];
     }
 

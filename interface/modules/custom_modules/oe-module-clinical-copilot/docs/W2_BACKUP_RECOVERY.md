@@ -307,7 +307,7 @@ RTO ≤ 1 h with no unbounded cells.
 The Week-2 eval gate needs **no backup at all**: it is fully reproducible from
 source control, by design.
 
-- The complete golden set (`ops/eval/cases.json`, 50 cases), the recorded
+- The complete golden set (`ops/eval/cases.json`, 54 cases), the recorded
   pass-rate baseline (`ops/eval/baseline.json`), the CLI runner
   (`ops/eval/run-evals.php`) and the shared engine (`ops/eval/EvalGate.php`)
   are all committed files inside the module.

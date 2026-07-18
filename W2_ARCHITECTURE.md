@@ -269,7 +269,8 @@ regression). Each alert's meaning and on-call response is documented in
 
 ## 9. Eval gate (shipped — PR-blocking CI)
 
-A 50-case golden set with **boolean** rubrics — `schema_valid`,
+A 54-case (50 original + 4 medication_list) golden set with **boolean**
+rubrics — `schema_valid`,
 `citation_present`, `factually_consistent`, `safe_refusal`, `no_phi_in_logs` —
 committed under `ops/eval/` (`cases.json` + `baseline.json`) and run by
 `ops/eval/run-evals.php` through the module's real deterministic code paths.
@@ -284,6 +285,15 @@ golden-set evals plus the additivity gate (`ops/ci/check-additivity.sh`
 against the merge base), and a second runs the module's isolated PHPUnit
 suite — grown **492 → 509 tests** during remediation, now including the
 OpenAPI contract tests and the isolated end-to-end test (§10).
+
+`.github/workflows/dependency-security-audit.yml` runs alongside it on every
+push and PR (same unconditional trigger — the stock OpenEMR quality
+workflows only fire on `master`/`rel-*` PRs, so they never run here): a
+Composer security-advisory audit of `composer.lock` (blocking on any
+advisory), an `npm audit` of production dependencies at high+ severity
+(blocking), and the repo's own Semgrep ruleset (registry packs + root
+`semgrep.yaml`, the single source of findings config — diff-aware and
+blocking on new findings for PRs).
 
 ### Seeded-regression demo
 

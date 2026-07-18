@@ -26,7 +26,7 @@ php ops/demo/run-demo.php
    an incident trace population (via `../load/bench/dashboard-demo.php`), with
    four alerts firing under the incident. Rendered dashboards land in
    `../load/bench/results/dashboard-{healthy,incident}.html`.
-5. **Eval gate** — the 50-case boolean-rubric HARD GATE (`../eval/run-evals.php`).
+5. **Eval gate** — the 54-case boolean-rubric HARD GATE (`../eval/run-evals.php`).
 6. **Cost** — measured per-call cost tied to the real prompt sizes
    (`../load/bench/measure-tokens.php`).
 

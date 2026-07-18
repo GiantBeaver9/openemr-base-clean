@@ -298,7 +298,7 @@ exists yet (synthetic data only). Every figure is a named, adjustable lever.
   retrieval + a Cohere-style reranker are optional upgrades; when enabled, cost
   is one embedding call per query (~hundreds of tokens) plus a rerank call over a
   handful of candidates — negligible next to the vision call.
-- **Eval gate.** **$0 at CI time** — the 50-case gate feeds recorded model
+- **Eval gate.** **$0 at CI time** — the 54-case gate feeds recorded model
   outputs through the real deterministic code; no live model or DB is called.
 - **Chart write-back, review, and the guideline surface.** Deterministic PHP and
   local retrieval — no LLM cost.
@@ -315,7 +315,7 @@ high-value event, unlike per-view synthesis.
 | Guideline retrieval (sparse) | in-process TF-IDF over the corpus | p95 < ~50 ms |
 | Verify/edit (per field) | one indexed UPDATE | p95 < ~150 ms |
 | Lock → chart commit | a few indexed INSERTs + accuracy calc | p95 < ~300 ms |
-| Eval gate (50 cases, CI) | deterministic, no I/O to models/DB | < ~2 s total |
+| Eval gate (54 cases, CI) | deterministic, no I/O to models/DB | < ~2 s total |
 
 The vision call is the only step whose latency depends on an external provider;
 it carries the Week 1 LLM client's 90 s per-attempt timeout plus the shared
@@ -346,7 +346,7 @@ where the real console figure belongs. **Do not read the estimate as a bill.**
 
 **Provably $0 (deterministic, no live model):**
 
-- Every eval-gate run — the 50-case golden set (`ops/eval/run-evals.php`)
+- Every eval-gate run — the 54-case golden set (`ops/eval/run-evals.php`)
   feeds recorded model outputs through the real code; no API call, in local
   runs or in `w2-eval-gate.yml` CI.
 - Every load/baseline capture — `ops/load/RESULTS.md` Part A

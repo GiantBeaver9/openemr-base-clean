@@ -220,7 +220,7 @@ vendor/bin/phpstan analyse -c interface/modules/custom_modules/oe-module-clinica
 Full detail on both, including the exact base-ref resolution order and a
 sample GitHub Actions step: `ops/README.md`.
 
-The **50-case eval gate** (`ops/ci/run-eval-gate.sh`, deterministic, no live
+The **54-case eval gate** (`ops/ci/run-eval-gate.sh`, deterministic, no live
 model/DB) is the third gate. Wire it into CI the same way, and/or install it as
 a **PR-blocking local git hook**:
 

@@ -73,7 +73,7 @@ if ($isPost) {
         $configStore->manualReset($authUser);
         EventAuditLogger::getInstance()->newEvent('security', $authUser, $authProvider, 1, 'Clinical Co-Pilot: circuit breaker manually reset');
     } elseif ($action === 'run_evals') {
-        // The 50-case boolean-rubric gate, on demand from the UI — the SAME
+        // The 54-case boolean-rubric gate, on demand from the UI — the SAME
         // deterministic engine the CLI/CI gate uses (ops/eval/run-evals.php),
         // with no live model or DB. EvalGate lives under ops/eval/ (not src/),
         // so require it explicitly; its src/ collaborators autoload normally.

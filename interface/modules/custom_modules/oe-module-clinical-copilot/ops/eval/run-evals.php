@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Week 2 eval gate runner — 50-case golden set, boolean rubrics, exit-code gate.
+ * Week 2 eval gate runner — 54-case golden set, boolean rubrics, exit-code gate.
  *
  * @package   OpenEMR\Modules\ClinicalCopilot
  * @link      https://www.open-emr.org
@@ -13,7 +13,8 @@
 declare(strict_types=1);
 
 /*
- * The spec's HARD GATE: a 50-case golden set with BOOLEAN rubrics (not 1-10
+ * The spec's HARD GATE: a 54-case (50 original + 4 medication_list) golden
+ * set with BOOLEAN rubrics (not 1-10
  * ratings) that blocks regressions before they reach the demo. The evaluation
  * engine lives in EvalGate (ops/eval/EvalGate.php) so the SAME logic backs both
  * this CLI gate AND the dashboard's "Run evals" button — this file is just the
@@ -32,6 +33,10 @@ declare(strict_types=1);
  * Usage:
  *   php ops/eval/run-evals.php                 # gate: compare to baseline, exit 0/1
  *   php ops/eval/run-evals.php --update-baseline  # rewrite baseline.json from this run
+ *   php ops/eval/run-evals.php --report <path> # gate, plus write a per-case JSON report
+ *                                              # (ids/categories/rubric booleans only —
+ *                                              # never case content; the committed copy
+ *                                              # lives at ops/eval/results-latest.json)
  *   php ops/eval/run-evals.php --record        # gate, then persist the outcome for the
  *                                              # eval-regression alert (needs the OpenEMR DB;
  *                                              # CLINICAL_COPILOT_EVAL_RECORD=1 does the same)
@@ -66,11 +71,26 @@ $evalDir = __DIR__;
 $updateBaseline = in_array('--update-baseline', $argv, true);
 $recordRequested = in_array('--record', $argv, true) || getenv('CLINICAL_COPILOT_EVAL_RECORD') === '1';
 
+$reportPath = null;
+$reportFlagIdx = array_search('--report', $argv, true);
+if ($reportFlagIdx !== false) {
+    $reportPath = $argv[$reportFlagIdx + 1] ?? null;
+    if (!is_string($reportPath) || $reportPath === '' || str_starts_with($reportPath, '--')) {
+        fwrite(STDERR, "eval: --report requires a file path argument.\n");
+        exit(2);
+    }
+}
+
 try {
     $result = (new EvalGate($evalDir))->run();
 } catch (\Throwable $e) {
     fwrite(STDERR, 'eval: ' . $e->getMessage() . "\n");
     exit(2);
+}
+
+if ($reportPath !== null) {
+    writeReport($reportPath, $result);
+    echo "eval: per-case report written to {$reportPath}\n";
 }
 
 $rates = $result['rates'];
@@ -127,6 +147,34 @@ if (!$result['passed']) {
 
 echo "\neval: GATE PASSED — all rubrics at or above baseline.\n";
 exit(0);
+
+/**
+ * Write the per-case JSON report: case ids, categories, and rubric booleans
+ * ONLY — never case inputs or model output, so the file stays PHI-free by
+ * construction. Deterministic (no timestamp), so the committed copy
+ * (ops/eval/results-latest.json) diffs cleanly between runs.
+ *
+ * @param array{
+ *     rates: array<string, float>,
+ *     tally: array<string, array{pass: int, total: int}>,
+ *     regressions: list<string>,
+ *     passed: bool,
+ *     case_count: int,
+ *     cases: list<array{id: string, category: string, rubrics: array<string, bool>}>
+ * } $result
+ */
+function writeReport(string $path, array $result): void
+{
+    $report = [
+        'case_count' => $result['case_count'],
+        'passed' => $result['passed'],
+        'rates' => $result['rates'],
+        'tally' => $result['tally'],
+        'regressions' => $result['regressions'],
+        'cases' => $result['cases'],
+    ];
+    file_put_contents($path, json_encode($report, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR) . "\n");
+}
 
 /**
  * @param array<string, float> $rates
