@@ -263,7 +263,17 @@ The procedure that proves the gate actually blocks a regression:
 3. Revert the flip on the same PR → the workflow returns **green**; close the
    PR without merging.
 
-<!-- SEEDED-REGRESSION-DEMO-RUNS: placeholder — red and green workflow run URLs will be inserted here after the live demo. -->
+This demo was executed live on 2026-07-18 via
+[PR #4](https://github.com/GiantBeaver9/openemr-base-clean/pull/4)
+(`w2-eval-gate-seeded-regression-demo`, closed unmerged):
+
+- **Red** — seeded commit `d240c56` flipped `ext-lab-01/02` expectations,
+  dropping `schema_valid` to 93.3% (below the 95% tolerance line):
+  [workflow run 29638359997](https://github.com/GiantBeaver9/openemr-base-clean/actions/runs/29638359997)
+  → conclusion `failure`.
+- **Green** — revert commit `3e0e432` restored the expectations:
+  [workflow run 29638453561](https://github.com/GiantBeaver9/openemr-base-clean/actions/runs/29638453561)
+  → conclusion `success`.
 
 ---
 
