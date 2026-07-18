@@ -67,7 +67,7 @@ final class DocViewModel
      *        this presenter stays DB-free.
      * @return array{
      *     narrative: list<array{text: string, claim_type: string, flags: list<string>, emphasis: ?string, citations: list<array{label: string, refs: list<array{pk: int, url: ?string}>}>}>,
-     *     fact_groups: list<array{key: string, label: string, total: int, shown: int, consolidated: bool, summary: array<string, mixed>|null, facts: list<array<string, mixed>>}>
+     *     fact_groups: list<array{key: string, label: string, total: int, shown: int, consolidated: bool, summary: array<string, mixed>|null, sparkline: array<string, mixed>|null, facts: list<array<string, mixed>>}>
      * }
      */
     public static function build(SynthesisReadResult $result, string $webRoot, array $analyteByFactId = []): array
@@ -287,7 +287,7 @@ final class DocViewModel
      * isolated. Blood pressure has no derived-fact math (VitalsTrend's
      * documented v1 scope limit) and is shown as-is with no change column.
      *
-     * @param list<array{key: string, label: string, total: int, shown: int, consolidated: bool, summary: array<string, mixed>|null, facts: list<array<string, mixed>>}> $factGroups {@see self::buildFactGroups()}'s output for the SAME `$facts`
+     * @param list<array{key: string, label: string, total: int, shown: int, consolidated: bool, summary: array<string, mixed>|null, sparkline: array<string, mixed>|null, facts: list<array<string, mixed>>}> $factGroups {@see self::buildFactGroups()}'s output for the SAME `$facts`
      * @param list<Fact> $facts current extraction's full fact set
      * @param array<string, array{key: string, label: string}> $analyteByFactId
      * @return list<array<string, mixed>> most-recent-first, each row carrying a 'group_label' (the analyte/metric name)
@@ -459,7 +459,7 @@ final class DocViewModel
      *
      * @param list<Fact> $facts
      * @param array<string, array{key: string, label: string}> $analyteByFactId
-     * @return list<array{key: string, label: string, total: int, shown: int, consolidated: bool, summary: array<string, mixed>|null, facts: list<array<string, mixed>>}>
+     * @return list<array{key: string, label: string, total: int, shown: int, consolidated: bool, summary: array<string, mixed>|null, sparkline: array<string, mixed>|null, facts: list<array<string, mixed>>}>
      */
     private static function buildFactGroups(array $facts, string $webRoot, array $analyteByFactId): array
     {
@@ -545,9 +545,14 @@ final class DocViewModel
      * and caps it to the most recent {@see self::MAX_FACTS_PER_GROUP}, carrying
      * the pre-cap total so the panel can disclose what was trimmed.
      *
+     * A consolidated (trend-lab) group additionally carries the inline-SVG
+     * sparkline coordinates for the SAME rows the table shows (the capped
+     * `$shown`, so the chart never plots draws the table hides) -- null when
+     * nothing in the group is plottable ({@see TrendSparkline::fromRows()}).
+     *
      * @param list<array<string, mixed>> $rows
      * @param array{count: ?string, count_citations: list<array{label: string, url: ?string}>, span: ?string, span_citations: list<array{label: string, url: ?string}>}|null $summary
-     * @return array{key: string, label: string, total: int, shown: int, consolidated: bool, summary: array<string, mixed>|null, facts: list<array<string, mixed>>}
+     * @return array{key: string, label: string, total: int, shown: int, consolidated: bool, summary: array<string, mixed>|null, sparkline: array<string, mixed>|null, facts: list<array<string, mixed>>}
      */
     private static function group(string $key, string $label, array $rows, bool $consolidated = false, ?array $summary = null): array
     {
@@ -563,6 +568,7 @@ final class DocViewModel
             'shown' => count($shown),
             'consolidated' => $consolidated,
             'summary' => $summary,
+            'sparkline' => $consolidated ? TrendSparkline::fromRows($shown) : null,
             'facts' => $shown,
         ];
     }

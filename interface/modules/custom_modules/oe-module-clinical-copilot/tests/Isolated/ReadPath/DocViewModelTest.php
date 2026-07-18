@@ -246,6 +246,37 @@ final class DocViewModelTest extends TestCase
         self::assertSame('+0.30 %', $group['summary']['span']);
     }
 
+    public function testConsolidatedLabGroupCarriesSparklineAndOtherGroupsDoNot(): void
+    {
+        // The per-analyte sparkline is computed over the same consolidated
+        // draw rows the table shows; non-consolidated groups (vitals, meds,
+        // in-flight, ...) never carry one.
+        $early = self::trendPointOn('2026-01-01', 1, 6.9);
+        $late = self::trendPointOn('2026-06-01', 2, 7.2);
+        $map = [
+            $early->factId => ['key' => 'a1c', 'label' => 'A1c'],
+            $late->factId => ['key' => 'a1c', 'label' => 'A1c'],
+        ];
+
+        $facts = [$early, $late, self::weightFact('2026-06-01', 9, 175.0)];
+        $viewModel = DocViewModel::build(self::servedResult($facts, null), 'https://example.test', $map);
+
+        $labGroup = self::group($viewModel, 'lab:a1c');
+        self::assertNotNull($labGroup);
+        self::assertNotNull($labGroup['sparkline']);
+        self::assertCount(2, $labGroup['sparkline']['points'], 'one sparkline point per draw');
+        self::assertSame(
+            '2026-06-01: 7.2 %',
+            $labGroup['sparkline']['points'][1]['label'],
+            'points are chronological -- the newest draw plots last even though the table lists it first'
+        );
+        self::assertTrue($labGroup['sparkline']['points'][1]['latest']);
+
+        $vitalsGroup = self::group($viewModel, 'vitals_trend');
+        self::assertNotNull($vitalsGroup);
+        self::assertNull($vitalsGroup['sparkline'], 'only consolidated lab groups render the widget');
+    }
+
     public function testWithoutAnAnalyteMapLabsStayGroupedByCapability(): void
     {
         // Back-compat: no map => the trend labs remain a single control_proxy
@@ -526,8 +557,8 @@ final class DocViewModelTest extends TestCase
     }
 
     /**
-     * @param array{narrative: mixed, fact_groups: list<array{key: string, label: string, total: int, shown: int, consolidated: bool, summary: array<string, mixed>|null, facts: list<array<string, mixed>>}>} $viewModel
-     * @return array{key: string, label: string, total: int, shown: int, consolidated: bool, summary: array<string, mixed>|null, facts: list<array<string, mixed>>}|null
+     * @param array{narrative: mixed, fact_groups: list<array{key: string, label: string, total: int, shown: int, consolidated: bool, summary: array<string, mixed>|null, sparkline: array<string, mixed>|null, facts: list<array<string, mixed>>}>} $viewModel
+     * @return array{key: string, label: string, total: int, shown: int, consolidated: bool, summary: array<string, mixed>|null, sparkline: array<string, mixed>|null, facts: list<array<string, mixed>>}|null
      */
     private static function group(array $viewModel, string $key): ?array
     {

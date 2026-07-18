@@ -105,6 +105,34 @@
     </tr></thead>
 {% endmacro %}
 
+{# Inline-SVG trend sparkline for one consolidated analyte group -- no chart
+   library, no JS. All plot math (time-proportional x, inverted y, padding,
+   gap segments) is precomputed by TrendSparkline::fromRows(); this macro only
+   emits markup from those ready-made coordinate strings. Each point carries a
+   native <title> tooltip ("2026-06-01: 7.2 %"); the most recent draw gets a
+   larger, theme-primary dot. Colours ride on currentColor / Bootstrap theme
+   variables (see the .ccp-sparkline CSS) so the widget follows the active
+   theme. `spark` is the {width, height, segments, points} shape documented on
+   TrendSparkline::fromRows(). #}
+{% macro trend_sparkline(spark, label) %}
+    <div class="ccp-sparkline-wrap mt-2">
+        <svg class="ccp-sparkline" viewBox="0 0 {{ spark.width|attr }} {{ spark.height|attr }}"
+             width="{{ spark.width|attr }}" height="{{ spark.height|attr }}"
+             role="img" aria-label="{{ label|attr }} {{ "trend"|xla }}" focusable="false">
+            {%- for seg in spark.segments -%}
+                <polyline class="ccp-sparkline-line" points="{{ seg|attr }}"
+                          fill="none" stroke="currentColor" stroke-width="1.5"
+                          stroke-linejoin="round" stroke-linecap="round"></polyline>
+            {%- endfor -%}
+            {%- for p in spark.points -%}
+                <circle class="ccp-sparkline-point{% if p.latest %} ccp-sparkline-point-latest{% endif %}"
+                        cx="{{ p.x|attr }}" cy="{{ p.y|attr }}" r="{{ p.latest ? '3' : '2' }}"
+                        fill="currentColor"><title>{{ p.label|text }}</title></circle>
+            {%- endfor -%}
+        </svg>
+    </div>
+{% endmacro %}
+
 {# Shared by consolidated_fact_row and variance_fact_row: a conflict-flagged
    fact stays table-warning, an excluded fact (only reachable if a caller
    ever feeds one in -- both current callers filter FactKind::Exclusion
@@ -269,6 +297,22 @@
         }
         .ccp-zebra-table tbody tr:not(.table-warning):not(.table-light):nth-child(even) {
             background-color: #f2f3f5;
+        }
+        /* Per-analyte trend sparkline (inline SVG, no chart library). The
+           line and dots inherit the muted secondary colour via currentColor;
+           the most recent draw uses the Bootstrap theme primary variable, so
+           a re-themed install recolours the widget without touching this
+           file. overflow visible keeps edge dots from being clipped by the
+           viewBox border. */
+        .ccp-sparkline-wrap {
+            line-height: 0;
+        }
+        .ccp-sparkline {
+            color: var(--secondary, #6c757d);
+            overflow: visible;
+        }
+        .ccp-sparkline-point-latest {
+            fill: var(--primary, #007bff);
         }
         @media (max-width: 991.98px) {
             .ccp-facts-column {
@@ -694,6 +738,9 @@
                                                 <div class="text-muted small mt-2">
                                                     {{ "Showing"|xlt }} {{ g.shown|text }} {{ "of"|xlt }} {{ g.total|text }} — {{ "most recent first"|xlt }}
                                                 </div>
+                                            {% endif %}
+                                            {% if g.consolidated and g.sparkline %}
+                                                {{ _self.trend_sparkline(g.sparkline, g.label) }}
                                             {% endif %}
                                             {% if g.consolidated and g.summary %}
                                                 <div class="text-muted small mt-2">
