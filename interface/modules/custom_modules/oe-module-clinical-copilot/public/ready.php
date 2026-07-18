@@ -41,7 +41,12 @@ $result = (new ReadyCheck())->check();
 // ALREADY nothing but status enums (ReadyCheck's own contract) -- the HTTP
 // status code additionally reflects genuine failure (503) vs. a degraded-
 // but-serving state (200, I6: "degraded-but-serving states are reported
-// honestly").
-http_response_code($result['status'] === 'error' ? 503 : 200);
+// honestly"). Literal http_response_code() calls per branch keep the codes
+// visible to the OpenAPI contract tests (tests/Isolated/Api/).
+if ($result['status'] === 'error') {
+    http_response_code(503);
+} else {
+    http_response_code(200);
+}
 header('Content-Type: application/json');
 echo json_encode($result, JSON_UNESCAPED_SLASHES);

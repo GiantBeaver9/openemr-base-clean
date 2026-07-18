@@ -46,10 +46,7 @@ final class OpenApiContractTest extends TestCase
         'dashboard.php',       // observability dashboard (ARCHITECTURE.md §3.3)
         'doc.php',             // Week 1 pre-visit synthesis page (U8)
         'event.php',           // over-reliance indicator ping (ARCHITECTURE.md §2.5)
-        'health.php',          // unauthenticated liveness probe (ARCHITECTURE.md §3.4)
         'intake_form_pdf.php', // static blank-form PDF download feeding intake_upload.php
-        'knowledge_upload.php',// maintenance-only RAG corpus loader
-        'ready.php',           // unauthenticated readiness probe (ARCHITECTURE.md §3.4)
         'status.php',          // Week 1 chat/synthesis polling fallback (ARCHITECTURE.md §1.3)
     ];
 

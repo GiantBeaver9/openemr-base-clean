@@ -20,6 +20,8 @@ tags:
   - name: review
   - name: evidence
   - name: agent
+  - name: knowledge
+  - name: ops
 paths:
   /interface/modules/custom_modules/oe-module-clinical-copilot/public/agent.php:
     get:
@@ -267,8 +269,157 @@ paths:
       responses:
         "200": { description: "Topic-grouped, cited guideline evidence (HTML)." }
         "403": { description: "ACL denied." }
+  /interface/modules/custom_modules/oe-module-clinical-copilot/public/knowledge_upload.php:
+    get:
+      tags: [knowledge]
+      summary: Knowledge-base (RAG corpus) upload form
+      description: >
+        Maintenance surface for curating the guideline knowledge base.
+        Admin-only: requires the host admin section (admin/super or
+        admin/users) AND the module's clinical_copilot/copilot_access ACL —
+        stricter than the patients/med gate the ingestion endpoints use. The
+        only write is to the SEPARATE knowledge Postgres, never an
+        OpenEMR/PHI table.
+      responses:
+        "200": { description: "The knowledge upload form (HTML)." }
+        "403": { description: "ACL denied (not an admin, or module ACL missing)." }
+        "500": { description: "Rendering failed after an internal error (generic message, no detail)." }
+    post:
+      tags: [knowledge]
+      summary: Preview a document's chunking, or commit the reviewed chunks to the knowledge base
+      description: >
+        Two-step deferred-commit flow: action=preview extracts text from the
+        uploaded file (or the pasted text), chunks it with the requested
+        size/overlap (clamped to a safe band), and renders a review screen
+        without persisting anything; action=commit (submitted from that
+        review screen, chunks carried through as JSON) writes the chunks to
+        the knowledge store and audit-logs the ingestion. Documents over
+        12 MB are rejected as unsupported.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [action, csrf_token_form]
+              properties:
+                action: { type: string, enum: [preview, commit] }
+                csrf_token_form: { type: string }
+                source:
+                  type: string
+                  description: "action=preview (required): source label — the citation and the re-upload key."
+                title: { type: string, description: "action=preview: optional document title." }
+                section: { type: string, description: "action=preview: optional section label applied to chunks." }
+                url:
+                  type: string
+                  description: "action=preview: optional source URL stored with the document metadata."
+                tags:
+                  type: string
+                  description: "action=preview: comma-separated base tags applied to every chunk."
+                chunk_size:
+                  type: integer
+                  description: "action=preview: target chunk size in characters; blank/invalid falls back to the default, out-of-band values are clamped."
+                overlap:
+                  type: integer
+                  description: "action=preview: chunk overlap in characters (clamped with chunk_size)."
+                document:
+                  type: string
+                  format: binary
+                  description: >
+                    action=preview: the document to ingest (text, markdown,
+                    HTML, PDF, or image; max 12 MB). Omit to use pasted_text
+                    instead.
+                pasted_text:
+                  type: string
+                  description: "action=preview: pasted text to ingest when no file is uploaded."
+                chunks_json:
+                  type: string
+                  description: "action=commit: the reviewed chunks, carried through the review screen as JSON."
+                replace_existing:
+                  type: string
+                  enum: ["0", "1"]
+                  description: "action=commit: replace previously ingested chunks with the same source label (default 1)."
+      responses:
+        "200": { description: "action=preview: the chunk review screen (nothing persisted). action=commit: the ingestion result. Also the form re-rendered with a validation error." }
+        "403": { description: "CSRF or ACL denied." }
+        "413": { description: "Upload exceeded the server's post body limit." }
+        "500": { description: "Rendering failed after an internal error (generic message, no detail)." }
+  /interface/modules/custom_modules/oe-module-clinical-copilot/public/health.php:
+    get:
+      tags: [ops]
+      summary: Unauthenticated liveness probe (checks no dependencies)
+      description: >
+        Deliberately UNAUTHENTICATED and dependency-free (ARCHITECTURE.md
+        §3.4): a DB outage must not fail liveness and get the app pointlessly
+        restarted by an orchestrator. Returns only module identity + version;
+        always 200 while the PHP process can serve at all.
+      responses:
+        "200":
+          description: "Liveness: module enabled + version. No dependency state."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, module, version]
+                properties:
+                  status: { type: string, enum: [ok] }
+                  module: { type: string, example: oe-module-clinical-copilot }
+                  version: { type: string }
+  /interface/modules/custom_modules/oe-module-clinical-copilot/public/ready.php:
+    get:
+      tags: [ops]
+      summary: Unauthenticated, redacted, rate-limited readiness probe
+      description: >
+        Genuine dependency checks (ARCHITECTURE.md §3.4) — DB round-trip,
+        module tables writable, LLM reachability, worker heartbeat, circuit
+        breaker, plus the Week-2 dependencies document_store / knowledge /
+        reranker. Unauthenticated but REDACTED: every field is a status enum
+        only (no latencies, no config values, no PHI), and requests are
+        per-IP rate-limited. Degraded-but-serving states (LLM down, stale
+        heartbeat) report status=degraded with HTTP 200; only hard-dependency
+        failure (DB / tables) is status=error with HTTP 503.
+      responses:
+        "200":
+          description: "Ready (status=ok) or degraded-but-serving (status=degraded)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyStatus"
+        "429":
+          description: "Per-IP rate limit exceeded."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, enum: [rate_limited] }
+        "503":
+          description: "Hard dependencies (DB / module tables) failed: status=error, ready=false."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyStatus"
 components:
   schemas:
+    ReadyStatus:
+      type: object
+      description: >
+        The redacted readiness snapshot (status enums only — ReadyCheck's own
+        contract). `ready` is true whenever the hard dependencies (DB +
+        writable tables) are sound, independent of the LLM.
+      required: [ready, status, db, tables_writable, llm, worker_heartbeat, breaker, document_store, knowledge, reranker]
+      properties:
+        ready: { type: boolean }
+        status: { type: string, enum: [ok, degraded, error] }
+        db: { type: string }
+        tables_writable: { type: string }
+        llm: { type: string }
+        worker_heartbeat: { type: string }
+        breaker: { type: string, enum: [open, closed, unknown] }
+        document_store: { type: string }
+        knowledge: { type: string }
+        reranker: { type: string, enum: [in-process] }
     SourceCitation:
       type: object
       description: The Week 2 machine-readable citation contract (per extracted fact / evidence snippet).
