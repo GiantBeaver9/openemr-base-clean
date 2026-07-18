@@ -146,3 +146,4 @@ openemr-cmd phpstan                              # static analysis (alias: pst)
 - `docs/decisions.md` — decisions & tradeoffs log.
 - `docs/knowledge-base.md`, `docs/configuration.md`, `docs/ingestion-failure-modes.md`
 - `docs/SECURITY.md`, `docs/REPORT.md` — code-review + audit output.
+- `docs/W2_BACKUP_RECOVERY.md` — backup & recovery plan (RPO/RTO per artifact).

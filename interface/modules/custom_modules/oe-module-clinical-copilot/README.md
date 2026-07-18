@@ -39,6 +39,8 @@ choices: the lab identity guard, deferred-save intake, the separate knowledge
 Postgres, the `gemini-embedding-001 @ 1536` embedding choice, local pgvector
 bring-up, and more. New calls append here as they are made.
 
+[`docs/W2_BACKUP_RECOVERY.md`](docs/W2_BACKUP_RECOVERY.md) is the backup & recovery plan — what to back up and where it lives, backup/restore procedures, and per-artifact RPO/RTO targets.
+
 ## LLM credential / config surface
 
 [`docs/configuration.md`](docs/configuration.md) is the complete list of
