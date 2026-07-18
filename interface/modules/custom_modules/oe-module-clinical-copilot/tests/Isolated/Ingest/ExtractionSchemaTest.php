@@ -159,6 +159,66 @@ final class ExtractionSchemaTest extends TestCase
         self::assertNotNull($field->citation->bbox);
     }
 
+    public function testIntakeWithoutAnyCitationValidatesAndParsesClean(): void
+    {
+        // Failure mode guarded (the original intake breakage): page/quote are
+        // OPTIONAL on intake — they were once required, which over-constrained
+        // the model (forced to cite every blank demographic field) and made
+        // extraction fail into a blank manual form. A citation-free payload
+        // must validate with zero errors AND parse into citation-free fields;
+        // nothing downstream may treat the missing citation as an error.
+        $payload = ['fields' => [
+            ['field_key' => 'first_name', 'value' => 'Ada'],
+            ['field_key' => 'middle_name', 'value' => null],
+        ]];
+
+        self::assertSame([], ExtractionSchema::validate(DocType::IntakeForm, $payload));
+
+        $parsed = ExtractionSchema::parse(DocType::IntakeForm, $payload, 'upload');
+        self::assertCount(2, $parsed->fields);
+        self::assertSame('Ada', $parsed->fields[0]->value);
+        self::assertNull($parsed->fields[0]->citation, 'no volunteered citation => none, silently');
+        self::assertNull($parsed->fields[1]->citation);
+    }
+
+    public function testIntakeWithVolunteeredPageAndQuoteCapturesThemIntoTheCitation(): void
+    {
+        // Failure mode guarded: the model volunteers the optional page/quote
+        // (per the softened prompt) but parse() drops them, so the review
+        // screen loses the "p.N + quote" verification aid the spec asks for.
+        // Intake has no bbox overlay, so the citation must tolerate bbox null.
+        $payload = ['fields' => [
+            ['field_key' => 'first_name', 'value' => 'Ada', 'page' => 2, 'quote' => 'Patient: Ada Lovelace'],
+        ]];
+
+        self::assertSame([], ExtractionSchema::validate(DocType::IntakeForm, $payload));
+
+        $field = ExtractionSchema::parse(DocType::IntakeForm, $payload, 'upload')->fields[0];
+        self::assertNotNull($field->citation);
+        self::assertSame(2, $field->citation->pageOrSection);
+        self::assertSame('Patient: Ada Lovelace', $field->citation->quoteOrValue);
+        self::assertNull($field->citation->bbox, 'intake has no overlay, so no bbox — and that must be fine');
+    }
+
+    public function testIntakePageWithoutAQuoteStillLandsInACitationViaTheValue(): void
+    {
+        // Failure mode guarded: a valid volunteered page arriving WITHOUT a
+        // quote used to be dropped on the floor (SourceCitation requires a
+        // non-empty quote_or_value, and there was no quote to satisfy it). The
+        // spec's citation shape is quote OR value, so the field's own value
+        // stands in and the page survives into the review screen's deep link.
+        $payload = ['fields' => [
+            ['field_key' => 'last_name', 'value' => 'Lovelace', 'page' => 3],
+        ]];
+
+        self::assertSame([], ExtractionSchema::validate(DocType::IntakeForm, $payload));
+
+        $field = ExtractionSchema::parse(DocType::IntakeForm, $payload, 'upload')->fields[0];
+        self::assertNotNull($field->citation);
+        self::assertSame(3, $field->citation->pageOrSection);
+        self::assertSame('Lovelace', $field->citation->quoteOrValue, 'the value stands in as quote_or_value');
+    }
+
     public function testParseCarriesThePrintedCollectionDateThrough(): void
     {
         // Failure mode guarded (W5): the schema + prompt request the printed

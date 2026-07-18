@@ -34,7 +34,7 @@ use OpenEMR\Modules\ClinicalCopilot\Reduce\PromptRequest;
  */
 final class ExtractionClient
 {
-    private const PROMPT_VERSION = 'ingest-extract-v1';
+    private const PROMPT_VERSION = 'ingest-extract-v2';
 
     private const SYSTEM_INSTRUCTIONS_BASE =
         "You are a careful clinical document transcriber. Read the attached document and "
@@ -49,6 +49,15 @@ final class ExtractionClient
     private const SYSTEM_INSTRUCTIONS_CITATION =
         "For every field you MUST return the 1-based page it appears on, the exact source "
         . "text as `quote`, and a bounding box `[x0,y0,x1,y1]` normalized to 0-1000. ";
+
+    // Intake citations are OPTIONAL (mirrors intake_form.schema.json, where page/quote sit
+    // outside the required array): softly invite a citation when the source text is clearly
+    // identifiable, never demand one — a MUST-cite clause here is exactly what broke intake
+    // extraction before. Deliberately no bbox: intake has no overlay to feed.
+    private const SYSTEM_INSTRUCTIONS_CITATION_OPTIONAL =
+        "When the source text for a field is clearly identifiable, also include the 1-based "
+        . "page it appears on and a short verbatim quote of that text; omit page and quote "
+        . "entirely otherwise — never guess or invent a citation. ";
 
     private const SYSTEM_INSTRUCTIONS_TAIL =
         "Return output strictly matching the provided JSON schema and nothing else.";
@@ -101,15 +110,15 @@ final class ExtractionClient
 
     /**
      * The transcriber system prompt, tailored per doc type. Labs require a
-     * per-field citation (they drive the click-to-source overlay); intake does
-     * not, so its prompt omits the citation clause — matching the intake schema,
-     * which no longer requires page/quote either.
+     * per-field citation (they drive the click-to-source overlay); intake gets
+     * the OPTIONAL clause — cite when clearly identifiable, omit otherwise —
+     * matching the intake schema, where page/quote are optional properties.
      */
     private function systemInstructions(DocType $docType): string
     {
         $citation = match ($docType) {
             DocType::LabPdf => self::SYSTEM_INSTRUCTIONS_CITATION,
-            DocType::IntakeForm => '',
+            DocType::IntakeForm => self::SYSTEM_INSTRUCTIONS_CITATION_OPTIONAL,
         };
 
         return self::SYSTEM_INSTRUCTIONS_BASE . $citation . self::SYSTEM_INSTRUCTIONS_TAIL;

@@ -74,8 +74,16 @@ final class ExtractionClientTest extends TestCase
         self::assertNull($outcome->extraction->fields[0]->citation);
     }
 
-    public function testCitationClauseIsSentForLabsButNotIntake(): void
+    public function testCitationIsMandatoryInTheLabPromptButOptionalInTheIntakePrompt(): void
     {
+        // Failure mode guarded: the prompts drifting back to the shared
+        // lab-first contract. Labs keep the MUST-cite clause (page/quote/bbox
+        // feed the click-to-source overlay). Intake gets the SOFT clause —
+        // invite a page + short verbatim quote when clearly identifiable, omit
+        // otherwise — and must never regain "MUST" citation language or a bbox
+        // demand: commanding a citation for every (often blank) demographic
+        // field is exactly what over-constrained the model and degraded intake
+        // to "extraction unavailable".
         $json = json_encode(['fields' => []], JSON_THROW_ON_ERROR);
         $stub = StubLlmClient::up(new LlmResponse($json, 'gemini-2.5-pro', 1, 1, 1));
         $client = new ExtractionClient($stub, 'gemini-2.5-pro');
@@ -86,8 +94,40 @@ final class ExtractionClientTest extends TestCase
         $labPrompt = $stub->calls()[0]->systemInstructions;
         $intakePrompt = $stub->calls()[1]->systemInstructions;
 
+        self::assertStringContainsString('MUST', $labPrompt);
         self::assertStringContainsString('bounding box', $labPrompt);
-        self::assertStringNotContainsString('bounding box', $intakePrompt);
+
+        self::assertStringContainsString('page', $intakePrompt, 'intake softly invites the optional citation');
+        self::assertStringContainsString('quote', $intakePrompt);
+        self::assertStringContainsString('omit', $intakePrompt, 'omitting the citation must be explicitly allowed');
+        self::assertStringNotContainsString('MUST', $intakePrompt, 'never demand citations from intake again');
+        self::assertStringNotContainsString('bounding box', $intakePrompt, 'intake has no overlay, so no bbox ask');
+    }
+
+    public function testIntakeExtractionWithVolunteeredCitationsCapturesThem(): void
+    {
+        // The flip side of the citation-free regression test above: when the
+        // model DOES volunteer the optional page/quote, they must survive
+        // end-to-end into the parsed field's citation (the review screen shows
+        // them as a p.N deep link + quote tooltip) — while the uncited sibling
+        // field in the same payload stays valid with a null citation.
+        $json = json_encode(['fields' => [
+            ['field_key' => 'first_name', 'value' => 'Jane', 'page' => 1, 'quote' => 'Name: Jane Doe'],
+            ['field_key' => 'last_name', 'value' => 'Doe'],
+        ]], JSON_THROW_ON_ERROR);
+
+        $client = new ExtractionClient(
+            StubLlmClient::up(new LlmResponse($json, 'gemini-2.5-pro', 300, 20, 120)),
+            'gemini-2.5-pro',
+        );
+
+        $outcome = $client->extract(DocType::IntakeForm, 'PDFBYTES', 'application/pdf', 'upload');
+
+        $cited = $outcome->extraction->fields[0];
+        self::assertNotNull($cited->citation);
+        self::assertSame(1, $cited->citation->pageOrSection);
+        self::assertSame('Name: Jane Doe', $cited->citation->quoteOrValue);
+        self::assertNull($outcome->extraction->fields[1]->citation, 'uncited fields stay valid alongside cited ones');
     }
 
     public function testModelOutputThatFailsTheSchemaIsRejected(): void

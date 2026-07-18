@@ -53,7 +53,13 @@ final class AttachAndExtract
      * human confirms on the review screen; only then does {@see commitReviewedIntake}
      * write anything.
      *
-     * @return array{fields: array<string, string|null>, vision_used: bool, schema_rejected: bool}
+     * `citations` carries the OPTIONAL per-field source citations (page/quote)
+     * the model volunteered — the review screen shows them beside the prefilled
+     * fields as advisory verification aids. The map is sparse and often empty:
+     * intake citations are never required, so an extraction with none is still
+     * fully successful.
+     *
+     * @return array{fields: array<string, string|null>, citations: array<string, array{page: int|null, quote: string}>, vision_used: bool, schema_rejected: bool}
      */
     public function previewIntake(string $bytes, string $mimeType, string $correlationId): array
     {
@@ -70,6 +76,7 @@ final class AttachAndExtract
 
         return [
             'fields' => $this->demographicsFrom($outcome),
+            'citations' => $this->citationsFrom($outcome),
             'vision_used' => $visionUsed,
             'schema_rejected' => $schemaRejected,
         ];
@@ -291,6 +298,29 @@ final class AttachAndExtract
         if ($documentId !== null) {
             $this->store->setSourceDocument($extractionId, $documentId);
         }
+    }
+
+    /**
+     * The sparse map of OPTIONAL intake citations: only fields where the model
+     * volunteered a page and/or quote appear at all — fields without one are
+     * simply absent, never an error (blank extractions have no citations, and
+     * that is the normal case, not a degraded one).
+     *
+     * @return array<string, array{page: int|null, quote: string}> field_key => citation
+     */
+    private function citationsFrom(ExtractionOutcome $outcome): array
+    {
+        $out = [];
+        foreach ($outcome->extraction->fields as $field) {
+            if ($field->citation !== null) {
+                $out[$field->fieldKey] = [
+                    'page' => $field->citation->pageOrSection,
+                    'quote' => $field->citation->quoteOrValue,
+                ];
+            }
+        }
+
+        return $out;
     }
 
     /**

@@ -93,11 +93,12 @@ final class ExtractionSchema
 
             // A citation (page + quote) is required only for a LAB field that has
             // a value: labs drive the click-to-source bbox overlay, so every real
-            // result must cite its page. INTAKE does NOT use citations at all (the
-            // review screen prefills a form beside the PDF — no overlay), so
-            // requiring them there only risks rejecting the whole extraction and
-            // blanking the form when the model returns a value without a clean
-            // page/quote. And a field with no value has nothing to cite either.
+            // result must cite its page. INTAKE citations are OPTIONAL — welcome
+            // when the model can supply them (the review form shows a page link
+            // and quote beside the field), but requiring them rejects the whole
+            // extraction and blanks the form whenever the model returns a value
+            // without a clean page/quote — the original intake breakage. And a
+            // field with no value has nothing to cite either.
             $hasValue = array_key_exists('value', $field) && is_string($field['value']) && $field['value'] !== '';
             if ($hasValue && $docType === DocType::LabPdf) {
                 if (!isset($field['page']) || !is_int($field['page']) || $field['page'] < 1) {
@@ -138,9 +139,11 @@ final class ExtractionSchema
 
     /**
      * Builds the typed {@see ParsedExtraction} from an already-validated
-     * payload. Every field gets a {@see SourceCitation} pointing back at the
-     * source document. On the human path, `value` starts equal to the model's
-     * value (unedited); the review UI applies {@see ExtractedField::withHumanValue()}.
+     * payload. Every lab field gets a {@see SourceCitation} pointing back at
+     * the source document; intake fields get one only when the model included
+     * the optional page/quote (a missing intake citation is normal, never an
+     * error). On the human path, `value` starts equal to the model's value
+     * (unedited); the review UI applies {@see ExtractedField::withHumanValue()}.
      *
      * @param array<string, mixed> $payload
      */
@@ -175,8 +178,17 @@ final class ExtractionSchema
                 $bbox = new BoundingBox((int)$c[0], (int)$c[1], (int)$c[2], (int)$c[3]);
             }
 
-            $citation = $quote !== ''
-                ? new SourceCitation(SourceType::Document, $sourceId, $page, $key, $quote, $bbox)
+            // Citation building is best-effort by design: labs always have one
+            // (validate() enforces page+quote per valued result); intake gets
+            // one only when the model volunteered it — its schema lists
+            // page/quote as OPTIONAL, and their absence must never fail the
+            // extraction. When a (validated) page arrives without a quote, the
+            // field's own value stands in as quote_or_value — the spec's
+            // citation shape explicitly allows either — so a usable page is
+            // never dropped. No page and no quote simply means no citation.
+            $citationText = $quote !== '' ? $quote : ($vlmValue ?? '');
+            $citation = ($quote !== '' || ($page !== null && $citationText !== ''))
+                ? new SourceCitation(SourceType::Document, $sourceId, $page, $key, $citationText, $bbox)
                 : null;
 
             $fields[] = new ExtractedField(

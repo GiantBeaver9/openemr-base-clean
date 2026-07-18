@@ -75,9 +75,13 @@ if ($action === 'upload') {
     // model failure (the form just renders blank for manual entry).
     $visionUsed = false;
     $schemaRejected = false;
+    $citations = [];
     try {
         $preview = IngestController::createDefault()->previewIntake($upload->bytes, $upload->mimeType);
         $values = is_array($preview['fields'] ?? null) ? $preview['fields'] : [];
+        // Optional per-field source citations (page/quote) the model volunteered.
+        // Often empty — a citation-free intake extraction is fully successful.
+        $citations = is_array($preview['citations'] ?? null) ? $preview['citations'] : [];
         $visionUsed = (bool)($preview['vision_used'] ?? false);
         $schemaRejected = (bool)($preview['schema_rejected'] ?? false);
     } catch (\Throwable $e) {
@@ -113,7 +117,7 @@ if ($action === 'upload') {
     // the round-trip is cheap and the oversize edge is already handled (the 413
     // guard above). The priority for this module is extraction matching and
     // human correction, not large-document scale — so the simpler path wins.
-    renderReview($postUrl, $values, base64_encode($upload->bytes), $upload->mimeType, $upload->filename, [], $note);
+    renderReview($postUrl, $values, base64_encode($upload->bytes), $upload->mimeType, $upload->filename, [], $note, $citations);
     exit;
 }
 
@@ -198,10 +202,16 @@ function renderIntakeForm(string $moduleBase, string $webRoot, string $error = '
  * Render the two-pane review screen: prefilled new-patient fields (left), the
  * source PDF (right), all sections expanded.
  *
- * @param array<string, string> $values   field_key => current value
+ * $citations is the sparse map of OPTIONAL model-volunteered source citations
+ * (page/quote per field_key). Purely advisory display: a field without one
+ * renders exactly as before, and the save flow never reads them (they are not
+ * round-tripped through the error re-render — the values are what matter).
+ *
+ * @param array<string, string> $values    field_key => current value
  * @param list<string>          $errors
+ * @param array<string, mixed>  $citations field_key => {page, quote}
  */
-function renderReview(string $postUrl, array $values, string $pdfB64, string $pdfMime, string $pdfName, array $errors, string $note = ''): void
+function renderReview(string $postUrl, array $values, string $pdfB64, string $pdfMime, string $pdfName, array $errors, string $note = '', array $citations = []): void
 {
     // Build the grouped field view model from the single source of truth that
     // also drives the printable form (so the screen and the PDF always match).
@@ -210,12 +220,19 @@ function renderReview(string $postUrl, array $values, string $pdfB64, string $pd
         $fields = [];
         foreach ($section['fields'] as $field) {
             $key = $field['key'];
+            $cite = is_array($citations[$key] ?? null) ? $citations[$key] : [];
+            $citePage = $cite['page'] ?? null;
+            $citeQuote = $cite['quote'] ?? null;
             $fields[] = [
                 'key' => $key,
                 'label' => $field['label'],
                 'is_demographic' => $field['patient_data'] !== null,
                 'lines' => $field['lines'],
                 'value' => $values[$key] ?? '',
+                // Optional citation, display-only: null/'' when the model did
+                // not volunteer one (the normal case — never an error).
+                'cite_page' => is_int($citePage) && $citePage >= 1 ? $citePage : null,
+                'cite_quote' => is_string($citeQuote) ? $citeQuote : '',
             ];
         }
         $groups[] = ['section' => $section['section'], 'fields' => $fields];

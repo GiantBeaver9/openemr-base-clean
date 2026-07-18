@@ -69,9 +69,11 @@ final class IngestController
 
     /**
      * Deferred-save intake: extract the fields but create/persist NOTHING, for
-     * the human-reviewed create-at-save flow.
+     * the human-reviewed create-at-save flow. `citations` is the sparse map of
+     * OPTIONAL page/quote citations the model volunteered (often empty — never
+     * required for intake).
      *
-     * @return array{fields: array<string, string|null>, vision_used: bool, schema_rejected: bool}
+     * @return array{fields: array<string, string|null>, citations: array<string, array{page: int|null, quote: string}>, vision_used: bool, schema_rejected: bool}
      */
     public function previewIntake(string $bytes, string $mimeType): array
     {
