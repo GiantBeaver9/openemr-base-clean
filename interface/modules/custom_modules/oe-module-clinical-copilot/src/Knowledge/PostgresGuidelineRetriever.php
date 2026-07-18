@@ -28,9 +28,11 @@ use OpenEMR\Modules\ClinicalCopilot\Rag\RetrieverInterface;
  * remains the fallback the factory wires when the store is not configured).
  *
  * Two guarantees hold the PHI/knowledge segregation:
- *   - The query is scrubbed to non-PHI keywords by {@see KnowledgeQueryScrubber}
- *     before it leaves this process, so nothing patient-identifying reaches the
- *     non-BAA store.
+ *   - The query AND the tags are scrubbed to non-PHI terms by
+ *     {@see KnowledgeQueryScrubber} before they leave this process (free text
+ *     via the clinical-keyword allowlist, tags via the closed tag vocabulary in
+ *     {@see KnowledgeQueryScrubber::scrubTags()}), so nothing
+ *     patient-identifying reaches the non-BAA store.
  *   - Only a parameterized SELECT is issued (via the read-only
  *     {@see KnowledgeQueryRunner}); this class can neither write to the store nor
  *     reach OpenEMR's PHI database.
@@ -244,13 +246,18 @@ final class PostgresGuidelineRetriever implements RetrieverInterface
     }
 
     /**
+     * Tags cross the segregation boundary as SQL bind params, so they go
+     * through the scrubber's tag allowlist — not bare normalization — before
+     * leaving the process (closes SECURITY.md finding #12: the `tags`
+     * parameter previously bypassed {@see KnowledgeQueryScrubber} entirely).
+     *
      * @param list<string> $tags
      *
      * @return list<string>
      */
     private function safeTags(array $tags): array
     {
-        return TagNormalizer::normalizeList($tags);
+        return $this->scrubber->scrubTags($tags);
     }
 
     /**

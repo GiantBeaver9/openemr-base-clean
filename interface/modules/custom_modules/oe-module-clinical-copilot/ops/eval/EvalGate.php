@@ -228,13 +228,18 @@ final class EvalGate
         $client = new ExtractionClient(new EvalStubLlm($raw), 'eval-stub');
 
         $refused = false;
+        // A never-refused case has no logged refusal artifact to leak PHI from;
+        // it fails safe_refusal instead. When the refusal DOES happen, the
+        // logged artifact is measured — not assumed — to be PHI-free.
+        $phiFree = true;
         try {
             $client->extract($docType, 'BYTES', 'application/pdf', 'eval');
-        } catch (SchemaValidationException) {
+        } catch (SchemaValidationException $e) {
             $refused = true;
+            $phiFree = $this->refusalLogIsPhiFree($e, $raw);
         }
 
-        return ['safe_refusal' => $refused, 'no_phi_in_logs' => true];
+        return ['safe_refusal' => $refused, 'no_phi_in_logs' => $phiFree];
     }
 
     /**
@@ -270,6 +275,67 @@ final class EvalGate
             'factually_consistent' => $consistent,
             'citation_present' => $hits === [] ? true : $allCited,
         ];
+    }
+
+    /**
+     * The refusal-path counterpart of {@see self::loggedArtifactIsPhiFree()}:
+     * builds the artifact the observability layer would log for a REJECTED
+     * extraction (doc type + the structured, field-level schema errors that
+     * {@see SchemaValidationException} carries for the trace) and asserts no
+     * content from the refused model output leaked into it — neither a
+     * `fields[*].value` string from a decodable payload nor, for undecodable
+     * output, the raw text itself. Deterministic and offline, same as the rest
+     * of the gate.
+     */
+    private function refusalLogIsPhiFree(SchemaValidationException $e, string $raw): bool
+    {
+        $logged = json_encode([
+            'doc_type' => $e->docType->value,
+            'error_count' => count($e->errors),
+            'errors' => $e->errors,
+        ], JSON_THROW_ON_ERROR);
+
+        foreach ($this->refusedOutputValues($raw) as $value) {
+            if (str_contains($logged, $value)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * The content-bearing strings of a refused model output: every string
+     * `fields[*].value` when the output decodes as JSON, else the raw text
+     * itself (a non-JSON model reply could carry anything, so none of it may
+     * be echoed into a log).
+     *
+     * @return list<string>
+     */
+    private function refusedOutputValues(string $raw): array
+    {
+        if (trim($raw) === '') {
+            return [];
+        }
+
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            return [$raw];
+        }
+
+        $values = [];
+        $fields = $decoded['fields'] ?? null;
+        foreach (is_array($fields) ? $fields : [] as $field) {
+            if (!is_array($field)) {
+                continue;
+            }
+            $value = $field['value'] ?? null;
+            if (is_string($value) && $value !== '') {
+                $values[] = $value;
+            }
+        }
+
+        return $values;
     }
 
     /**

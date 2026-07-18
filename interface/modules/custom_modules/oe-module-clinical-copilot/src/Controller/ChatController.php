@@ -811,21 +811,18 @@ final class ChatController
 
     /**
      * Heightened-visibility log of one chat interaction (ARCHITECTURE.md §3
-     * observability): the provider's question, the assistant's answer, the
-     * deterministic confidence, and the turn's cost/latency/verification
-     * metadata -- one structured PSR-3 record per turn for oversight and
-     * dashboards, keyed by correlation id back to the turn ledger and traces.
+     * observability): the deterministic confidence and the turn's
+     * cost/latency/verification metadata -- one structured PSR-3 record per
+     * turn for oversight and dashboards, keyed by correlation id back to the
+     * turn ledger and traces.
      *
-     * PHI NOTE -- ACKNOWLEDGED AND INTENTIONAL FOR THE DEMO, not an oversight:
-     * `provider_message` and `assistant_answer` carry patient clinical content,
-     * and logging them in full is a deliberate choice here for demo visibility
-     * on synthetic-only data (OPEN-1). This is intentionally left un-hardened at
-     * this stage -- no gating/scrubbing is warranted for a synthetic demo and
-     * adding it now would be wasted effort. The one thing worth recording is
-     * that the tradeoff is understood: before any real-PHI deployment, route
-     * these two fields to a PHI-eligible sink or drop them (the confidence +
-     * metadata stay useful, and the content already persists on the
-     * access-controlled `mod_copilot_chat_turn` row).
+     * PHI NOTE: metadata ONLY -- this record upholds the module's
+     * `no_phi_in_logs` guarantee (SECURITY.md finding #14, closed). The raw
+     * provider message and assistant answer are never logged here; only their
+     * lengths and claim counts are, which keeps the record operationally
+     * useful (truncation, verbosity, cost anomalies) without patient clinical
+     * content. The full text already persists on the access-controlled
+     * `mod_copilot_chat_turn` row, which is the PHI-eligible place to read it.
      */
     private function logChatTurn(ChatSession $session, string $message, ChatAnswer $answer, ChatTurnConfidence $confidence, string $correlationId): void
     {
@@ -841,12 +838,14 @@ final class ChatController
             'frozen' => $answer->frozen,
             'degraded_reason' => $answer->degradedReason,
             'tool_calls' => array_map(static fn ($entry): string => $entry->request->name, $answer->toolCallLog),
+            'tool_call_count' => count($answer->toolCallLog),
             'tokens_in' => $answer->usage->tokensIn,
             'tokens_out' => $answer->usage->tokensOut,
             'latency_ms' => $answer->usage->latencyMs,
             'model' => $answer->usage->modelVersion,
-            'provider_message' => $message,
-            'assistant_answer' => self::answerText($answer),
+            'provider_message_chars' => mb_strlen($message),
+            'assistant_answer_chars' => mb_strlen(self::answerText($answer)),
+            'claim_count' => $answer->claims === null ? 0 : count($answer->claims),
         ]);
     }
 

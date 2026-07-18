@@ -15,6 +15,7 @@ declare(strict_types=1);
 namespace OpenEMR\Modules\ClinicalCopilot\Tests\Isolated\Knowledge;
 
 use OpenEMR\Modules\ClinicalCopilot\Knowledge\KnowledgeQueryScrubber;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -93,6 +94,67 @@ final class KnowledgeQueryScrubberTest extends TestCase
         self::assertContains('ldl', $tokens);
         self::assertContains('lipids', $tokens);
         self::assertSame('a1c', $tokens[0], 'tags lead the query');
+    }
+
+    public function testUnrecognizedTagsAreDroppedNotForwarded(): void
+    {
+        // The finding this closes (SECURITY.md #12): tags used to bypass the
+        // scrubber entirely on the retrieval path, so a caller-supplied tag
+        // could carry PHI ("jane", an MRN) straight to the non-BAA store.
+        // Tags now go through the same allowlist discipline as free text.
+        $out = $this->scrubber->scrub('', ['jane', 'MRN12345678', 'a1c']);
+
+        self::assertSame('a1c', $out);
+        self::assertSame(['a1c'], $this->scrubber->scrubTags(['jane', 'MRN12345678', 'a1c']));
+    }
+
+    #[DataProvider('safeTagProvider')]
+    public function testCorpusAndTopicTagVocabularySurvivesTagScrubbing(string $rawTag, string $expected): void
+    {
+        self::assertSame([$expected], $this->scrubber->scrubTags([$rawTag]));
+    }
+
+    /**
+     * @return array<string, array{string, string}>
+     *
+     * @codeCoverageIgnore Data providers run before coverage instrumentation starts.
+     */
+    public static function safeTagProvider(): array
+    {
+        return [
+            // every producer of retrieval tags draws from this closed set:
+            // corpus chunk tags + PatientEvidenceService topics + analyte codes
+            'analyte code' => ['a1c', 'a1c'],
+            'analyte code, cased' => ['GLP1', 'glp1'],
+            'clinical term' => ['triglycerides', 'triglycerides'],
+            'corpus-only tag' => ['glycemic', 'glycemic'],
+            'corpus-only tag (uacr)' => ['uacr', 'uacr'],
+            'topic tag with underscore' => ['blood_pressure', 'bloodpressure'],
+            'hypoglycemia topic tag' => ['hypoglycemia', 'hypoglycemia'],
+        ];
+    }
+
+    #[DataProvider('unsafeTagProvider')]
+    public function testPhiShapedTagsNeverSurviveTagScrubbing(string $rawTag): void
+    {
+        self::assertSame([], $this->scrubber->scrubTags([$rawTag]));
+    }
+
+    /**
+     * @return array<string, array{string}>
+     *
+     * @codeCoverageIgnore Data providers run before coverage instrumentation starts.
+     */
+    public static function unsafeTagProvider(): array
+    {
+        return [
+            'lowercase name' => ['jane'],
+            'capitalized name' => ['Smith'],
+            'mrn-shaped identifier' => ['MRN12345678'],
+            'date' => ['2024-01-01'],
+            'bare number' => ['55'],
+            'free text' => ['call her about the result'],
+        ];
     }
 
     public function testDropsEmailsAndStopwordsAndShortNoise(): void

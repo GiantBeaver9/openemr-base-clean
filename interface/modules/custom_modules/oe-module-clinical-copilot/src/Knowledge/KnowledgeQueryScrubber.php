@@ -23,7 +23,12 @@ namespace OpenEMR\Modules\ClinicalCopilot\Knowledge;
  *
  *   1. The structured analyte/topic {@see $tags} are the PRIMARY signal — they
  *      are derived deterministically from the chart's out-of-range facts and are
- *      non-PHI by construction ("a1c", "ldl", "tsh"). They are always kept.
+ *      non-PHI by construction ("a1c", "ldl", "tsh"). "By construction" is
+ *      ENFORCED here, not assumed: {@see self::scrubTags()} keeps a tag only if
+ *      it is a recognized analyte code, clinical term, or corpus/topic tag
+ *      ({@see self::TAG_VOCABULARY}) — an unrecognized tag is dropped exactly
+ *      like an unrecognized free-text token, so a tag can never smuggle PHI
+ *      past the free-text allowlist.
  *   2. Free text is kept only as clinical KEYWORDS, on an ALLOWLIST — a token
  *      survives only if it is a recognized clinical term (an analyte code like
  *      "a1c"/"b12", or a word in {@see self::CLINICAL_TERMS}). Everything else is
@@ -84,7 +89,24 @@ final class KnowledgeQueryScrubber
     ];
 
     /**
-     * @param list<string> $tags analyte/topic tags (non-PHI by construction)
+     * The retrieval-side tag vocabulary beyond {@see self::CLINICAL_TERMS} and
+     * the analyte-code shape: every corpus chunk tag and evidence-topic tag
+     * (src/Rag/corpus/endocrinology.json, PatientEvidenceService::TOPICS) in its
+     * {@see TagNormalizer::normalize()} canonical form. Together the three sets
+     * are the CLOSED set of tags allowed to cross to the non-BAA store — the
+     * module's own tag producers (curated topics, the agent endpoint's
+     * topic-validated tags) all draw from it, so nothing legitimate is lost,
+     * while an arbitrary string arriving via the `$tags` parameter is dropped
+     * instead of forwarded (SECURITY.md finding #12).
+     *
+     * @var list<string>
+     */
+    private const TAG_VOCABULARY = [
+        'albuminuria', 'bloodpressure', 'cadence', 'glycemic', 'hypoglycemia', 'uacr', 'bp',
+    ];
+
+    /**
+     * @param list<string> $tags analyte/topic tags (allowlist-enforced here)
      *
      * @return string a space-joined bag of safe keywords; may be empty
      */
@@ -93,11 +115,8 @@ final class KnowledgeQueryScrubber
         /** @var array<string, true> $kept ordered set (preserves first-seen order) */
         $kept = [];
 
-        foreach ($tags as $tag) {
-            $normalized = $this->normalizeTag($tag);
-            if ($normalized !== '') {
-                $kept[$normalized] = true;
-            }
+        foreach ($this->scrubTags($tags) as $tag) {
+            $kept[$tag] = true;
         }
 
         foreach (preg_split('/\s+/', trim($rawQuery)) ?: [] as $token) {
@@ -110,11 +129,42 @@ final class KnowledgeQueryScrubber
         return implode(' ', array_keys($kept));
     }
 
-    private function normalizeTag(string $tag): string
+    /**
+     * The tag-side counterpart of {@see self::safeKeyword()}: normalize to the
+     * shared canonical shape (so tags collapse against free-text keywords and
+     * match the stored chunk tags), then keep only tags on the closed clinical
+     * vocabulary. Same trade as the free text: an unrecognized tag — whatever
+     * produced it — is dropped rather than sent to the non-BAA store.
+     *
+     * @param list<string> $tags
+     *
+     * @return list<string> de-duplicated, first-seen order
+     */
+    public function scrubTags(array $tags): array
     {
-        // Tags are trusted non-PHI, but normalize to the shared canonical shape so
-        // they collapse against free-text keywords and match the stored tags.
-        return TagNormalizer::normalize($tag);
+        // Deduped as a list, not via array keys: PHP silently turns a
+        // numeric-string array key ("55") into an int, which would leak an
+        // int into this list<string> (TagNormalizer::normalizeList has that
+        // exact quirk, so it is not reused here).
+        $safe = [];
+        foreach ($tags as $tag) {
+            $normalized = TagNormalizer::normalize($tag);
+            if ($normalized === '' || !$this->isSafeTag($normalized)) {
+                continue;
+            }
+            if (!in_array($normalized, $safe, true)) {
+                $safe[] = $normalized;
+            }
+        }
+
+        return $safe;
+    }
+
+    private function isSafeTag(string $tag): bool
+    {
+        return preg_match(self::ANALYTE_CODE, $tag) === 1
+            || in_array($tag, self::CLINICAL_TERMS, true)
+            || in_array($tag, self::TAG_VOCABULARY, true);
     }
 
     private function safeKeyword(string $token): ?string

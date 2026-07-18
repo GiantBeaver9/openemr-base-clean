@@ -108,6 +108,34 @@ final class PostgresGuidelineRetrieverTest extends TestCase
         self::assertStringNotContainsString('9.4', $q);
     }
 
+    public function testUnsafeTagsNeverReachTheSqlBindParams(): void
+    {
+        // SECURITY.md finding #12: tags used to bypass the scrubber, so a
+        // PHI-carrying tag ("jane") became a `tags &&` bind param sent to the
+        // non-BAA store. Tags now pass the scrubber's allowlist first.
+        $runner = new FakeKnowledgeRunner(available: true, rows: []);
+        $retriever = new PostgresGuidelineRetriever($runner, new KnowledgeQueryScrubber());
+
+        $retriever->retrieve('a1c target', ['jane', 'MRN12345678', 'a1c']);
+
+        self::assertIsString($runner->lastSql);
+        $flattened = json_encode($runner->lastParams, JSON_THROW_ON_ERROR);
+        self::assertStringContainsString('a1c', $flattened);
+        self::assertStringNotContainsString('jane', $flattened);
+        self::assertStringNotContainsString('12345678', strtolower($flattened));
+    }
+
+    public function testAllTagsUnsafeAndNoSafeTextMeansNoQueryAtAll(): void
+    {
+        // If NOTHING survives scrubbing — free text all PHI, tags all
+        // unrecognized — the retriever must not touch the external store.
+        $runner = new FakeKnowledgeRunner(available: true, rows: []);
+        $retriever = new PostgresGuidelineRetriever($runner, new KnowledgeQueryScrubber());
+
+        self::assertSame([], $retriever->retrieve('John 55', ['jane', 'MRN12345678']));
+        self::assertNull($runner->lastSql);
+    }
+
     public function testRejectsAnUnsafeTableName(): void
     {
         $this->expectException(\DomainException::class);
