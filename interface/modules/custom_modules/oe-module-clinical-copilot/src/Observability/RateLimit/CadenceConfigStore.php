@@ -37,9 +37,9 @@ final class CadenceConfigStore
     /**
      * Last eval-gate run summary (rates/regressions only -- synthetic golden
      * set, no PHI). Written by {@see self::recordEvalRun()} whenever the
-     * dashboard's "Run evals" action completes; read by AlertEvaluator's
-     * eval-regression alert. Public so the reader does not hand-roll the
-     * code_set string.
+     * dashboard's "Run evals" action completes (or the CLI runner is opted in
+     * via `--record`); read by AlertEvaluator's eval-regression alert. Public
+     * so the reader does not hand-roll the code_set string.
      */
     public const EVAL_LAST_RUN_CODE_SET = 'eval_last_run';
 
@@ -182,9 +182,10 @@ final class CadenceConfigStore
      * rubrics and rates only (no PHI, no case content).
      *
      * Called from the dashboard's "Run evals" action (web context, DB
-     * available). The CLI/CI runner (ops/eval/run-evals.php) is deliberately
-     * DB-free and does NOT record here -- its gate is the process exit code CI
-     * already blocks on.
+     * available) and from the CLI runner (ops/eval/run-evals.php) when opted
+     * in via `--record` or CLINICAL_COPILOT_EVAL_RECORD=1. The DEFAULT CLI/CI
+     * invocation stays deliberately DB-free and does NOT record here -- its
+     * gate is the process exit code CI already blocks on.
      *
      * @param array<string, mixed> $result
      */

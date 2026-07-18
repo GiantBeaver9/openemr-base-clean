@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Evaluates the 7 ARCHITECTURE.md §3.5 alerts, the I14 unaccounted-entity alert, and the 3 Week-2 spec-named alerts, on every worker tick.
+ * Evaluates the 7 ARCHITECTURE.md §3.5 alerts, the I14 unaccounted-entity alert, the 3 Week-2 spec-named alerts, and the ingestion-latency SLO alert, on every worker tick.
  *
  * @package   OpenEMR\Modules\ClinicalCopilot
  * @link      https://www.open-emr.org
@@ -74,6 +74,7 @@ final class AlertEvaluator
             $this->checkUnaccountedEntity($thresholds, $now),
             $this->checkExtractionFailureRate($thresholds, $now),
             $this->checkRagRetrievalLatency($thresholds, $now),
+            $this->checkIngestionLatency($thresholds, $now),
             $this->checkEvalRegression(),
         ];
 
@@ -425,13 +426,59 @@ final class AlertEvaluator
     }
 
     /**
+     * Ingestion latency SLO alert: p95 over `ingest` spans (one committed
+     * lab/medication upload -> draft each) and `preview` spans (one
+     * deferred-save intake extract each) -- together, every document-ingestion
+     * run {@see \OpenEMR\Modules\ClinicalCopilot\Ingest\AttachAndExtract}
+     * records. The threshold is the documented upload->draft target from
+     * ops/cost-analysis.md ("Latency profile": p95 < ~8 s, the one step whose
+     * latency depends on the external vision provider) -- the same treatment
+     * retrieval already has via {@see self::checkRagRetrievalLatency()}.
+     */
+    private function checkIngestionLatency(array $thresholds, \DateTimeImmutable $now): AlertFinding
+    {
+        $windowStart = $now->modify("-{$thresholds['eval_window_minutes']} minutes")->format('Y-m-d H:i:s.u');
+        $durations = self::intColumn(
+            "SELECT `duration_ms` AS v FROM `mod_copilot_trace` WHERE `kind` IN ('ingest', 'preview') AND `duration_ms` IS NOT NULL AND `started_at` > ?",
+            [$windowStart],
+        );
+
+        return self::ingestionLatencyFinding($durations, $thresholds['ingestion_p95_ms'], $thresholds['eval_window_minutes']);
+    }
+
+    /**
+     * Pure decision half of the ingestion-latency alert (same pattern as
+     * {@see self::ragRetrievalLatencyFinding()}). An empty window never fires
+     * (no documents were ingested); with data, fires when the p95 exceeds the
+     * threshold.
+     *
+     * @param list<int> $durationsMs
+     */
+    public static function ingestionLatencyFinding(array $durationsMs, float $thresholdMs, int $windowMinutes): AlertFinding
+    {
+        $p95 = RateMath::percentile($durationsMs, 95.0);
+        $fired = $durationsMs !== [] && $p95 > $thresholdMs;
+
+        return new AlertFinding(
+            AlertName::IngestionLatency,
+            $fired,
+            $fired
+                ? sprintf('document ingestion p95 latency %.0fms exceeds %.0fms over the last %d minutes', $p95, $thresholdMs, $windowMinutes)
+                : sprintf('document ingestion p95 latency %.0fms is within threshold', $p95),
+            $p95,
+            $thresholdMs,
+        );
+    }
+
+    /**
      * Week-2 spec-named alert 3: eval regression. EvalGate already computes
      * `regressions` (>5% drop vs baseline in any rubric, or below the 0.90
-     * absolute floor); the dashboard's "Run evals" action persists each run's
-     * summary via {@see CadenceConfigStore::recordEvalRun()}, and this alert
-     * fires while the LAST recorded run has any regression. Stays within the
-     * evaluator's dependency budget: a cadence-config read, never an eval run
-     * on the tick.
+     * absolute floor); the dashboard's "Run evals" action -- and the CLI
+     * runner when opted in (`ops/eval/run-evals.php --record`, or
+     * CLINICAL_COPILOT_EVAL_RECORD=1) -- persists each run's summary via
+     * {@see CadenceConfigStore::recordEvalRun()}, and this alert fires while
+     * the LAST recorded run has any regression. Stays within the evaluator's
+     * dependency budget: a cadence-config read, never an eval run on the tick.
      */
     private function checkEvalRegression(): AlertFinding
     {
@@ -452,7 +499,7 @@ final class AlertEvaluator
             return new AlertFinding(
                 AlertName::EvalRegression,
                 false,
-                'no eval run has been recorded yet (run evals from the dashboard to arm this alert; CI runs gate on exit code instead)',
+                'no eval run has been recorded yet (run evals from the dashboard or ops/eval/run-evals.php --record to arm this alert; plain CI runs gate on exit code instead)',
                 0.0,
                 0.0,
             );
@@ -509,7 +556,8 @@ final class AlertEvaluator
      *     eval_window_minutes: int, p95_latency_ms: float, warm_miss_rate_pct: float,
      *     error_rate_pct: float, tool_failure_rate_pct: float,
      *     verification_failure_rate_pct: float, heartbeat_stale_multiplier: float,
-     *     extraction_failure_rate_pct: float, rag_retrieval_p95_ms: float
+     *     extraction_failure_rate_pct: float, rag_retrieval_p95_ms: float,
+     *     ingestion_p95_ms: float
      * }
      */
     private function loadThresholds(): array
@@ -531,6 +579,10 @@ final class AlertEvaluator
             // times the healthy offline/Postgres path.
             'extraction_failure_rate_pct' => (float)($config['extraction_failure_rate_pct'] ?? 10.0),
             'rag_retrieval_p95_ms' => (float)($config['rag_retrieval_p95_ms'] ?? 2000),
+            // The documented ingestion SLO (ops/cost-analysis.md "Latency
+            // profile": upload->draft p95 < ~8 s -- one non-streaming vision
+            // call dominates).
+            'ingestion_p95_ms' => (float)($config['ingestion_p95_ms'] ?? 8000),
         ];
     }
 

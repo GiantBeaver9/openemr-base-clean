@@ -1,7 +1,7 @@
 <?php
 
 /**
- * The closed set of alerts AlertEvaluator checks (ARCHITECTURE.md §3.5 + I14 + the Week-2 spec-named three).
+ * The closed set of alerts AlertEvaluator checks (ARCHITECTURE.md §3.5 + I14 + the Week-2 spec-named three + the ingestion-latency SLO).
  *
  * @package   OpenEMR\Modules\ClinicalCopilot
  * @link      https://www.open-emr.org
@@ -17,9 +17,11 @@ namespace OpenEMR\Modules\ClinicalCopilot\Observability\Alert;
 /**
  * The seven alerts in ARCHITECTURE.md §3.5's table, plus the I14 unaccounted-
  * entity alert (docs/build-notes.md "I14"), plus the three Week-2 spec-named
- * alerts (extraction failure rate, RAG retrieval latency, eval regression).
- * One enum case per alert, spec order first, so the dashboard and the
- * evaluator's own findings list read the same way the spec documents them.
+ * alerts (extraction failure rate, RAG retrieval latency, eval regression),
+ * plus the ingestion-latency SLO alert (the ops/cost-analysis.md upload→draft
+ * p95 < 8 s target). One enum case per alert, spec order first, so the
+ * dashboard and the evaluator's own findings list read the same way the spec
+ * documents them.
  */
 enum AlertName: string
 {
@@ -33,6 +35,7 @@ enum AlertName: string
     case UnaccountedEntity = 'unaccounted_entity';
     case ExtractionFailureRate = 'extraction_failure_rate';
     case RagRetrievalLatency = 'rag_retrieval_latency';
+    case IngestionLatency = 'ingestion_latency';
     case EvalRegression = 'eval_regression';
 
     /**
@@ -53,6 +56,7 @@ enum AlertName: string
             self::UnaccountedEntity => 'a data-shape surprise: extraction silently dropped a source row before it was ever classified (I14)',
             self::ExtractionFailureRate => 'document ingestion failing on real uploads -- VLM outage, extraction-schema drift, or a new document shape',
             self::RagRetrievalLatency => 'guideline-evidence retrieval is slow -- knowledge Postgres degrading, missing index, or corpus scan overload',
+            self::IngestionLatency => 'document ingestion (upload -> draft) is breaching its p95 SLO (ops/cost-analysis.md: p95 < 8 s) -- slow vision provider, oversized scans, or a saturated document-store/DB tier',
             self::EvalRegression => 'the last eval-gate run recorded a rubric regression (>5% drop vs baseline, or below the 0.90 floor) -- model/prompt/code drift reached the golden set',
         };
     }
@@ -73,6 +77,7 @@ enum AlertName: string
             self::UnaccountedEntity => 'pull the span payload, add the case to fixtures BEFORE fixing the mapping',
             self::ExtractionFailureRate => 'pull failing vision_extract spans (error_class/error_detail); if provider-side, confirm the manual-entry fallback is serving uploads; if a new document shape, add it to fixtures before fixing the extractor',
             self::RagRetrievalLatency => 'check the knowledge row on /ready and the dashboard; if Postgres is slow, check indexes/connection health on the knowledge DB -- if it goes fully unreachable the module degrades to the offline corpus on its own',
+            self::IngestionLatency => 'open a slow ingest/preview span\'s waterfall and compare its vision_extract child: if the vision call dominates, check provider status and consider the flash extraction model (ops/cost-analysis.md lever); otherwise profile document storage and draft persistence',
             self::EvalRegression => 'treat as a deploy blocker: re-run ops/eval/run-evals.php, diff the failing-case list against baseline.json, pin/roll back the model or prompt version; only update the baseline deliberately (--update-baseline)',
         };
     }

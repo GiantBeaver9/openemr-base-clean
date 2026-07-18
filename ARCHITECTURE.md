@@ -213,6 +213,8 @@ An in-app module page (Twig + the host's Bootstrap stack, auto-refreshing) compu
 
 Alert evaluation runs on the module's background-service tick; firing writes an `alert_eval` span, surfaces a dashboard banner, and logs at `error` severity (pluggable email/webhook at deploy time). The heartbeat alert is the stated exception — a dead worker can't report itself, so its detection lives on the pull paths (`/ready`, dashboard, external probe).
 
+Additions since this table, evaluated on the same tick (each with its meaning and on-call response documented in `src/Observability/Alert/AlertName.php`): **unaccounted entity** (I14 — any extraction span reporting silently dropped source rows), **extraction failure rate** (> 10% of `vision_extract` spans errored over 1 h), **RAG retrieval latency** (`retrieve`-span p95 > 2 s), **ingestion latency** (`ingest`/`preview`-span p95 > 8 s — the upload→draft SLO in `ops/cost-analysis.md`), and **eval regression** (fires while the last recorded eval-gate run has a rubric regression).
+
 ### 3.7 Rate limits and cost circuit breakers
 
 Cost is not only observed (§3.3) — it is **limited**. All limits are initial values in versioned config rows (module-owned; version is a digest-style config input, E5 discipline), tuned from trace data:

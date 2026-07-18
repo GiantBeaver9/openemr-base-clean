@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Decision logic of the three Week-2 spec-named alerts (extraction failure rate, RAG retrieval latency, eval regression).
+ * Decision logic of the three Week-2 spec-named alerts (extraction failure rate, RAG retrieval latency, eval regression) plus the ingestion-latency SLO alert.
  *
  * @package   OpenEMR\Modules\ClinicalCopilot
  * @link      https://www.open-emr.org
@@ -33,6 +33,10 @@ use PHPUnit\Framework\TestCase;
  *  - eval regression: the alert firing before any eval run has ever been
  *    recorded (false alarm on a fresh install), staying quiet when the last
  *    recorded run had regressions, or crashing on a malformed stored row.
+ *  - ingestion latency: same failure modes as RAG retrieval latency, against
+ *    the documented upload->draft SLO (ops/cost-analysis.md: p95 < ~8 s) --
+ *    must not fire on a window with no ingestions, and must fire on the p95
+ *    tail even when the mean sits under threshold.
  */
 final class SpecNamedAlertFindingTest extends TestCase
 {
@@ -85,6 +89,34 @@ final class SpecNamedAlertFindingTest extends TestCase
 
         self::assertTrue($finding->fired);
         self::assertGreaterThan(2000.0, $finding->metricValue);
+    }
+
+    public function testIngestionLatencyNeverFiresWithNoIngestionsInTheWindow(): void
+    {
+        $finding = AlertEvaluator::ingestionLatencyFinding([], 8000.0, 15);
+
+        self::assertSame(AlertName::IngestionLatency, $finding->name);
+        self::assertFalse($finding->fired, 'zero ingest/preview spans must read as quiet, not as an incident');
+    }
+
+    public function testIngestionLatencyStaysQuietWhenP95IsWithinTheSlo(): void
+    {
+        // Healthy uploads: a few seconds each, all under the 8s SLO target.
+        self::assertFalse(AlertEvaluator::ingestionLatencyFinding([2500, 3200, 4100, 6800], 8000.0, 15)->fired);
+    }
+
+    public function testIngestionLatencyFiresOnTheTailNotTheMean(): void
+    {
+        // 9 healthy ~3s ingests and one 40s outlier: the mean (~6.7s) sits
+        // under the 8s SLO but the nearest-rank p95 catches the tail -- a
+        // provider-side vision slowdown showing up as a dead upload queue.
+        $durations = array_merge(array_fill(0, 9, 3000), [40000]);
+        $finding = AlertEvaluator::ingestionLatencyFinding($durations, 8000.0, 15);
+
+        self::assertTrue($finding->fired);
+        self::assertGreaterThan(8000.0, $finding->metricValue);
+        self::assertSame(8000.0, $finding->threshold);
+        self::assertStringContainsString('document ingestion p95', $finding->message);
     }
 
     public function testEvalRegressionIsQuietWhenNoRunWasEverRecorded(): void

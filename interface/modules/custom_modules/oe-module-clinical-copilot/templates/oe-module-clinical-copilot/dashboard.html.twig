@@ -321,6 +321,48 @@
         </div></div>
     </div>
 
+    {# Week 2 (W2 rubric) metrics: ingestion volume, extraction field-level
+       pass rate, retrieval hit rate, worker routing -- all computed live from
+       mod_copilot_trace / mod_copilot_extracted_fact, same as every tile above. #}
+    <div class="row">
+        <div class="col-md-3"><div class="ccp-tile">
+            <h6>{{ "Document ingestions"|xlt }}</h6>
+            <div class="ccp-value"><a href="{{ dashboard_url|attr }}?kind=ingest">{{ metrics.ingestion_counts.total }}</a></div>
+            <small class="text-muted">{{ metrics.ingestion_counts.ingest }} {{ "ingest"|xlt }} &middot; {{ metrics.ingestion_counts.preview }} {{ "intake preview"|xlt }}</small>
+        </div></div>
+        <div class="col-md-3"><div class="ccp-tile">
+            <h6>{{ "Extraction field pass rate"|xlt }}</h6>
+            {% if metrics.extraction_field_pass.proposed > 0 %}
+                <div class="ccp-value">{{ metrics.extraction_field_pass.rate_pct }}%</div>
+                <small class="text-muted">{{ metrics.extraction_field_pass.accepted }}/{{ metrics.extraction_field_pass.proposed }} {{ "fields accepted unchanged (locked extractions)"|xlt }}</small>
+            {% else %}
+                <div class="ccp-value">{{ "n/a"|xlt }}</div>
+                <small class="text-muted">{{ "no locked extractions in this window"|xlt }}</small>
+            {% endif %}
+        </div></div>
+        <div class="col-md-3"><div class="ccp-tile">
+            <h6>{{ "Retrieval hit rate"|xlt }}</h6>
+            {% if metrics.retrieval_hit_rate.total > 0 %}
+                <div class="ccp-value">{{ metrics.retrieval_hit_rate.rate_pct }}%</div>
+                <small class="text-muted">{{ metrics.retrieval_hit_rate.with_hits }}/{{ metrics.retrieval_hit_rate.total }} {{ "retrievals returned evidence"|xlt }}</small>
+            {% else %}
+                <div class="ccp-value">{{ "n/a"|xlt }}</div>
+                <small class="text-muted">{{ "no retrievals in this window"|xlt }}</small>
+            {% endif %}
+        </div></div>
+        <div class="col-md-3"><div class="ccp-tile">
+            <h6>{{ "Worker routing"|xlt }}</h6>
+            <div class="ccp-value">
+                {{ "intake"|xlt }}: {{ metrics.worker_routing.workers.intake_extractor }}
+                &middot; {{ "evidence"|xlt }}: {{ metrics.worker_routing.workers.evidence_retriever }}
+            </div>
+            <small class="text-muted">
+                {{ "supervisor ok/degraded/error"|xlt }}:
+                {{ metrics.worker_routing.supervisor_by_status.ok }}/{{ metrics.worker_routing.supervisor_by_status.degraded }}/{{ metrics.worker_routing.supervisor_by_status.error }}
+            </small>
+        </div></div>
+    </div>
+
     <div class="row">
         <div class="col-md-3"><div class="ccp-tile">
             <h6>{{ "Reviewer concurrence rate"|xlt }}</h6>

@@ -248,6 +248,23 @@ on lock, `field_accuracy = accepted-unchanged / model-proposed` is computed and
 stored on `mod_copilot_extraction`, rolled up by `doc_type`. It is **PHI-free** —
 a rate over field keys and accept/edit booleans, never clinical values.
 
+**Dashboard tiles (W2).** `public/dashboard.php` surfaces the Week 2 metrics
+live from these ledgers: document-ingestion count (`ingest` + `preview` spans),
+extraction field-level pass rate (the same accepted-unchanged / model-proposed
+definition, aggregated over fields of locked extractions), retrieval hit rate
+(share of `retrieve` spans returning evidence), and worker routing decisions
+(worker spans by worker, supervisor outcomes by status).
+
+**Alerts (W2).** Four Week 2 alerts ride the same worker-tick evaluator as the
+Week 1 set (`src/Observability/Alert/`): **extraction failure rate** (errored
+`vision_extract` spans), **RAG retrieval latency** (`retrieve`-span p95),
+**ingestion latency** (`ingest`/`preview`-span p95 against the upload→draft
+p95 < 8 s SLO from `ops/cost-analysis.md`), and **eval regression** (fires
+while the last recorded eval-gate run — from the dashboard, or from
+`ops/eval/run-evals.php --record` where a DB is available — has a rubric
+regression). Each alert's meaning and on-call response is documented in
+`AlertName.php`.
+
 ---
 
 ## 9. Eval gate (shipped — PR-blocking CI)

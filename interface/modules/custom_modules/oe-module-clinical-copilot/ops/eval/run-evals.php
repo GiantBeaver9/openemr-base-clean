@@ -32,6 +32,17 @@ declare(strict_types=1);
  * Usage:
  *   php ops/eval/run-evals.php                 # gate: compare to baseline, exit 0/1
  *   php ops/eval/run-evals.php --update-baseline  # rewrite baseline.json from this run
+ *   php ops/eval/run-evals.php --record        # gate, then persist the outcome for the
+ *                                              # eval-regression alert (needs the OpenEMR DB;
+ *                                              # CLINICAL_COPILOT_EVAL_RECORD=1 does the same)
+ *
+ * Recording is strictly OPT-IN and best-effort: without --record (or the env
+ * var) this runner stays exactly as DB-free and network-free as CI needs it to
+ * be; with it, the run's summary is written to the `eval_last_run` cadence
+ * config row (the same row the dashboard's "Run evals" button writes), so the
+ * AlertEvaluator eval-regression alert also arms from CLI/CI runs that DO have
+ * a database. Any bootstrap or persistence failure degrades to the pure
+ * offline behavior -- the gate's own exit code is never affected.
  */
 
 use OpenEMR\Modules\ClinicalCopilot\Ops\Eval\EvalGate;
@@ -53,6 +64,7 @@ require_once __DIR__ . '/EvalGate.php';
 
 $evalDir = __DIR__;
 $updateBaseline = in_array('--update-baseline', $argv, true);
+$recordRequested = in_array('--record', $argv, true) || getenv('CLINICAL_COPILOT_EVAL_RECORD') === '1';
 
 try {
     $result = (new EvalGate($evalDir))->run();
@@ -75,6 +87,38 @@ if ($updateBaseline) {
 }
 
 printReport($rates, $tally, $result['failures'], $result['regressions']);
+
+// Opt-in outcome persistence (never on --update-baseline: a re-baselining
+// run's regressions are measured against the baseline it is replacing, and
+// recording them would arm the alert on a deliberately superseded number).
+// Bootstrapping OpenEMR happens HERE, at top-level scope, only after the
+// gate result is already computed -- the default (no flag, no env var) path
+// never touches globals.php, the DB, or the network.
+if ($recordRequested) {
+    $recorded = false;
+    // ops/eval -> module root -> custom_modules -> modules -> interface/globals.php
+    $globalsPath = $moduleRoot . '/../../../globals.php';
+    if (is_file($globalsPath)) {
+        try {
+            $ignoreAuth = true;
+            $sessionAllowWrite = true;
+            $_GET['site'] = $_GET['site'] ?? 'default';
+            require_once $globalsPath;
+            (new \OpenEMR\Modules\ClinicalCopilot\Observability\RateLimit\CadenceConfigStore())->recordEvalRun($result);
+            $recorded = true;
+        } catch (\Throwable) {
+            // Degrade to the pure offline behavior -- the gate's exit code is
+            // the contract; a persistence failure must never change it. The
+            // generic notice below is all that surfaces (no exception detail).
+            $recorded = false;
+        }
+    }
+    if ($recorded) {
+        echo "\neval: outcome recorded (eval_last_run) -- the eval-regression alert now reflects this run.\n";
+    } else {
+        fwrite(STDERR, "\neval: --record requested but no OpenEMR DB was reachable -- outcome not recorded (gate result unaffected).\n");
+    }
+}
 
 if (!$result['passed']) {
     fwrite(STDERR, "\neval: GATE FAILED — " . count($result['regressions']) . " rubric regression(s).\n");

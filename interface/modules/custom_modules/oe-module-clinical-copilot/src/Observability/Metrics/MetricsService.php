@@ -73,7 +73,158 @@ final class MetricsService
             'unaccounted_entity_rate_pct' => $this->unaccountedEntityRate($sinceSql),
             'citation_click_through_rate_pct' => $this->citationClickThroughRate($sinceSql, $since),
             'facts_panel_opens' => $this->factsPanelOpens($since),
+            'ingestion_counts' => $this->ingestionCounts($sinceSql),
+            'extraction_field_pass' => $this->extractionFieldPass($sinceSql),
+            'retrieval_hit_rate' => $this->retrievalHitRate($sinceSql),
+            'worker_routing' => $this->workerRouting($sinceSql),
         ];
+    }
+
+    /**
+     * Week-2 tile: document-ingestion volume. One `ingest` span per committed
+     * upload (lab / medication list) and one `preview` span per deferred-save
+     * intake extract ({@see \OpenEMR\Modules\ClinicalCopilot\Ingest\AttachAndExtract}),
+     * so the two kinds together are every document-ingestion run in the window.
+     * Deliberately NOT folded into {@see self::requestsByKind()}: that tile
+     * counts distinct read-path requests by correlation id, while an ingestion
+     * span is one run by construction (and an agent-driven ingest shares its
+     * correlation id with the supervisor request that triggered it).
+     *
+     * @return array{ingest: int, preview: int, total: int}
+     */
+    private function ingestionCounts(string $sinceSql): array
+    {
+        $rows = QueryUtils::fetchRecords(
+            "SELECT `kind`, COUNT(*) AS c
+             FROM `mod_copilot_trace`
+             WHERE `kind` IN ('ingest', 'preview') AND `started_at` > ?
+             GROUP BY `kind`",
+            [$sinceSql],
+        );
+
+        $result = ['ingest' => 0, 'preview' => 0];
+        foreach ($rows as $row) {
+            $result[(string)$row['kind']] = (int)$row['c'];
+        }
+
+        return ['ingest' => $result['ingest'], 'preview' => $result['preview'], 'total' => $result['ingest'] + $result['preview']];
+    }
+
+    /**
+     * Week-2 tile: extraction field-level pass rate, REUSING the one accuracy
+     * definition this module already stores (W2_ARCHITECTURE.md §8 /
+     * {@see \OpenEMR\Modules\ClinicalCopilot\Ingest\ParsedExtraction::fieldAccuracy()}):
+     * accepted-unchanged / model-proposed. Aggregated at the field level over
+     * extractions LOCKED in the window -- `edited_by_user` only becomes ground
+     * truth once a human has reviewed and locked, and manual-entry fields
+     * (`vlm_value` NULL) are excluded from the denominator because there is no
+     * model claim to be right or wrong about. PHI-free: counts of field rows
+     * and accept/edit booleans, never a field value.
+     *
+     * @return array{proposed: int, accepted: int, rate_pct: float}
+     */
+    private function extractionFieldPass(string $sinceSql): array
+    {
+        $row = QueryUtils::querySingleRow(
+            "SELECT COUNT(*) AS proposed,
+                    COALESCE(SUM(CASE WHEN f.`edited_by_user` = 0 THEN 1 ELSE 0 END), 0) AS accepted
+             FROM `mod_copilot_extracted_fact` f
+             INNER JOIN `mod_copilot_extraction` e ON e.`id` = f.`extraction_id`
+             WHERE e.`status` = 'locked' AND e.`locked_at` > ? AND f.`vlm_value` IS NOT NULL",
+            [$sinceSql],
+        );
+
+        $proposed = is_array($row) ? (int)$row['proposed'] : 0;
+        $accepted = is_array($row) ? (int)$row['accepted'] : 0;
+
+        return [
+            'proposed' => $proposed,
+            'accepted' => $accepted,
+            'rate_pct' => RateMath::percentage($accepted, $proposed),
+        ];
+    }
+
+    /**
+     * Week-2 tile: retrieval hit rate -- the share of `retrieve` spans that
+     * returned at least one guideline snippet.
+     * {@see \OpenEMR\Modules\ClinicalCopilot\Agent\EvidenceRetrieverWorker}
+     * records an empty retrieval as `status = 'degraded'` with a PHI-free
+     * `hits=0` detail line, and any non-empty retrieval as `status = 'ok'` --
+     * so hits>0 is exactly the ok-status spans, no detail parsing needed.
+     *
+     * @return array{total: int, with_hits: int, rate_pct: float}
+     */
+    private function retrievalHitRate(string $sinceSql): array
+    {
+        $total = (int)QueryUtils::fetchSingleValue(
+            "SELECT COUNT(*) AS c FROM `mod_copilot_trace` WHERE `kind` = 'retrieve' AND `started_at` > ?",
+            'c',
+            [$sinceSql],
+        );
+        $withHits = (int)QueryUtils::fetchSingleValue(
+            "SELECT COUNT(*) AS c FROM `mod_copilot_trace` WHERE `kind` = 'retrieve' AND `status` = 'ok' AND `started_at` > ?",
+            'c',
+            [$sinceSql],
+        );
+
+        return [
+            'total' => $total,
+            'with_hits' => $withHits,
+            'rate_pct' => RateMath::percentage($withHits, $total),
+        ];
+    }
+
+    /**
+     * Week-2 tile: the supervisor's routing decisions. A `worker` span carries
+     * no worker-name field (`mod_copilot_trace` has no attrs column -- same
+     * documented limitation as tool_call), but each worker records exactly one
+     * distinguishing child span: `retrieve` under the evidence retriever,
+     * `vision_extract` under the intake extractor -- so the worker identity is
+     * recovered from the child kind. Supervisor outcomes come from the
+     * `supervisor` root span's own status (ok = answered/gathered, degraded =
+     * refused draft, error = sev-1 freeze).
+     *
+     * @return array{workers: array{intake_extractor: int, evidence_retriever: int}, supervisor_by_status: array{ok: int, degraded: int, error: int}}
+     */
+    private function workerRouting(string $sinceSql): array
+    {
+        $workerRows = QueryUtils::fetchRecords(
+            "SELECT c.`kind` AS child_kind, COUNT(*) AS c
+             FROM `mod_copilot_trace` w
+             INNER JOIN `mod_copilot_trace` c
+                ON c.`correlation_id` = w.`correlation_id` AND c.`parent_span_id` = w.`span_id`
+             WHERE w.`kind` = 'worker' AND w.`started_at` > ? AND c.`kind` IN ('retrieve', 'vision_extract')
+             GROUP BY c.`kind`",
+            [$sinceSql],
+        );
+
+        $workers = ['intake_extractor' => 0, 'evidence_retriever' => 0];
+        foreach ($workerRows as $row) {
+            $childKind = (string)$row['child_kind'];
+            if ($childKind === 'vision_extract') {
+                $workers['intake_extractor'] = (int)$row['c'];
+            } elseif ($childKind === 'retrieve') {
+                $workers['evidence_retriever'] = (int)$row['c'];
+            }
+        }
+
+        $statusRows = QueryUtils::fetchRecords(
+            "SELECT `status`, COUNT(*) AS c
+             FROM `mod_copilot_trace`
+             WHERE `kind` = 'supervisor' AND `started_at` > ?
+             GROUP BY `status`",
+            [$sinceSql],
+        );
+
+        $supervisorByStatus = ['ok' => 0, 'degraded' => 0, 'error' => 0];
+        foreach ($statusRows as $row) {
+            $status = (string)$row['status'];
+            if ($status === 'ok' || $status === 'degraded' || $status === 'error') {
+                $supervisorByStatus[$status] = (int)$row['c'];
+            }
+        }
+
+        return ['workers' => $workers, 'supervisor_by_status' => $supervisorByStatus];
     }
 
     /**
