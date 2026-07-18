@@ -102,7 +102,8 @@ final class KnowledgeChunkWriterTest extends TestCase
         $runner = new FakeWriteRunner(available: true);
         (new KnowledgeChunkWriter($runner))->write($this->chunks()); // default => UnavailableEmbeddingClient
 
-        self::assertNull($runner->lastUpsertParams['embedding'] ?? 'unset');
+        self::assertArrayHasKey('embedding', $runner->lastUpsertParams);
+        self::assertNull($runner->lastUpsertParams['embedding']);
     }
 }
 

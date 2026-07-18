@@ -83,15 +83,27 @@ final class DocumentChunkerTest extends TestCase
 
     public function testOverlapCarriesTrailingTextIntoTheNextChunk(): void
     {
-        $sentenceA = 'Alpha sentence about hypoglycemia risk in insulin therapy.';
-        $sentenceB = 'Bravo sentence about sulfonylurea dose reduction guidance.';
-        $sentenceC = 'Charlie sentence about monitoring cadence for stable patients.';
-        $text = "{$sentenceA} {$sentenceB} {$sentenceC}";
+        // Six ~60-char sentences (~380 chars total) in ONE paragraph, so the
+        // block genuinely exceeds the 300-char target (ChunkOptions::MIN_TARGET
+        // clamps anything smaller) and must split with an 80-char overlap.
+        $sentences = [
+            'Alpha sentence about hypoglycemia risk in insulin therapy.',
+            'Bravo sentence about sulfonylurea dose reduction guidance.',
+            'Charlie sentence about monitoring cadence for stable patients.',
+            'Delta sentence about renal dosing thresholds for metformin users.',
+            'Echo sentence about titration of basal insulin at bedtime.',
+            'Foxtrot sentence about follow-up intervals after regimen changes.',
+        ];
+        $text = implode(' ', $sentences);
 
         $chunks = $this->chunker->chunk($text, $this->meta, [], new ChunkOptions(300, 80));
 
         self::assertGreaterThanOrEqual(2, count($chunks));
-        // The second chunk should begin with overlap text from the first.
-        self::assertNotSame('', $chunks[1]->text);
+        // Overlap: the second chunk opens with the trailing sentence of the
+        // first, so a boundary-straddling passage is retrievable from either side.
+        $overlapSentence = mb_substr($chunks[1]->text, 0, (int)mb_strpos($chunks[1]->text, '.') + 1);
+        self::assertNotSame('', $overlapSentence);
+        self::assertContains($overlapSentence, $sentences);
+        self::assertStringEndsWith($overlapSentence, $chunks[0]->text);
     }
 }

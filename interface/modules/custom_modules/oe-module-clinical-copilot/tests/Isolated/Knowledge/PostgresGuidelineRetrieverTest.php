@@ -106,10 +106,38 @@ final class PostgresGuidelineRetrieverTest extends TestCase
 
         $snippets = $retriever->retrieve('a1c target', ['a1c']);
 
+        // Vector search runs first, ranking by pgvector cosine distance over
+        // the embedded rows only — no full-text predicate in that query.
+        self::assertNotSame([], $runner->queries);
+        [$vectorSql, $vectorParams] = $runner->queries[0];
+        self::assertStringContainsString('embedding <=> :qvec::vector', $vectorSql);
+        self::assertStringNotContainsString('websearch_to_tsquery', $vectorSql);
+        self::assertArrayHasKey('qvec', $vectorParams);
+        self::assertStringStartsWith('[', (string)$vectorParams['qvec']);
+
+        // Hybrid: one vector row < topK (4), so the remaining slots are topped
+        // up from full-text — a mixed store's non-embedded rows stay reachable.
+        self::assertCount(2, $runner->queries);
+        self::assertStringContainsString('websearch_to_tsquery', $runner->queries[1][0]);
+
+        // Both queries returned the same row; the merge dedupes it by id.
         self::assertCount(1, $snippets);
+        self::assertSame('ada-a1c', $snippets[0]->chunk->id);
+    }
+
+    public function testVectorSearchAloneServesTheRequestWhenItFillsTopK(): void
+    {
+        $runner = new FakeKnowledgeRunner(available: true, rows: [
+            ['id' => 'ada-a1c', 'title' => 'A1c', 'source' => 'ADA', 'section' => 'T', 'body' => 'A1c below 7%.', 'tags' => '{a1c}', 'url' => null, 'score' => 0.9],
+        ]);
+        $retriever = new PostgresGuidelineRetriever($runner, new KnowledgeQueryScrubber(), 'guideline_chunks', new FakeEmbedder());
+
+        $snippets = $retriever->retrieve('a1c target', ['a1c'], topK: 1);
+
+        // The single vector row fills topK, so no full-text top-up is issued.
+        self::assertCount(1, $snippets);
+        self::assertCount(1, $runner->queries);
         self::assertStringContainsString('embedding <=> :qvec::vector', (string)$runner->lastSql);
-        self::assertArrayHasKey('qvec', $runner->lastParams);
-        self::assertStringStartsWith('[', (string)$runner->lastParams['qvec']);
         self::assertStringNotContainsString('websearch_to_tsquery', (string)$runner->lastSql);
     }
 
@@ -161,6 +189,9 @@ final class FakeKnowledgeRunner implements KnowledgeQueryRunner
     /** @var array<string, scalar|null> */
     public array $lastParams = [];
 
+    /** @var list<array{0: string, 1: array<string, scalar|null>}> every select, in order */
+    public array $queries = [];
+
     /**
      * @param list<array<string, mixed>> $rows
      */
@@ -179,6 +210,7 @@ final class FakeKnowledgeRunner implements KnowledgeQueryRunner
     {
         $this->lastSql = $sql;
         $this->lastParams = $params;
+        $this->queries[] = [$sql, $params];
 
         return $this->rows;
     }
