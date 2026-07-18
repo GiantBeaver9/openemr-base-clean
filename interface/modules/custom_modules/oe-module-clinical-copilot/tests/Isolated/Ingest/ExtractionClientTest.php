@@ -130,6 +130,79 @@ final class ExtractionClientTest extends TestCase
         self::assertNull($outcome->extraction->fields[1]->citation, 'uncited fields stay valid alongside cited ones');
     }
 
+    public function testMedicationPromptDemandsExactTranscriptionAndNeverDemandsCitations(): void
+    {
+        // Failure modes guarded: (1) the medication prompt losing its
+        // exactness clause, letting the model "helpfully" normalize a dose
+        // (500 mg -> 0.5 g) or expand an abbreviation (BID -> twice daily) —
+        // silently rewriting a prescription before any human reviews it; and
+        // (2) the prompt regaining lab-style MUST-cite / bounding-box language,
+        // which over-constrains the model into failing otherwise-good reads —
+        // the exact regression the intake prompt already guards against.
+        // Citations stay on the intake-style OPTIONAL clause.
+        $json = json_encode(['fields' => []], JSON_THROW_ON_ERROR);
+        $stub = StubLlmClient::up(new LlmResponse($json, 'gemini-2.5-pro', 1, 1, 1));
+        $client = new ExtractionClient($stub, 'gemini-2.5-pro');
+
+        $client->extract(DocType::MedicationList, 'PDFBYTES', 'application/pdf', 'upload');
+
+        $prompt = $stub->calls()[0]->systemInstructions;
+
+        self::assertStringContainsString('exactly as written', $prompt);
+        self::assertStringContainsString('Never normalize', $prompt);
+        self::assertStringContainsString('never infer', $prompt);
+
+        self::assertStringContainsString('page', $prompt, 'medication softly invites the optional citation');
+        self::assertStringContainsString('quote', $prompt);
+        self::assertStringContainsString('omit', $prompt, 'omitting the citation must be explicitly allowed');
+        self::assertStringNotContainsString('MUST', $prompt, 'never demand citations from a medication list');
+        self::assertStringNotContainsString('bounding box', $prompt, 'no overlay is fed, so no bbox ask');
+
+        $user = $stub->calls()[0]->userContent;
+        self::assertStringContainsString('medication_name', $user, 'the grouping convention rides in the user instruction');
+        self::assertStringContainsString('document order', $user);
+    }
+
+    public function testMedicationListExtractionParsesWithAndWithoutVolunteeredCitations(): void
+    {
+        // End-to-end through the client: a valid attribute-run payload parses;
+        // a volunteered citation lands on the field and an uncited sibling in
+        // the same payload stays valid with a null citation (never an error).
+        $json = json_encode(['fields' => [
+            ['field_key' => 'medication_name', 'value' => 'Metformin', 'page' => 1, 'quote' => 'Metformin 500 mg'],
+            ['field_key' => 'dose', 'value' => '500 mg'],
+        ]], JSON_THROW_ON_ERROR);
+
+        $client = new ExtractionClient(
+            StubLlmClient::up(new LlmResponse($json, 'gemini-2.5-pro', 300, 20, 120)),
+            'gemini-2.5-pro',
+        );
+
+        $outcome = $client->extract(DocType::MedicationList, 'PDFBYTES', 'application/pdf', 'upload');
+
+        self::assertCount(2, $outcome->extraction->fields);
+        self::assertNotNull($outcome->extraction->fields[0]->citation);
+        self::assertSame(1, $outcome->extraction->fields[0]->citation->pageOrSection);
+        self::assertNull($outcome->extraction->fields[1]->citation);
+    }
+
+    public function testMedicationListOutputWithAnUnknownFieldKeyIsRejected(): void
+    {
+        // The closed enum is the backstop even when constrained decoding
+        // misbehaves: a hallucinated attribute key never becomes a stored row.
+        $json = json_encode(['fields' => [
+            ['field_key' => 'strength', 'value' => '500 mg'],
+        ]], JSON_THROW_ON_ERROR);
+
+        $client = new ExtractionClient(
+            StubLlmClient::up(new LlmResponse($json, 'gemini-2.5-pro', 10, 10, 10)),
+            'gemini-2.5-pro',
+        );
+
+        $this->expectException(SchemaValidationException::class);
+        $client->extract(DocType::MedicationList, 'PDFBYTES', 'application/pdf', 'upload');
+    }
+
     public function testModelOutputThatFailsTheSchemaIsRejected(): void
     {
         // value present but no page/quote — fails the citation-required contract.

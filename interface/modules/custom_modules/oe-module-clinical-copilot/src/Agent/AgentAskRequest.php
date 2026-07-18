@@ -93,7 +93,7 @@ final readonly class AgentAskRequest
         if ($document !== null) {
             $docType = is_string($rawDocType) ? DocType::tryFrom($rawDocType) : null;
             if ($docType === null) {
-                throw new InvalidAgentAskException('doc_type must be intake_form or lab_pdf when a document is uploaded');
+                throw new InvalidAgentAskException('doc_type must be intake_form, lab_pdf, or medication_list when a document is uploaded');
             }
         }
 

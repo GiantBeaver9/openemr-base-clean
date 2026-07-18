@@ -189,6 +189,50 @@ final class AttachAndExtract
     }
 
     /**
+     * Medication list: existing patient, the third patient-attached document
+     * type. Mirrors {@see ingestLab} — store the source, extract, persist the
+     * draft into module STAGING (never a core table) — because, like a lab and
+     * unlike intake, the chart already exists to attach the source document to,
+     * and a persisted draft lets the reviewer's verification survive the
+     * session and render through the generic review screen. The deliberate
+     * difference is at lock: {@see ExtractionReview::lock()} writes NOTHING to
+     * the chart for this type — medication chart reconciliation is a
+     * clinical-safety-sensitive step this module defers, exactly as intake
+     * once deferred create-at-upload. No identity guard either: the medication
+     * schema carries no patient_name/patient_dob header (a future step,
+     * alongside reconciliation).
+     *
+     * `$parentSpanId`: null (the standalone medication_upload.php path) keeps
+     * the `ingest` span a root; an agent-driven path may pass its worker span
+     * id, as with labs.
+     */
+    public function ingestMedicationList(
+        int $pid,
+        string $bytes,
+        string $filename,
+        string $mimeType,
+        string $correlationId,
+        int $userId,
+        ?string $parentSpanId = null,
+    ): IngestResult {
+        $span = $this->openSpan($correlationId, $parentSpanId, 'ingest', $pid);
+        [$outcome, $visionUsed, $schemaRejected] = $this->tryExtract(
+            DocType::MedicationList,
+            $bytes,
+            $mimeType,
+            $correlationId,
+            $span,
+            $pid,
+        );
+
+        $extractionId = $this->persistDraft($pid, DocType::MedicationList, $outcome, $visionUsed, $correlationId, $userId);
+        $this->storeSource($pid, $filename, $mimeType, $bytes, $extractionId);
+        $this->tracer->record($span);
+
+        return new IngestResult($pid, $extractionId, DocType::MedicationList, $visionUsed, $schemaRejected);
+    }
+
+    /**
      * Manual-entry start: an empty draft for a lab tab with no PDF. The
      * physician adds result rows in the review UI, then locks.
      */

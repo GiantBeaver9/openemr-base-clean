@@ -60,7 +60,11 @@
             </div>
         </div>
         <div class="text-right">
-            {% if locked %}
+            {% if locked and is_medication_list %}
+                {# Medication lock freezes the verified transcription ONLY —
+                   never claim the chart got it (reconciliation is deferred). #}
+                <span class="badge badge-success p-2">{{ "Locked — verified (not in chart)"|xlt }}</span>
+            {% elseif locked %}
                 <span class="badge badge-success p-2">{{ "Locked — in chart"|xlt }}</span>
             {% else %}
                 <span class="badge badge-warning p-2">{{ "Draft — verifying"|xlt }}</span>
@@ -92,6 +96,16 @@
     {% elseif is_lab and identity_status == 'match' %}
         <div class="alert alert-success py-2" role="alert">
             <i class="fa fa-check-circle mr-1"></i>{{ "Patient name and date of birth on the document match this chart."|xlt }}
+        </div>
+    {% endif %}
+
+    {# Honest-scope banner for the third document type: locking a medication
+       list records verification only. The chart's medication list is NOT
+       touched — reconciliation (interactions, duplicates, superseded orders)
+       is a deliberately deferred clinical step. #}
+    {% if is_medication_list %}
+        <div class="alert alert-info py-2" role="alert">
+            <i class="fa fa-info-circle mr-1"></i>{{ "Locking saves this verified transcription only. These medications are NOT written to the chart's medication list — reconcile them into the chart through your normal clinical workflow."|xlt }}
         </div>
     {% endif %}
 
@@ -237,7 +251,7 @@
                 {# Single-quoted attribute: xlj (json_encode) supplies double
                    quotes, which would close a double-quoted attribute early. #}
                 <form method="POST" action="{{ post_url|attr }}" class="form-inline d-inline-flex align-items-end"
-                      onsubmit='return confirm({{ "Lock these values and write them into the chart?"|xlj }})'>
+                      onsubmit='return confirm({{ (is_medication_list ? "Lock this verified transcription? Medications are NOT written to the chart." : "Lock these values and write them into the chart?")|xlj }})'>
                     {{ csrfToken('default', 'csrf_token_form') }}
                     <input type="hidden" name="action" value="lock">
                     <input type="hidden" name="extraction_id" value="{{ extraction_id|attr }}">

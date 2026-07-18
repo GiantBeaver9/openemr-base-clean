@@ -71,10 +71,12 @@ final class ExtractionReview
     }
 
     /**
-     * Verify & lock. Commits the verified values to the chart, records the
-     * write-back lineage, computes and stores extraction accuracy, and flips the
-     * extraction to `locked`. Idempotent: a second lock of the same extraction
-     * commits nothing new.
+     * Verify & lock. Commits the verified values to the chart (intake
+     * demographics / lab results), records the write-back lineage, computes and
+     * stores extraction accuracy, and flips the extraction to `locked`.
+     * Idempotent: a second lock of the same extraction commits nothing new.
+     * For a MEDICATION LIST, lock deliberately writes NOTHING to the chart —
+     * it freezes the verified transcription only; see the match arm below.
      *
      * `$parentSpanId`: null (the standalone extraction_review.php lock) keeps
      * the `chart_commit` span a ROOT span under the extraction's own
@@ -94,16 +96,25 @@ final class ExtractionReview
         $start = new \DateTimeImmutable();
         $t0 = microtime(true);
 
-        if ($header->docType === DocType::IntakeForm) {
-            $this->commitIntake($header, $fields);
-        } else {
+        match ($header->docType) {
+            DocType::IntakeForm => $this->commitIntake($header, $fields),
             // Fallback chain for the specimen date: the reviewer's explicit
             // form value wins; absent that, the collection date parsed off the
             // printed report at ingest (W5); ChartWriter's own last resort is
             // today. The review screen prefills the form field from the same
             // parsed date, so on the human path these usually agree.
-            $this->commitLabs($header, $providerId, $fields, $collectionDate ?? $header->collectionDate);
-        }
+            DocType::LabPdf => $this->commitLabs($header, $providerId, $fields, $collectionDate ?? $header->collectionDate),
+            // DELIBERATE no chart write. Locking a medication list freezes the
+            // human-verified transcription in module staging and records
+            // extraction accuracy — nothing more. Reconciling extracted
+            // medications into the chart's medication/prescription tables is a
+            // clinical-safety-sensitive step (interactions, duplicates,
+            // superseded orders) this module defers, matching its pattern of
+            // deferring risky writes until a dedicated, human-gated flow
+            // exists. Fields therefore get NO lineage and stay uncommitted —
+            // honestly reflecting that they are not in the chart.
+            DocType::MedicationList => null,
+        };
 
         $this->store->markLocked($extractionId, $actorUserId, $this->accuracy($fields));
 

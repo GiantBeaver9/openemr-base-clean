@@ -66,7 +66,7 @@ paths:
                 csrf_token_form: { type: string }
                 doc_type:
                   type: string
-                  enum: [intake_form, lab_pdf]
+                  enum: [intake_form, lab_pdf, medication_list]
                   description: Required when `document` is uploaded; ignored otherwise.
                 document:
                   type: string
@@ -166,6 +166,50 @@ paths:
       responses:
         "302": { description: "Redirect to extraction_review.php?extraction_id=<id>." }
         "200": { description: "The form re-rendered with a validation error." }
+        "403": { description: "CSRF or ACL denied." }
+  /interface/modules/custom_modules/oe-module-clinical-copilot/public/medication_upload.php:
+    get:
+      tags: [ingestion]
+      summary: Medication list upload form for a patient (third patient-attached document type)
+      parameters:
+        - { name: pid, in: query, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: "The medication list upload page." }
+        "400": { description: "Missing pid." }
+        "403": { description: "ACL denied." }
+    post:
+      tags: [ingestion]
+      summary: Upload a medication list for extraction and human review
+      description: >
+        Extracts each medication (name, dose, route, frequency, PRN flag,
+        prescriber — transcribed exactly as printed, never normalized) into a
+        draft in module staging and 302-redirects to
+        extraction_review.php?extraction_id=<id>. Locking the review freezes
+        the verified transcription and records extraction accuracy but writes
+        NOTHING to the chart's medication/prescription tables — medication
+        chart reconciliation is a deliberately deferred clinical step. With no
+        model configured the upload degrades to a blank draft skeleton.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [action, pid, csrf_token_form]
+              properties:
+                action: { type: string, enum: [upload] }
+                pid: { type: integer }
+                csrf_token_form: { type: string }
+                document:
+                  type: string
+                  format: binary
+                  description: >
+                    The medication list (application/pdf, image/png,
+                    image/jpeg, image/webp).
+      responses:
+        "302": { description: "Redirect to extraction_review.php?extraction_id=<id>." }
+        "200": { description: "The form re-rendered with a validation error." }
+        "400": { description: "Missing pid." }
         "403": { description: "CSRF or ACL denied." }
   /interface/modules/custom_modules/oe-module-clinical-copilot/public/extraction_review.php:
     get:

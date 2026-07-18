@@ -252,7 +252,7 @@ CREATE TABLE IF NOT EXISTS `mod_copilot_ui_event` (
 CREATE TABLE IF NOT EXISTS `mod_copilot_extraction` (
     `id` BIGINT(20) NOT NULL AUTO_INCREMENT,
     `pid` BIGINT(20) NOT NULL COMMENT 'references patient_data.pid; for intake this is the patient created from the upload',
-    `doc_type` VARCHAR(32) NOT NULL COMMENT 'intake_form | lab_pdf',
+    `doc_type` VARCHAR(32) NOT NULL COMMENT 'intake_form | lab_pdf | medication_list (medication_list locks WITHOUT a chart write)',
     `source_document_id` BIGINT(20) DEFAULT NULL COMMENT 'references documents.id (the stored source PDF); NULL for pure manual entry',
     `status` VARCHAR(16) NOT NULL DEFAULT 'draft' COMMENT 'draft (under review, editable) | locked (committed to chart, elevated-only edit)',
     `model` VARCHAR(64) DEFAULT NULL COMMENT 'VLM model version string; NULL when the row was hand-entered (LLM unavailable / manual path)',

@@ -17,7 +17,7 @@ synthesizes it.
 
 ## 1. Document ingestion flow
 
-Three document types: two patient-attached entry flows sharing one pipeline
+Four document types: three patient-attached entry flows sharing one pipeline
 and an `insert → verify → lock` lifecycle, plus a knowledge-corpus flow that
 reuses the same vision path.
 
@@ -30,16 +30,29 @@ co-pilot on the patient chart)
 Upload a lab PDF **or** start manual entry → extraction (or empty draft) →
 review page → lock, which commits results to `procedure_result`.
 
+**Medication list (existing patient)** — `public/medication_upload.php`
+The third *patient-attached* type. Upload a medication list (discharge list,
+pharmacy printout) → extraction against `medication_list.schema.json`
+(name/dose/route/frequency/prn/prescriber transcribed **exactly as printed**,
+never normalized; citations optional, intake-style) → draft in module staging
+→ the same review page → lock, which **freezes the verified transcription
+only**. Honest scope: locking writes NOTHING to the chart's
+medication/prescription tables — medication chart reconciliation
+(interactions, duplicates, superseded orders) is a clinical-safety-sensitive
+step deliberately deferred to a dedicated human-gated flow, exactly as intake
+once deferred create-at-upload. The review UI and the lock confirmation say so
+explicitly.
+
 **Knowledge document (guideline corpus)** — `public/knowledge_upload.php`
-The third ingestion type: upload a guideline PDF/image → the same vision path
+The corpus ingestion type: upload a guideline PDF/image → the same vision path
 transcribes it → chunk → operator previews the proposed chunks → commit to the
 RAG store (`src/Knowledge/KnowledgeDocumentIngestor`: extract → chunk →
 review → write, with preview and commit split so confirm never re-transcribes).
 Honest framing: this feeds the **PHI-free guideline corpus** (§7), not a
 patient chart — it exercises the multimodal path and the review-before-write
-discipline, but not the chart-write seam. The documented next
-*patient-attached* type (referral fax / medication list) would ride the shared
-pipeline below by adding a schema per §2.
+discipline, but not the chart-write seam. The medication-list type above shows
+how the next patient-attached type (a referral fax) would land: a schema per
+§2, a prompt arm, an upload page — riding the shared pipeline below.
 
 Shared pipeline (`src/Ingest/AttachAndExtract.php` orchestrates 1–4; the review
 page drives 5–7):
@@ -71,8 +84,12 @@ and is discarded, never stored.
 - `lab_pdf.schema.json` — per-result `field_key` (test name), value, unit,
   reference range, abnormal flag, collection date. `field_key` is open (test
   names are free text).
+- `medication_list.schema.json` — per-medication attribute runs in document
+  order (`medication_name` starts each medication, then dose/route/frequency/
+  prn/prescriber), transcribed exactly as printed. `field_key` is a **closed
+  enum** (the intake convention).
 
-Lab fields require a citation (`page` + `quote`); intake fields may
+Lab fields require a citation (`page` + `quote`); intake and medication-list fields may
 **volunteer** one (optional in the schema, never in `required` — a missing
 citation never fails an intake extraction, and volunteered ones surface on the
 review screen as a `p.N` deep link + quote tooltip). Values may be `null`
@@ -393,7 +410,8 @@ themselves are documented per flow:
 ## 14. Status
 
 Built, tested, and gate-green on `FINAL_REVIEW`: the ingestion pipeline
-(§1–5) including the third (knowledge-document) type, the supervisor + workers
+(§1–5) including the medication-list (extract + review only; chart
+reconciliation deferred) and knowledge-document types, the supervisor + workers
 + critic graph behind `public/agent.php` (§6), the RAG stack with production
 rerank and section/url citation provenance (§7), the 4-level trace tree (§8),
 the PR-blocking eval gate (§9), the layered test suite (§10 — isolated 509

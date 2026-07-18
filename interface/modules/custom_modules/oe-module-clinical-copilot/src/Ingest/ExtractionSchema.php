@@ -93,12 +93,12 @@ final class ExtractionSchema
 
             // A citation (page + quote) is required only for a LAB field that has
             // a value: labs drive the click-to-source bbox overlay, so every real
-            // result must cite its page. INTAKE citations are OPTIONAL — welcome
-            // when the model can supply them (the review form shows a page link
-            // and quote beside the field), but requiring them rejects the whole
-            // extraction and blanks the form whenever the model returns a value
-            // without a clean page/quote — the original intake breakage. And a
-            // field with no value has nothing to cite either.
+            // result must cite its page. INTAKE and MEDICATION-LIST citations are
+            // OPTIONAL — welcome when the model can supply them (the review
+            // screen shows a page link and quote beside the field), but requiring
+            // them rejects the whole extraction and blanks the review whenever
+            // the model returns a value without a clean page/quote — the original
+            // intake breakage. And a field with no value has nothing to cite.
             $hasValue = array_key_exists('value', $field) && is_string($field['value']) && $field['value'] !== '';
             if ($hasValue && $docType === DocType::LabPdf) {
                 if (!isset($field['page']) || !is_int($field['page']) || $field['page'] < 1) {
@@ -109,8 +109,8 @@ final class ExtractionSchema
                     $errors[] = "{$at}.quote must be a non-empty string (citation is required for a value)";
                 }
             } elseif ($hasValue && isset($field['page']) && (!is_int($field['page']) || $field['page'] < 1)) {
-                // Even where a citation is optional (intake), a page supplied
-                // alongside a real value must still be a positive 1-based
+                // Even where a citation is optional (intake, medication list),
+                // a page supplied alongside a real value must be a positive 1-based
                 // integer. A page like "one", a quoted "3", 2.0, true, or a
                 // zero/negative index can never address a real page in the
                 // source document, so the extraction is refused rather than
@@ -243,7 +243,9 @@ final class ExtractionSchema
      * A blank extraction for the manual-entry / degraded path: no model ran (or
      * its output was rejected), so there is nothing to verify against. For an
      * intake form we pre-seed one empty field per enum key so the review page
-     * renders the full form to hand-fill; for a lab report there is no fixed
+     * renders the full form to hand-fill; a medication list gets the same
+     * treatment — one blank attribute row per enum key, i.e. a single blank
+     * medication skeleton to hand-fill; for a lab report there is no fixed
      * field set, so the physician adds result rows themselves. Every value is
      * null and `vlmValue` is null, so these fields never count toward extraction
      * accuracy (there was no model claim to be right or wrong about).
@@ -261,13 +263,16 @@ final class ExtractionSchema
 
     /**
      * The closed field_key enum for a doc type, or null when field_key is open
-     * (lab test names are free text).
+     * (lab test names are free text). Intake AND medication lists are closed:
+     * intake keys name form fields, medication keys name the per-medication
+     * attributes (medication_name/dose/route/frequency/prn/prescriber) —
+     * emitted as document-order runs, each starting at a `medication_name`.
      *
      * @return list<string>|null
      */
     private static function allowedFieldKeys(DocType $docType): ?array
     {
-        if ($docType !== DocType::IntakeForm) {
+        if ($docType === DocType::LabPdf) {
             return null;
         }
 

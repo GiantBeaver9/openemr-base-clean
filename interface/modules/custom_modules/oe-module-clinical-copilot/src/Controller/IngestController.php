@@ -107,6 +107,17 @@ final class IngestController
         return $this->ingest->ingestLab($pid, $bytes, $filename, $mimeType, $this->newCorrelationId(), $userId);
     }
 
+    /**
+     * Medication list (third patient-attached type): store the source, extract,
+     * persist the draft to module staging. Review + lock freeze the verified
+     * transcription; chart reconciliation is deliberately not performed
+     * ({@see \OpenEMR\Modules\ClinicalCopilot\Ingest\ExtractionReview::lock()}).
+     */
+    public function ingestMedicationList(int $pid, string $bytes, string $filename, string $mimeType, int $userId): IngestResult
+    {
+        return $this->ingest->ingestMedicationList($pid, $bytes, $filename, $mimeType, $this->newCorrelationId(), $userId);
+    }
+
     public function startManualLab(int $pid, int $userId): IngestResult
     {
         return $this->ingest->startManualLab($pid, $this->newCorrelationId(), $userId);
@@ -216,6 +227,10 @@ final class IngestController
             'doc_type' => $header->docType->value,
             'doc_type_label' => $header->docType->label(),
             'is_lab' => $header->docType->value === 'lab_pdf',
+            // Medication lists render through the same review screen but lock
+            // WITHOUT a chart write (reconciliation deferred); the template
+            // uses this to swap the lock/locked wording and show the banner.
+            'is_medication_list' => $header->docType->value === 'medication_list',
             'status' => $header->status->value,
             'locked' => $header->isLocked(),
             'field_accuracy' => $header->fieldAccuracy,
