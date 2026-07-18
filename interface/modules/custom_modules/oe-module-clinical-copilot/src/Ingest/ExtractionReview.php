@@ -75,8 +75,15 @@ final class ExtractionReview
      * write-back lineage, computes and stores extraction accuracy, and flips the
      * extraction to `locked`. Idempotent: a second lock of the same extraction
      * commits nothing new.
+     *
+     * `$parentSpanId`: null (the standalone extraction_review.php lock) keeps
+     * the `chart_commit` span a ROOT span under the extraction's own
+     * correlation id — unchanged behavior. When an agent-driven flow commits,
+     * it passes its span id (with the extraction already carrying the
+     * supervisor run's correlation id) so `chart_commit` attaches under the
+     * supervisor trace tree.
      */
-    public function lock(int $extractionId, int $actorUserId, int $providerId, ?string $collectionDate = null): void
+    public function lock(int $extractionId, int $actorUserId, int $providerId, ?string $collectionDate = null, ?string $parentSpanId = null): void
     {
         $header = $this->requireHeader($extractionId);
         if ($header->isLocked()) {
@@ -103,7 +110,7 @@ final class ExtractionReview
         $this->tracer->record(new TraceSpan(
             $header->correlationId,
             TraceSpan::newSpanId(),
-            null,
+            $parentSpanId,
             'chart_commit',
             $start,
             (int)round((microtime(true) - $t0) * 1000),

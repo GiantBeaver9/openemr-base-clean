@@ -33,6 +33,15 @@ use OpenEMR\Modules\ClinicalCopilot\Reduce\LlmUnavailableException;
  * dead-ends on a missing or misbehaving model. The correlation id threads through
  * the ingest span and the vision_extract child span, so the extraction is one
  * reconstructable trace.
+ *
+ * Span parentage: {@see previewIntake} / {@see ingestLab} accept an OPTIONAL
+ * `$parentSpanId`. Standalone callers (lab_upload.php / intake_upload.php via
+ * {@see \OpenEMR\Modules\ClinicalCopilot\Controller\IngestController}) omit it,
+ * so their `ingest`/`preview` spans stay ROOT spans under their own
+ * `ingest-...` correlation id — unchanged behavior. When the agent path drives
+ * ingestion it passes its worker span id (and the supervisor run's correlation
+ * id), attaching the whole ingest subtree under the supervisor trace:
+ * `supervisor -> worker -> ingest/preview -> vision_extract`.
  */
 final class AttachAndExtract
 {
@@ -59,11 +68,15 @@ final class AttachAndExtract
      * intake citations are never required, so an extraction with none is still
      * fully successful.
      *
+     * `$parentSpanId`: null (the standalone upload endpoints) keeps the
+     * `preview` span a root; the agent path passes its worker span id so the
+     * preview subtree attaches under the supervisor trace.
+     *
      * @return array{fields: array<string, string|null>, citations: array<string, array{page: int|string|null, quote: string}>, vision_used: bool, schema_rejected: bool}
      */
-    public function previewIntake(string $bytes, string $mimeType, string $correlationId): array
+    public function previewIntake(string $bytes, string $mimeType, string $correlationId, ?string $parentSpanId = null): array
     {
-        $span = $this->openSpan($correlationId, null, 'preview', 0);
+        $span = $this->openSpan($correlationId, $parentSpanId, 'preview', 0);
         [$outcome, $visionUsed, $schemaRejected] = $this->tryExtract(
             DocType::IntakeForm,
             $bytes,
@@ -133,6 +146,10 @@ final class AttachAndExtract
     /**
      * Labs: existing patient. Store the source, extract, persist the draft. No
      * chart write here — results reach `procedure_result` only on lock.
+     *
+     * `$parentSpanId`: null (the standalone lab_upload.php path) keeps the
+     * `ingest` span a root; the agent path passes its worker span id so the
+     * ingest subtree attaches under the supervisor trace.
      */
     public function ingestLab(
         int $pid,
@@ -141,8 +158,9 @@ final class AttachAndExtract
         string $mimeType,
         string $correlationId,
         int $userId,
+        ?string $parentSpanId = null,
     ): IngestResult {
-        $span = $this->openSpan($correlationId, null, 'ingest', $pid);
+        $span = $this->openSpan($correlationId, $parentSpanId, 'ingest', $pid);
         [$outcome, $visionUsed, $schemaRejected] = $this->tryExtract(
             DocType::LabPdf,
             $bytes,

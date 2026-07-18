@@ -207,15 +207,30 @@ final class W2EndToEndTest extends TestCase
         $review->lock($result->extractionId, self::USER_ID, self::PROVIDER_ID, self::COLLECTION_DATE);
         self::assertSame($resultCountBefore, self::countProcedureResults($this->pid), 're-locking must never duplicate chart rows');
 
-        // The ingest + commit left a reconstructable trace (I12).
-        $spanKinds = QueryUtils::fetchTableColumn(
-            'SELECT `kind` FROM `mod_copilot_trace` WHERE `correlation_id` = ?',
-            'kind',
+        // The ingest + commit left a reconstructable trace (I12). This drive is
+        // the STANDALONE path (no parent span id passed to ingestLab()/lock()),
+        // so `ingest` and `chart_commit` must stay ROOT spans of their own
+        // correlation tree — only the agent path, which passes its worker span
+        // id down, attaches them under a supervisor tree (W8; see
+        // Tests\Isolated\Agent\SupervisorTraceTreeTest for that shape).
+        $spanRows = QueryUtils::fetchRecords(
+            'SELECT `kind`, `span_id`, `parent_span_id` FROM `mod_copilot_trace` WHERE `correlation_id` = ?',
             [self::CORRELATION_ID],
         );
-        self::assertContains('vision_extract', $spanKinds, 'the stubbed VLM call must still record its child span');
-        self::assertContains('ingest', $spanKinds);
-        self::assertContains('chart_commit', $spanKinds, 'the lock must record the chart-commit span');
+        $spansByKind = [];
+        foreach ($spanRows as $row) {
+            $spansByKind[(string)$row['kind']] = $row;
+        }
+        self::assertArrayHasKey('vision_extract', $spansByKind, 'the stubbed VLM call must still record its child span');
+        self::assertArrayHasKey('ingest', $spansByKind);
+        self::assertArrayHasKey('chart_commit', $spansByKind, 'the lock must record the chart-commit span');
+        self::assertNull($spansByKind['ingest']['parent_span_id'], 'standalone ingest stays a root span');
+        self::assertNull($spansByKind['chart_commit']['parent_span_id'], 'standalone chart_commit stays a root span');
+        self::assertSame(
+            (string)$spansByKind['ingest']['span_id'],
+            (string)$spansByKind['vision_extract']['parent_span_id'],
+            'the VLM child span must parent to the ingest span',
+        );
 
         // ---- Stage 3: retrieval -- the REAL SparseRetriever over the real corpus. ----
         $snippets = (new SparseRetriever(GuidelineCorpus::createDefault()))
