@@ -70,9 +70,12 @@ ALLOWED_SPEC_DOCS=(
   ".gitattributes"
   "Dockerfile.railway"
   "railway-install-copilot.sh"
-  # The PR-blocking eval-gate workflow -- the one intentional core-workflow
-  # addition (W1a); everything else under .github/ stays off-limits.
+  # The intentional core-workflow additions: the PR-blocking eval-gate
+  # workflow (W1a) and the dependency-audit + security-scan workflow the
+  # Week 2 engineering requirements mandate on every PR. Everything else
+  # under .github/ stays off-limits.
   ".github/workflows/w2-eval-gate.yml"
+  ".github/workflows/dependency-security-audit.yml"
 )
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"

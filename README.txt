@@ -63,6 +63,81 @@ worker cron requirement, the SELECT-only MySQL user recommendation, the test
 suites, the CI additivity gates, and the ops artifacts (Bruno collection,
 load/baseline harness, [AI cost analysis](interface/modules/custom_modules/oe-module-clinical-copilot/ops/cost-analysis.md)).
 
+## Week 2 — Multimodal Evidence Agent
+
+Everything above describes the **Week 1 baseline**: a strictly read-only
+co-pilot — deterministic PHP pulls and cites chart facts, the LLM only
+narrates, and nothing is ever written to the chart. **Week 2 adds the inverse
+path**, still inside the same additive module:
+
+- **Document ingestion** for three patient-attached types (`lab_pdf`,
+  `intake_form`, `medication_list`) with strict JSON schemas, an
+  `insert → verify → lock` human-review lifecycle, and per-field
+  page/quote/**bbox** citations rendered as a click-to-source overlay —
+  plus a fourth, knowledge-corpus type for guideline documents.
+- **Audited chart write-back** through a single sanctioned writer
+  (`ChartWriter`), enforced by a module-scoped PHPStan rule.
+- **Hybrid RAG** over a PHI-free endocrinology guideline corpus — sparse
+  TF-IDF fused with optional dense (pgvector) retrieval, then reranked.
+- **Agent graph** behind `public/agent.php` — a deterministic supervisor
+  routing to intake-extractor and evidence-retriever workers, with a critic
+  stage that runs the V1–V6 verifier over every drafted answer.
+- **Eval gate** — a 50-case golden set with boolean rubrics, PR-blocking in CI.
+- **Observability** — a 4-level trace waterfall and per-doc-type extraction
+  accuracy on the dashboard.
+
+Design docs: **[W2_PRD.md](W2_PRD.md)** (what/why, acceptance criteria,
+milestones) and **[W2_ARCHITECTURE.md](W2_ARCHITECTURE.md)** (how), plus the
+module's [data model / lineage reference](interface/modules/custom_modules/oe-module-clinical-copilot/docs/W2_DATA_MODEL.md)
+and [backup & recovery plan](interface/modules/custom_modules/oe-module-clinical-copilot/docs/W2_BACKUP_RECOVERY.md).
+The API surface is specified in the module's `ops/api/openapi.yaml` with a
+runnable [Bruno collection](interface/modules/custom_modules/oe-module-clinical-copilot/ops/bruno/).
+
+**Which branch to check out.** Week 2 is finalized on **`FINAL_REVIEW`**
+(also carried by the `claude/clinical-copilot-week-2-*` working branches) —
+that is the branch a grader should check out. Honest caveat: the Railway
+deploy fetches branch **`main`** (see the module's
+[`docs/HANDOFF.md`](interface/modules/custom_modules/oe-module-clinical-copilot/docs/HANDOFF.md)),
+so the live URL above reflects Week 2 only as far as `main` has been
+fast-forwarded to it — when in doubt, trust `FINAL_REVIEW` plus a local
+stack over the deployed app.
+
+**Week 2 entry points** — all module pages under
+`interface/modules/custom_modules/oe-module-clinical-copilot/public/`,
+session-authenticated (CSRF + ACL) unless noted:
+
+| Surface | Page | Where it appears in the UI |
+|---|---|---|
+| Intake upload (creates the patient) | `intake_upload.php` | "Co-Pilot Intake Upload" under both the Reports and Patient top menus |
+| Lab upload / manual entry | `lab_upload.php?pid=<pid>` | the "Labs (Co-Pilot)" patient-chart tab |
+| Medication-list upload | `medication_upload.php?pid=<pid>` | direct URL only (no menu item yet); extract + review only — locking never writes the chart's medication tables |
+| Knowledge (guideline) upload | `knowledge_upload.php` | "Co-Pilot Maintenance" top menu, admin-gated |
+| Extraction review (verify → lock) | `extraction_review.php?extraction_id=<id>` | redirect target of every upload above |
+| Agent run (supervisor + workers + critic) | `agent.php` | POST-only JSON API (OpenAPI spec + Bruno collection above) |
+| Guideline evidence panel | `evidence.php?pid=<pid>` | the "Guideline Evidence" patient-chart tab |
+| Dashboard (trace waterfall, accuracy) | `dashboard.php` | admin-gated |
+| Liveness / readiness | `health.php` / `ready.php` | unauthenticated probes |
+
+**Environment variables.** The complete table (every variable, default, and a
+copy-pasteable example) is the module's
+[`docs/configuration.md`](interface/modules/custom_modules/oe-module-clinical-copilot/docs/configuration.md).
+The no-key default described in "Setup" below extends to Week 2: with nothing
+configured, vision extraction degrades to a blank draft the reviewer completes
+by hand, and retrieval runs sparse-only over the committed in-repo corpus —
+no flow dead-ends.
+
+**Eval gate.** Run it locally — deterministic, no model or DB required:
+
+```bash
+php interface/modules/custom_modules/oe-module-clinical-copilot/ops/eval/run-evals.php
+```
+
+CI runs the same gate PR-blocking in
+[`.github/workflows/w2-eval-gate.yml`](.github/workflows/w2-eval-gate.yml),
+alongside the additivity gate and the module's isolated PHPUnit suite. The
+golden set and baseline live in
+[`ops/eval/`](interface/modules/custom_modules/oe-module-clinical-copilot/ops/eval/).
+
 ## Setup — run it locally
 
 The dev stack is Docker-first; you need no host PHP/Node. One command brings up
