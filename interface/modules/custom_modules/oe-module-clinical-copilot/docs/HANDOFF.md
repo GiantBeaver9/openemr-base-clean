@@ -147,3 +147,4 @@ openemr-cmd phpstan                              # static analysis (alias: pst)
 - `docs/knowledge-base.md`, `docs/configuration.md`, `docs/ingestion-failure-modes.md`
 - `docs/SECURITY.md`, `docs/REPORT.md` — code-review + audit output.
 - `docs/W2_BACKUP_RECOVERY.md` — backup & recovery plan (RPO/RTO per artifact).
+- `docs/W2_DATA_MODEL.md` — data model: owner/lineage/ACL/validation per Week-2 artifact.

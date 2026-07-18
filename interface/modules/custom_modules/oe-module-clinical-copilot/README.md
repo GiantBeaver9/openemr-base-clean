@@ -41,6 +41,8 @@ bring-up, and more. New calls append here as they are made.
 
 [`docs/W2_BACKUP_RECOVERY.md`](docs/W2_BACKUP_RECOVERY.md) is the backup & recovery plan — what to back up and where it lives, backup/restore procedures, and per-artifact RPO/RTO targets.
 
+[`docs/W2_DATA_MODEL.md`](docs/W2_DATA_MODEL.md) is the data model / lineage / authority reference — owner (source of truth), provenance columns, access control, and validation gates for each Week-2 artifact type, plus the no-silent-overwrites invariant and its enforcing mechanisms.
+
 ## LLM credential / config surface
 
 [`docs/configuration.md`](docs/configuration.md) is the complete list of
