@@ -290,7 +290,10 @@ Create `docs/W2_ARCHITECTURE.md` — either move Part 2 into it or make it a str
 index that points into `ARCHITECTURE.md` §7–12 and covers the required sections (ingestion
 flow, worker graph, RAG design, eval gate, risks, tradeoffs, **testing strategy**,
 **Week-2 failure modes + recovery**). Fix the dangling `ARCHITECTURE_COMPLETE.md`
-cross-reference (the file does not exist — repoint or remove). Also fold in the W3 seeded-
+cross-reference (the file does not exist — repoint or remove). *(Correction at
+execution time: root `ARCHITECTURE_COMPLETE.md` exists on `FINAL_REVIEW` and its
+referenced anchors — U9/U10 rows, WORKER block, OPEN-2 — resolve; the refs were
+verified valid and left in place.)* Also fold in the W3 seeded-
 regression demo note (from W1a) and the W17 third-doc-type framing.
 
 ### W15 — `/ready` W2 deps + the three named alerts (small wiring)

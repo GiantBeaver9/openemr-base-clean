@@ -81,4 +81,5 @@ additive precision on top.
 - Repo lint/CI: codespell skips `**/public/assets/*` and `npm run lint:js`
   globs only `**/*.js`, so the vendored `.mjs` bundles are outside both.
 
-(To be folded into `W2_ARCHITECTURE.md` by a later workstream.)
+(Folded into the root `W2_ARCHITECTURE.md` — see its §11 bullet on the
+shipped bbox overlay, which points back here for design and CSP detail.)

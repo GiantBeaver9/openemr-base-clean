@@ -17,7 +17,9 @@ synthesizes it.
 
 ## 1. Document ingestion flow
 
-Two entry flows, one shared pipeline, an `insert → verify → lock` lifecycle.
+Three document types: two patient-attached entry flows sharing one pipeline
+and an `insert → verify → lock` lifecycle, plus a knowledge-corpus flow that
+reuses the same vision path.
 
 **Intake (new patient)** — `public/intake_upload.php`
 Upload an intake PDF → vision extraction → **create the patient** from the
@@ -27,6 +29,17 @@ extracted demographics → redirect to the review page to verify/edit → lock.
 co-pilot on the patient chart)
 Upload a lab PDF **or** start manual entry → extraction (or empty draft) →
 review page → lock, which commits results to `procedure_result`.
+
+**Knowledge document (guideline corpus)** — `public/knowledge_upload.php`
+The third ingestion type: upload a guideline PDF/image → the same vision path
+transcribes it → chunk → operator previews the proposed chunks → commit to the
+RAG store (`src/Knowledge/KnowledgeDocumentIngestor`: extract → chunk →
+review → write, with preview and commit split so confirm never re-transcribes).
+Honest framing: this feeds the **PHI-free guideline corpus** (§7), not a
+patient chart — it exercises the multimodal path and the review-before-write
+discipline, but not the chart-write seam. The documented next
+*patient-attached* type (referral fax / medication list) would ride the shared
+pipeline below by adding a schema per §2.
 
 Shared pipeline (`src/Ingest/AttachAndExtract.php` orchestrates 1–4; the review
 page drives 5–7):
@@ -59,8 +72,16 @@ and is discarded, never stored.
   reference range, abnormal flag, collection date. `field_key` is open (test
   names are free text).
 
-Every field requires a citation (`page` + `quote`); values may be `null`
+Lab fields require a citation (`page` + `quote`); intake fields may
+**volunteer** one (optional in the schema, never in `required` — a missing
+citation never fails an intake extraction, and volunteered ones surface on the
+review screen as a `p.N` deep link + quote tooltip). Values may be `null`
 (blank/illegible) but must be present — the model may never invent a value.
+A citation `page` must be an integer; a non-integer page is refused, not
+coerced. The lab schema's `collection_date` is carried end-to-end: parsed
+strictly (`Y-m-d`, garbage degrades to `null` like `patient_name`/
+`patient_dob`), persisted on the extraction header, prefilled into the review
+draw-date field, and used as the lock/commit fallback.
 
 ---
 
@@ -120,7 +141,7 @@ normal core-row citation automatically.
 
 ---
 
-## 6. Worker graph — deterministic supervisor + two workers
+## 6. Worker graph — deterministic supervisor, two workers, and a critic
 
 `src/Agent/`. The spec requires "supervisor + 2 workers." We use a
 **deterministic router, not an LLM** (see Risks/Tradeoffs §11).
@@ -135,6 +156,20 @@ normal core-row citation automatically.
 - `IntakeExtractorWorker` — wraps `ExtractionClient`; degrades to `null` on
   no-model/schema-reject, never throws through the orchestration.
 - `EvidenceRetrieverWorker` — wraps the RAG retriever (§7).
+- `CriticWorker` — the critic stage on the supervisor path: the LLM-backed
+  `AnswerComposerInterface` implementation drafts an answer grounded in
+  tool-fetched chart facts, the critic runs the V1–V6 verifier over the draft
+  (recorded as a `verify` child span), and a rejected draft degrades to a
+  refusal — never the uncited/unsafe text. The verifier hard gate is
+  **enforced by default** module-wide
+  (`VerificationPolicy::GATE_ENFORCED_DEFAULT = true`;
+  `CLINICAL_COPILOT_VERIFY_ENFORCE=0` remains a QA-only relaxation).
+
+**Endpoint** — `public/agent.php` (POST-only JSON, CSRF + ACL, read-only
+session) drives one supervisor run per request via `AgentController`, with the
+parse-don't-validate boundary in `AgentAskRequest`. It is declared in
+`ops/api/openapi.yaml` and bound to the implementation by the OpenAPI contract
+tests (§10). One correlation id links the whole run's span tree (§8).
 
 ---
 
@@ -146,17 +181,27 @@ guideline recommends X [cite]," with guideline evidence kept separate from
 patient facts by citation type.
 
 - **Corpus** — a small, committed, PHI-free endocrinology guideline set
-  (`src/Rag/corpus/endocrinology.json`), reproducible from source control.
+  (`src/Rag/corpus/endocrinology.json`), reproducible from source control, and
+  growable at runtime through the knowledge-document upload flow (§1), which
+  chunks operator-reviewed guideline documents into the same store.
 - **Hybrid retrieval** (`HybridRetriever`) — sparse (`SparseRetriever`, pure-PHP
   TF-IDF with analyte-tag boost, offline) fused with an optional dense retriever
-  via Reciprocal Rank Fusion, then reranked (`RerankerInterface`).
+  via Reciprocal Rank Fusion, then reranked (`RerankerInterface`). The
+  **production path reranks too**: the deployed `PostgresGuidelineRetriever`
+  (pgvector + full-text) over-fetches candidates from both stages and applies
+  the same reranker before top-K truncation, matching the offline retriever.
+- **Citation provenance** — guideline citations carry source, **section**,
+  chunk id, quote, and **url** (`SourceCitation.page_or_section` is
+  `int|string|null`; documents cite pages, guidelines cite sections), so a
+  rendered guideline claim links back to the exact chunk and its source URL.
 - **Degrades one layer at a time** — no credentials ⇒ sparse-only +
   `PassthroughReranker`: still real, cited evidence, no network. Dense embeddings
-  and a Cohere-style reranker light up independently when configured.
-- **Integration points** (augmentation, both additive): the summarizer renders a
-  distinct "guideline evidence" section beside the verified narrative; the chat
-  gets one deterministic `get_guideline_evidence(topic)` tool. Neither mixes
-  guideline evidence into the patient-fact citation pipeline.
+  and the knowledge Postgres light up independently when configured.
+- **Integration points** (augmentation, all additive): the evidence panel
+  (`public/evidence.php` + `evidence.html.twig`) renders a distinct "guideline
+  evidence" section beside the verified narrative, and the supervisor path
+  (§6) gathers evidence via `EvidenceRetrieverWorker`. Neither mixes guideline
+  evidence into the patient-fact citation pipeline.
 
 > Not used for lab ingestion: "which page has which result" is already produced
 > deterministically by extraction (`page` + `bbox` per field), so RAG is reserved
@@ -172,6 +217,14 @@ nesting via `parent_span_id`). New span kinds: `ingest`, `vision_extract`,
 propagates through document storage, extraction, worker handoffs, and the chart
 commit — a full Week 2 request is reconstructable from the correlation id alone.
 
+Workers wrap their RAG/VLM sub-calls in `retrieve` / `vision_extract` child
+spans parented to their own `worker` span, and the ingest path accepts an
+optional parent span id (agent-driven ingestion attaches under the supervisor
+tree; standalone uploads keep their root spans). One correlation id therefore
+reconstructs the full **4-level waterfall**:
+`supervisor → worker → {retrieve | vision_extract} → chart_commit`, plus the
+critic's `verify` child span, viewable in `public/dashboard.php`.
+
 **Extraction accuracy** is the headline Week 2 metric: the human's edits are the
 ground truth. Each field stores `vlm_value` (model) and `value` (human-verified);
 on lock, `field_accuracy = accepted-unchanged / model-proposed` is computed and
@@ -180,17 +233,37 @@ a rate over field keys and accept/edit booleans, never clinical values.
 
 ---
 
-## 9. Eval gate (design; the primary remaining deliverable)
+## 9. Eval gate (shipped — PR-blocking CI)
 
 A 50-case golden set with **boolean** rubrics — `schema_valid`,
 `citation_present`, `factually_consistent`, `safe_refusal`, `no_phi_in_logs` —
-run as a PR-blocking check that fails on a >5% category regression. Phase-A code
-already wires the rubric hooks: schema validation (`schema_valid`), the mandatory
-`SourceCitation` per fact (`citation_present`), schema-gated extraction
-(`factually_consistent`), and PHI-free traces (`no_phi_in_logs`). The runner
-follows the existing `tests/smoke/deterministic-core-smoke.php` exit-code
-pattern; the corpus/golden set is committed (reproducible from the repo). This
-gate is the main item still owed (see §13).
+committed under `ops/eval/` (`cases.json` + `baseline.json`) and run by
+`ops/eval/run-evals.php` through the module's real deterministic code paths.
+The runner exits non-zero when any category's pass rate regresses >5% against
+the baseline or breaches an absolute floor. Every case supplies the model
+output verbatim, so the gate runs in CI with **no live model or database**.
+Re-baselining after an intentional behaviour change is explicit
+(`--update-baseline`, diff reviewed).
+
+`.github/workflows/w2-eval-gate.yml` makes it PR-blocking: one job runs the
+golden-set evals plus the additivity gate (`ops/ci/check-additivity.sh`
+against the merge base), and a second runs the module's isolated PHPUnit
+suite — grown **492 → 509 tests** during remediation, now including the
+OpenAPI contract tests and the isolated end-to-end test (§10).
+
+### Seeded-regression demo
+
+The procedure that proves the gate actually blocks a regression:
+
+1. Open a throwaway PR against `FINAL_REVIEW` flipping a single eval
+   expectation (e.g. invert one case's expected rubric boolean in
+   `ops/eval/cases.json`).
+2. The `w2-eval-gate` workflow goes **red** on the PR — the eval job exits
+   non-zero on the seeded category regression.
+3. Revert the flip on the same PR → the workflow returns **green**; close the
+   PR without merging.
+
+<!-- SEEDED-REGRESSION-DEMO-RUNS: placeholder — red and green workflow run URLs will be inserted here after the live demo. -->
 
 ---
 
@@ -198,20 +271,28 @@ gate is the main item still owed (see §13).
 
 Every test guards a documented failure mode.
 
-- **Isolated (no DB, no live model)** — the contracts: schema validation and each
-  failure mode (`ExtractionSchemaTest`), citation round-trip
-  (`SourceCitationTest`), the accuracy metric (`ExtractionAccuracyTest`),
-  extraction against a stub LLM (`ExtractionClientTest`), retrieval ranking and
-  degradation (`SparseRetrieverTest`), and supervisor routing + degradation
+- **Isolated (no DB, no live model; 509 tests, PR-blocking in CI)** — the
+  contracts: schema validation and each failure mode (`ExtractionSchemaTest`),
+  citation round-trip (`SourceCitationTest`), the accuracy metric
+  (`ExtractionAccuracyTest`), extraction against a stub LLM
+  (`ExtractionClientTest`), retrieval ranking and degradation
+  (`SparseRetrieverTest`), and supervisor routing + degradation
   (`SupervisorTest`). No model is ever called live — a hand-written
   `LlmClientInterface` stub stands in.
-- **DB-backed (`tests/Db/`, live schema)** — the write path end-to-end:
-  `AttachAndExtract` (doc stored, draft persisted, intake patient created),
-  `ChartWriter` idempotent commit, and the lock/unlock ACL. *(Owed — requires the
-  dev stack; see §13.)*
-- **Evaluated via the golden set** — agent behavior (§9).
-- **Static** — the additivity gate and the forbidden-write PHPStan rule run on
-  every change.
+- **OpenAPI contract (isolated, PR-blocking)** —
+  `tests/Isolated/Api/OpenApiContractTest.php` binds `ops/api/openapi.yaml`
+  to the implementation, so the declared endpoints (including
+  `public/agent.php`) cannot drift from the spec.
+- **End-to-end** — from a fixture lab PDF to a cited answer:
+  `tests/Isolated/E2e/W2EndToEndIsolatedTest.php` (stubbed, PR-blocking) and
+  `tests/Db/E2e/W2EndToEndTest.php` (live schema, dev container).
+- **DB-backed (`tests/Db/`, live schema; runs in the dev container)** — the
+  write path end-to-end: `AttachAndExtract` (doc stored, draft persisted,
+  intake patient created), `ChartWriter` idempotent commit, and the
+  lock/unlock ACL.
+- **Evaluated via the golden set (PR-blocking)** — agent behavior (§9).
+- **Static (PR-blocking)** — the additivity gate and the forbidden-write
+  PHPStan rule run on every change.
 
 ---
 
@@ -231,9 +312,12 @@ Every test guards a documented failure mode.
 - **Degrade-to-manual everywhere** — no credentials ⇒ extraction falls back to
   manual entry and retrieval to sparse-only. Honest and offline-capable, but
   extraction accuracy is only measured on the vision path.
-- **PDF bounding-box overlay is partial** — the review page ships click-to-source
-  citations (page + quote) and a source-document preview; the full canvas overlay
-  drawing normalized boxes on the rendered page (PDF.js) is the remaining UI item.
+- **PDF bounding-box overlay — shipped** — the lab review page renders the
+  source PDF to canvases via a vendored pdf.js and draws each field's
+  normalized 0–1000 citation bbox on the actual rendered page, with two-way
+  row ↔ box hover linking and click-to-source scroll/flash. The iframe viewer
+  (with `#page=N` deep links) remains the default and the no-pdf.js fallback —
+  never a broken pane. Design and CSP details: module `docs/bbox-overlay.md`.
 
 ---
 
@@ -265,16 +349,44 @@ golden set) are reproducible from the repo alone. Chart data
 (`documents`, `patient_data`, `procedure_result`) and the module ledgers
 (`mod_copilot_*`) are backed up with the OpenEMR database; the append-only
 ledgers must be exported before an uninstall (export-before-drop tooling remains
-open, as in Week 1).
+open, as in Week 1). The full plan — per-artifact-class **RPO/RTO targets**,
+backup procedures, and restore drills — is the module's
+[`docs/W2_BACKUP_RECOVERY.md`](interface/modules/custom_modules/oe-module-clinical-copilot/docs/W2_BACKUP_RECOVERY.md);
+per-artifact owner, lineage, ACL, and validation are formalized in
+[`docs/W2_DATA_MODEL.md`](interface/modules/custom_modules/oe-module-clinical-copilot/docs/W2_DATA_MODEL.md).
 
 ---
 
-## 13. Status
+## 13. Week-2 failure modes and recovery
 
-Built, tested (isolated), and additive-gate-green: the ingestion pipeline
-(§1–5), the deterministic worker graph (§6), and the RAG foundation (§7).
-**Owed:** the DB-backed test suite (§10, needs the dev stack), the 50-case eval
-gate runner (§9), the summarizer/chat evidence integration wiring (§7), and the
-PDF canvas bounding-box overlay (§11). Run the full suites via
-`openemr-cmd clean-sweep-tests` and `openemr-cmd code-quality` in the dev stack
-before submission.
+Every test in §10 guards a documented failure mode; the failure modes
+themselves are documented per flow:
+
+- **Per-flow failure analysis** — module
+  [`docs/ingestion-failure-modes.md`](interface/modules/custom_modules/oe-module-clinical-copilot/docs/ingestion-failure-modes.md):
+  for each of the three ingestion flows (intake, lab upload, knowledge
+  upload), the call chain, expected behavior, potential points of failure,
+  and the current-vs-desired backup story.
+- **Runtime failure model** — root [`ARCHITECTURE.md`](ARCHITECTURE.md) §6
+  (the Part 1 failure table: symptom → cause → way around) and §12 (the Week 2
+  cross-cutting invariant: degrade cleanly, never dead-end). The Week 2
+  degradation ladders live in §1 and §7 here: no model ⇒ manual-entry draft;
+  no knowledge Postgres ⇒ offline in-repo corpus; no embeddings ⇒ sparse-only
+  retrieval — each layer fails independently.
+- **Recovery** — the backup/restore plan with RPO/RTO targets in module
+  `docs/W2_BACKUP_RECOVERY.md` (§12 above); write-path recovery is idempotent
+  re-commit with lineage (§3), so a failed or repeated lock never duplicates
+  or orphans chart rows.
+
+---
+
+## 14. Status
+
+Built, tested, and gate-green on `FINAL_REVIEW`: the ingestion pipeline
+(§1–5) including the third (knowledge-document) type, the supervisor + workers
++ critic graph behind `public/agent.php` (§6), the RAG stack with production
+rerank and section/url citation provenance (§7), the 4-level trace tree (§8),
+the PR-blocking eval gate (§9), the layered test suite (§10 — isolated 509
+tests, OpenAPI contract, end-to-end, DB-backed), and the shipped bbox overlay
+(§11). Run the full suites via `openemr-cmd clean-sweep-tests` and
+`openemr-cmd code-quality` in the dev stack before submission.
