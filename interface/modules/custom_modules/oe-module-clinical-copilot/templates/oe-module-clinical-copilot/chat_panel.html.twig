@@ -124,6 +124,62 @@
             .trim();
     }
 
+    // Guideline evidence: deterministic, cited corpus snippets retrieved for
+    // the turn's question -- rendered VERBATIM in their own labelled block
+    // beneath the assistant's answer (never merged into the model's claims),
+    // matching the module's "guideline evidence and patient-record facts stay
+    // structurally separate" rule. DOM APIs / textContent only, same as the
+    // rest of this panel; the source url is attached only when it looks like
+    // a plain http(s) link.
+    function appendEvidence(evidence) {
+        var wrap = document.createElement('div');
+        wrap.className = 'ccp-narrative-claim ccp-chat-evidence';
+        var head = document.createElement('div');
+        var label = document.createElement('strong');
+        label.textContent = 'Guideline evidence: ';
+        head.appendChild(label);
+        var note = document.createElement('span');
+        note.className = 'text-muted small';
+        note.textContent = 'general guidance, cited from the office corpus -- separate from this patient\'s chart facts';
+        head.appendChild(note);
+        wrap.appendChild(head);
+
+        evidence.forEach(function (s) {
+            if (!s || typeof s !== 'object') {
+                return;
+            }
+            var quote = String(s.quote || '');
+            var source = String(s.source || '');
+            if (!quote || !source) {
+                return;
+            }
+            var row = document.createElement('div');
+            row.className = 'small mt-1';
+            row.appendChild(document.createTextNode(quote));
+            var cite = document.createElement('span');
+            cite.className = 'text-muted';
+            var citeText = ' — ' + source;
+            if (s.section) {
+                citeText += ' · ' + String(s.section);
+            }
+            cite.textContent = citeText;
+            row.appendChild(cite);
+            if (typeof s.url === 'string' && /^https?:\/\//i.test(s.url)) {
+                row.appendChild(document.createTextNode(' '));
+                var link = document.createElement('a');
+                link.href = s.url;
+                link.target = '_blank';
+                link.rel = 'noopener';
+                link.textContent = 'source';
+                row.appendChild(link);
+            }
+            wrap.appendChild(row);
+        });
+
+        turnsEl.appendChild(wrap);
+        turnsEl.scrollTop = turnsEl.scrollHeight;
+    }
+
     function appendLine(role, text) {
         var row = document.createElement('div');
         row.className = 'ccp-narrative-claim';
@@ -171,6 +227,14 @@
             }
         } else if (result.degraded_message) {
             appendLine('Assistant', result.degraded_message);
+        }
+
+        // The cited guideline-evidence block renders beneath the answer (and
+        // beneath a degraded message too -- the snippets are deterministic
+        // corpus content, still useful when the LLM was unavailable). An empty
+        // or missing list simply renders nothing.
+        if (Array.isArray(result.evidence) && result.evidence.length > 0) {
+            appendEvidence(result.evidence);
         }
 
         if (Array.isArray(result.tool_calls)) {

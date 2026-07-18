@@ -28,6 +28,8 @@ use OpenEMR\Modules\ClinicalCopilot\ReadPath\FactAnalyteResolver;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\PatientIdentifierLookup;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\ScheduledPatientListReader;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\ScheduledPatientRow;
+use OpenEMR\Modules\ClinicalCopilot\Rag\EvidenceSnippet;
+use OpenEMR\Modules\ClinicalCopilot\Rag\SummaryGuidelineEvidence;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\SynthesisDocPayload;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\SynthesisReadPath;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\SynthesisReadResult;
@@ -58,6 +60,7 @@ final class DocController
         private readonly ScheduledPatientListReader $scheduledPatientListReader,
         private readonly DocStore $docStore,
         private readonly TracePoller $tracePoller,
+        private readonly SummaryGuidelineEvidence $summaryEvidence,
     ) {
     }
 
@@ -70,7 +73,25 @@ final class DocController
             new ScheduledPatientListReader(),
             new DocStore(),
             new TracePoller(),
+            SummaryGuidelineEvidence::createDefault(),
         );
+    }
+
+    /**
+     * The summarizer's RAG hookup (W2_ARCHITECTURE.md §7): cited guideline
+     * evidence for the topics derived from THIS summary's analytes, retrieved
+     * under the summary's own correlation id so the `retrieve` spans join its
+     * dashboard waterfall. Deterministic and additive — the snippets render in
+     * their own cited section beside the narrative and never enter the
+     * fact/verifier pipeline. Empty ⇒ [] ⇒ no section (graceful degrade).
+     *
+     * @param array<string, array{key: string, label: string}> $analyteByFactId
+     *
+     * @return list<array{key: string, label: string, snippets: list<EvidenceSnippet>}>
+     */
+    public function guidelineEvidence(SynthesisReadResult $result, array $analyteByFactId, ?int $userId): array
+    {
+        return $this->summaryEvidence->forSummary($result->correlationId, $result->pid, $userId, $analyteByFactId);
     }
 
     /**

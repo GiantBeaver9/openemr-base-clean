@@ -48,12 +48,17 @@ use OpenEMR\Modules\ClinicalCopilot\Chat\Tool\ToolExecutor;
 use OpenEMR\Modules\ClinicalCopilot\Chat\TracePoller;
 use OpenEMR\Modules\ClinicalCopilot\DocStore;
 use OpenEMR\Modules\ClinicalCopilot\Fact\Fact;
+use OpenEMR\Modules\ClinicalCopilot\Knowledge\KnowledgeQueryScrubber;
 use OpenEMR\Modules\ClinicalCopilot\Lab\Config\DbLabContractConfigProvider;
 use OpenEMR\Modules\ClinicalCopilot\Lab\LabSliceReader;
 use OpenEMR\Modules\ClinicalCopilot\Observability\LlmCostEstimate;
 use OpenEMR\Modules\ClinicalCopilot\Observability\RateLimit\CadenceCircuitBreaker;
 use OpenEMR\Modules\ClinicalCopilot\Observability\RateLimit\CadenceRateLimiter;
 use OpenEMR\Modules\ClinicalCopilot\Observability\TraceRecorder;
+use OpenEMR\Modules\ClinicalCopilot\Rag\EvidenceSnippetPresenter;
+use OpenEMR\Modules\ClinicalCopilot\Rag\GuidelineRetrieverFactory;
+use OpenEMR\Modules\ClinicalCopilot\Rag\RetrieverInterface;
+use OpenEMR\Modules\ClinicalCopilot\Rag\TracedGuidelineRetriever;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\AlertSinkInterface;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\LoggingAlertSink;
 use OpenEMR\Modules\ClinicalCopilot\ReadPath\PatientIdentifierLookup;
@@ -95,6 +100,10 @@ final class ChatController
     private const DOC_TYPE = 'endo-previsit-chat-v1';
     private const PROMPT_VERSION = 'chat-v1';
 
+    // Guideline snippets surfaced per turn. Kept small: the chat answer is a
+    // short brief, and evidence renders beneath it, not instead of it.
+    private const EVIDENCE_TOP_K = 3;
+
     private static function model(): string
     {
         return LlmRuntimeConfig::chatModel();
@@ -113,6 +122,7 @@ final class ChatController
         private readonly AlertSinkInterface $alertSink,
         private readonly TraceRecorderInterface $tracer,
         private readonly TracePoller $tracePoller,
+        private readonly RetrieverInterface $guidelineRetriever,
         private readonly SystemLogger $logger,
     ) {
     }
@@ -148,6 +158,7 @@ final class ChatController
             $alertSink,
             new TraceRecorder(),
             new TracePoller(),
+            GuidelineRetrieverFactory::createDefault(),
             new SystemLogger(),
         );
     }
@@ -291,6 +302,7 @@ final class ChatController
                         'degraded_message' => $turn->content['degraded_message'] ?? null,
                         'frozen' => $turn->content['frozen'] ?? false,
                         'claims' => $turn->content['claims'] ?? null,
+                        'evidence' => self::evidenceFromContent($turn->content['evidence'] ?? null),
                         'verdicts' => $turn->verificationVerdict,
                     ],
                 ];
@@ -438,8 +450,17 @@ final class ChatController
 
         $confidence = ChatTurnConfidence::fromAnswer($answer);
 
+        // RAG hookup (W2_ARCHITECTURE.md §7): guideline evidence for this
+        // turn's question, retrieved deterministically AFTER the answer and
+        // never fed to the model or the verifier -- the same boundary
+        // AgentLoopAnswerComposer keeps on the supervisor path, so the
+        // critic/verifier never sees a guideline excerpt as a claim to
+        // ground. Snippets ride the response/turn row as their own cited
+        // section; an empty retrieval simply means no section.
+        $evidence = $this->retrieveGuidelineEvidence($session, $correlationId, $message);
+
         $this->persistToolTurns($session->id, $session->pid, $session->userId, $answer, $correlationId);
-        $this->persistAssistantTurn($session, $answer, $confidence, $correlationId);
+        $this->persistAssistantTurn($session, $answer, $confidence, $correlationId, $evidence);
 
         $this->recordSpan($correlationId, 'verify', $turnT0, $answer->verifyStatus->value === 'passed' ? 'ok' : 'degraded', $session->pid, $session->userId, model: $answer->usage->modelVersion, tokensIn: $answer->usage->tokensIn, tokensOut: $answer->usage->tokensOut);
         $this->recordSpan($correlationId, 'chat_turn', $turnT0, $answer->frozen ? 'error' : ($answer->verifyStatus->value === 'passed' ? 'ok' : 'degraded'), $session->pid, $session->userId, model: $answer->usage->modelVersion, tokensIn: $answer->usage->tokensIn, tokensOut: $answer->usage->tokensOut, costUsd: LlmCostEstimate::estimateUsd($answer->usage->modelVersion, $answer->usage->tokensIn, $answer->usage->tokensOut));
@@ -468,7 +489,32 @@ final class ChatController
         $this->logChatTurn($session, $message, $answer, $confidence, $correlationId);
         $this->auditTurn($session->pid, $answer, $confidence, $correlationId);
 
-        return $this->turnResponse($session, $answer, $confidence, $correlationId, $stale);
+        return $this->turnResponse($session, $answer, $confidence, $correlationId, $stale, $evidence);
+    }
+
+    /**
+     * One scrubbed, traced guideline retrieval for this turn's message. The
+     * {@see TracedGuidelineRetriever} enforces the segregation boundary
+     * (allowlist scrub of the raw physician message before it reaches the
+     * retriever -- and thus before anything could leave for the non-BAA
+     * knowledge store) and records the `retrieve` span under this turn's
+     * correlation id, so chat retrievals appear in the dashboard waterfall
+     * and the retrieval-hit-rate tile exactly like the agent path's.
+     *
+     * @return list<array{title: string, source: string, section: string, quote: string, url: ?string, score: float, citation: array<string, mixed>}>
+     */
+    private function retrieveGuidelineEvidence(ChatSession $session, string $correlationId, string $message): array
+    {
+        $retriever = new TracedGuidelineRetriever(
+            $this->guidelineRetriever,
+            new KnowledgeQueryScrubber(),
+            $this->tracer,
+            $correlationId,
+            $session->pid,
+            $session->userId,
+        );
+
+        return EvidenceSnippetPresenter::toWire($retriever->retrieve($message, [], self::EVIDENCE_TOP_K));
     }
 
     /**
@@ -642,7 +688,10 @@ final class ChatController
         }, $answer->claims);
     }
 
-    private function persistAssistantTurn(ChatSession $session, ChatAnswer $answer, ChatTurnConfidence $confidence, string $correlationId): void
+    /**
+     * @param list<array{title: string, source: string, section: string, quote: string, url: ?string, score: float, citation: array<string, mixed>}> $evidence
+     */
+    private function persistAssistantTurn(ChatSession $session, ChatAnswer $answer, ChatTurnConfidence $confidence, string $correlationId, array $evidence): void
     {
         $content = [
             'claims' => self::rehydratedClaimsArray($answer),
@@ -652,6 +701,10 @@ final class ChatController
             'frozen' => $answer->frozen,
             'confidence' => $confidence->score,
             'confidence_label' => $confidence->label,
+            // Guideline evidence rides the turn row too, so a replayed
+            // conversation (clientTurnHistory) restores the cited section
+            // exactly as it was shown.
+            'evidence' => $evidence,
         ];
 
         $verdictOut = array_map(static fn (Verdict $v): array => $v->toArray(), $answer->verdicts);
@@ -707,6 +760,7 @@ final class ChatController
                         : null,
                     'claims' => $claims,
                     'tool_calls' => [],
+                    'evidence' => self::evidenceFromContent($turn->content['evidence'] ?? null),
                 ],
             ];
         }
@@ -749,9 +803,47 @@ final class ChatController
     }
 
     /**
+     * The stored turn row is the source of truth for a replay, but its JSON
+     * round-trip means the evidence comes back as untyped arrays -- re-narrow
+     * to the exact display fields the panel renders (title/source/section/
+     * quote/url), dropping anything malformed rather than passing it through.
+     *
+     * @return list<array{title: string, source: string, section: string, quote: string, url: ?string}>
+     */
+    private static function evidenceFromContent(mixed $raw): array
+    {
+        if (!is_array($raw)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($raw as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $quote = is_string($entry['quote'] ?? null) ? $entry['quote'] : '';
+            $source = is_string($entry['source'] ?? null) ? $entry['source'] : '';
+            if ($quote === '' || $source === '') {
+                continue;
+            }
+            $out[] = [
+                'title' => is_string($entry['title'] ?? null) ? $entry['title'] : '',
+                'source' => $source,
+                'section' => is_string($entry['section'] ?? null) ? $entry['section'] : '',
+                'quote' => $quote,
+                'url' => is_string($entry['url'] ?? null) && $entry['url'] !== '' ? $entry['url'] : null,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param list<array{title: string, source: string, section: string, quote: string, url: ?string, score: float, citation: array<string, mixed>}> $evidence
+     *
      * @return array<string, mixed>
      */
-    private function turnResponse(ChatSession $session, ChatAnswer $answer, ChatTurnConfidence $confidence, string $correlationId, bool $stale): array
+    private function turnResponse(ChatSession $session, ChatAnswer $answer, ChatTurnConfidence $confidence, string $correlationId, bool $stale, array $evidence): array
     {
         return [
             'ok' => true,
@@ -763,6 +855,7 @@ final class ChatController
             'confidence' => $confidence->score,
             'confidence_label' => $confidence->label,
             'degraded_message' => $answer->degradedMessage,
+            'evidence' => $evidence,
             'claims' => self::rehydratedClaimsArray($answer),
             'verdicts' => array_map(static fn (Verdict $v): array => $v->toArray(), $answer->verdicts),
             'tool_calls' => array_map(static fn ($entry): array => [

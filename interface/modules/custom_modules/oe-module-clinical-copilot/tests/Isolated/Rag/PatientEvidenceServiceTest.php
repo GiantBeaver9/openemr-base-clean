@@ -18,6 +18,7 @@ use OpenEMR\Modules\ClinicalCopilot\Ingest\SourceType;
 use OpenEMR\Modules\ClinicalCopilot\Rag\GuidelineCorpus;
 use OpenEMR\Modules\ClinicalCopilot\Rag\PatientEvidenceService;
 use OpenEMR\Modules\ClinicalCopilot\Rag\SparseRetriever;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -74,5 +75,33 @@ final class PatientEvidenceServiceTest extends TestCase
         self::assertContains('a1c', $keys);
         self::assertContains('lipids', $keys);
         self::assertNotContains('', $keys);
+    }
+
+    /**
+     * @param list<string> $analyteKeys
+     * @param list<string> $expectedTopics
+     */
+    #[DataProvider('analyteTopicProvider')]
+    public function testAnalyteKeysMapOntoTheClosedTopicVocabulary(array $analyteKeys, array $expectedTopics): void
+    {
+        self::assertSame($expectedTopics, PatientEvidenceService::topicsForAnalyteKeys($analyteKeys));
+    }
+
+    /**
+     * @return array<string, array{list<string>, list<string>}>
+     *
+     * @codeCoverageIgnore Data providers run before coverage instrumentation starts.
+     */
+    public static function analyteTopicProvider(): array
+    {
+        return [
+            'a1c and glucose fold into one topic' => [['a1c', 'glucose'], ['a1c']],
+            'lipid panel folds into lipids' => [['cholesterol', 'ldl', 'hdl', 'triglycerides'], ['lipids']],
+            'acr maps to kidney' => [['acr'], ['kidney']],
+            'order follows topics, not input' => [['ldl', 'acr', 'a1c'], ['a1c', 'lipids', 'kidney']],
+            'unknown keys are dropped, not passed through' => [['a1c', 'not-an-analyte', 'drop table patients'], ['a1c']],
+            'nothing mapped means no topics' => [['unknown'], []],
+            'empty in, empty out' => [[], []],
+        ];
     }
 }

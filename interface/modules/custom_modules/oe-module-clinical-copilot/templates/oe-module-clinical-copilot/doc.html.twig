@@ -596,6 +596,35 @@
                             </div>
                         </div>
                     </div>
+
+                    {# Guideline Evidence (RAG): cited guideline snippets for the
+                       topics this patient's analytes map onto, retrieved
+                       deterministically from the knowledge store / corpus and
+                       rendered VERBATIM in their own section -- never mixed into
+                       the verified patient-fact narrative above (the module's
+                       "guideline evidence and patient-record facts never share a
+                       citation type" rule). Empty retrieval ⇒ no section. #}
+                    {% if guideline_evidence is defined and guideline_evidence is not empty %}
+                    <div class="card mb-0 mt-3" id="ccpGuidelineEvidence">
+                        <div class="card-header d-flex justify-content-between align-items-center flex-wrap">
+                            <strong>{{ "Guideline Evidence"|xlt }}</strong>
+                            <small class="text-muted">{{ "general guidance for this patient's notable topics, cited from the office guideline corpus -- separate from the chart facts above"|xlt }}</small>
+                        </div>
+                        <div class="card-body">
+                            {% for group in guideline_evidence %}
+                                <h6 class="{{ loop.first ? 'mt-0' : 'mt-3' }}">{{ group.label|text }}</h6>
+                                {% for s in group.snippets %}
+                                    <div class="ccp-narrative-claim">
+                                        {{ s.chunk.text|text }}
+                                        <span class="text-muted small text-nowrap">
+                                            <i class="fa fa-book mr-1"></i>{{ s.citation.sourceId|text }}{% if s.chunk.section %} · {{ s.chunk.section|text }}{% endif %}{% if s.chunk.url %} · <a href="{{ s.chunk.url|attr }}" target="_blank" rel="noopener">{{ "source"|xlt }}</a>{% endif %}
+                                        </span>
+                                    </div>
+                                {% endfor %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
                 {% endif %}
 

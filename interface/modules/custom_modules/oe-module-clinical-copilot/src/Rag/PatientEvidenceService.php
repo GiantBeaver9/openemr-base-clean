@@ -73,6 +73,52 @@ final class PatientEvidenceService
     }
 
     /**
+     * Maps the summarizer's fine-grained analyte keys
+     * ({@see \OpenEMR\Modules\ClinicalCopilot\Capability\Config\AnalyteCodeSets::analyteKeyForLoinc()}:
+     * a1c, glucose, cholesterol, ldl, hdl, triglycerides, acr) onto this
+     * service's closed topic vocabulary — the SAME "topics from patient data"
+     * derivation, whichever surface asks. Deliberately still closed on both
+     * sides: an unrecognized analyte key maps to nothing rather than becoming
+     * a free-text query.
+     *
+     * @param list<string> $analyteKeys
+     *
+     * @return list<string> topic keys, deduplicated, in {@see self::TOPICS} order
+     */
+    public static function topicsForAnalyteKeys(array $analyteKeys): array
+    {
+        $topicByAnalyte = [
+            'a1c' => 'a1c',
+            'glucose' => 'a1c',
+            'cholesterol' => 'lipids',
+            'ldl' => 'lipids',
+            'hdl' => 'lipids',
+            'triglycerides' => 'lipids',
+            'acr' => 'kidney',
+        ];
+
+        /** @var array<string, true> $selected */
+        $selected = [];
+        foreach ($analyteKeys as $key) {
+            $topic = $topicByAnalyte[$key] ?? null;
+            if ($topic !== null) {
+                $selected[$topic] = true;
+            }
+        }
+
+        // TOPICS order, so rendered groups follow the same clinical order as
+        // the evidence tab regardless of the order analytes arrived in.
+        $ordered = [];
+        foreach (array_keys(self::TOPICS) as $topicKey) {
+            if (isset($selected[$topicKey])) {
+                $ordered[] = $topicKey;
+            }
+        }
+
+        return $ordered;
+    }
+
+    /**
      * Retrieves cited guideline evidence for each requested topic.
      *
      * @param list<string> $topicKeys

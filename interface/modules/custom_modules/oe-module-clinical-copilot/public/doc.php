@@ -88,6 +88,7 @@ if ($pid <= 0) {
         'history_rows' => [],
         'doc' => ['capability_crash' => false],
         'view_model' => emptyDocViewModel(),
+        'guideline_evidence' => [],
         'visit_label' => null,
     ];
 } elseif ($isPost && ($_POST['action'] ?? '') === 'regenerate') {
@@ -142,7 +143,7 @@ if ($pid <= 0) {
         exit;
     }
     $todayVisit = $controller->todayAppointmentForPatient($pid);
-    $templateVars = buildDocTemplateVars($viewData, $pid, $moduleBase, $docLandingUrl, $webRoot, invalidPid: false, todayVisit: $todayVisit);
+    $templateVars = buildDocTemplateVars($viewData, $pid, $moduleBase, $docLandingUrl, $webRoot, invalidPid: false, todayVisit: $todayVisit, controller: $controller, authUserId: $authUserId);
 } else {
     $viewData = $controller->view($pid, $authUserId);
     $todayVisit = $viewData['found'] ? $controller->todayAppointmentForPatient($pid) : null;
@@ -155,6 +156,8 @@ if ($pid <= 0) {
         invalidPid: !$viewData['found'],
         scheduledPatients: !$viewData['found'] ? $controller->scheduledPatientsToday() : [],
         todayVisit: $todayVisit,
+        controller: $controller,
+        authUserId: $authUserId,
     );
 }
 
@@ -181,6 +184,8 @@ function buildDocTemplateVars(
     bool $invalidPid,
     array $scheduledPatients = [],
     ?ScheduledPatientRow $todayVisit = null,
+    ?DocController $controller = null,
+    int $authUserId = 0,
 ): array {
     $templateVars = [
         'landing' => false,
@@ -205,9 +210,16 @@ function buildDocTemplateVars(
         $viewModel['visit_rows'] = DocViewModel::visitRows($viewData['history'], $viewData['result']->docId);
         $viewModel['variance_rows'] = DocViewModel::varianceRows($viewModel['fact_groups'], $viewData['result']->facts, $webRoot, $analyteByFactId);
         $templateVars['view_model'] = $viewModel;
+        // RAG hookup: cited guideline evidence for the topics this summary's
+        // analytes map onto -- rendered as its own deterministic section
+        // beside the narrative (never mixed into the verified claims).
+        $templateVars['guideline_evidence'] = $controller !== null
+            ? $controller->guidelineEvidence($viewData['result'], $analyteByFactId, $authUserId > 0 ? $authUserId : null)
+            : [];
     } else {
         $templateVars['doc'] = ['capability_crash' => false];
         $templateVars['view_model'] = emptyDocViewModel();
+        $templateVars['guideline_evidence'] = [];
     }
 
     return $templateVars;

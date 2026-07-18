@@ -219,6 +219,18 @@ patient facts by citation type.
   evidence" section beside the verified narrative, and the supervisor path
   (§6) gathers evidence via `EvidenceRetrieverWorker`. Neither mixes guideline
   evidence into the patient-fact citation pipeline.
+- **Chat and summarizer hookup** — both Week 1 surfaces now pull from the same
+  store through `TracedGuidelineRetriever` (scrub → retrieve → `retrieve`
+  span). A chat turn retrieves against the physician's message (allowlist-
+  scrubbed before the retriever seam) and surfaces the top snippets as a
+  cited "Guideline evidence" block beneath the answer — on the response, the
+  persisted turn row, and session replay. The summarizer derives topics from
+  the summary's own analytes (`PatientEvidenceService::topicsForAnalyteKeys`
+  over the `FactAnalyteResolver` map) via `SummaryGuidelineEvidence` and
+  renders a "Guideline Evidence" section beside the narrative in
+  `doc.html.twig`. Snippets are surfaced verbatim, never fed to the model, and
+  never enter the verifier/critic (they carry `SourceType::Guideline`
+  citations, not fact ids); empty retrieval degrades to no section.
 
 > Not used for lab ingestion: "which page has which result" is already produced
 > deterministically by extraction (`page` + `bbox` per field), so RAG is reserved
@@ -233,6 +245,13 @@ nesting via `parent_span_id`). New span kinds: `ingest`, `vision_extract`,
 `chart_commit`, `supervisor`, `worker`, `retrieve`. The correlation id
 propagates through document storage, extraction, worker handoffs, and the chart
 commit — a full Week 2 request is reconstructable from the correlation id alone.
+
+`retrieve` spans are no longer supervisor-only: chat turns and the summary
+read path record one per attempted guideline retrieval (via
+`TracedGuidelineRetriever`) under their own correlation ids — `ok` on hits,
+`degraded`/`EmptyRetrieval` with PHI-free counts (`query_terms/top_k/hits=0`)
+on none — so both surfaces feed the same waterfall and retrieval-hit-rate
+tile as the agent path.
 
 Workers wrap their RAG/VLM sub-calls in `retrieve` / `vision_extract` child
 spans parented to their own `worker` span, and the ingest path accepts an
