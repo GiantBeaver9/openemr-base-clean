@@ -42,7 +42,6 @@ final class GeminiChatContentContractTest extends TestCase
     private function extractParts(array $decoded): array
     {
         $method = new ReflectionMethod(GeminiApiChatLlmClient::class, 'extractParts');
-        $method->setAccessible(true);
 
         /** @var list<array<string, mixed>> $parts */
         $parts = $method->invoke(null, $decoded);
@@ -53,7 +52,6 @@ final class GeminiChatContentContractTest extends TestCase
     private function classifyTransportError(GuzzleException $e): LlmUnavailableException
     {
         $method = new ReflectionMethod(GeminiApiChatLlmClient::class, 'classifyTransportError');
-        $method->setAccessible(true);
 
         return $method->invoke(null, $e);
     }
@@ -154,7 +152,6 @@ final class GeminiChatContentContractTest extends TestCase
     private function extractOutputTokenCount(array $decoded): int
     {
         $method = new ReflectionMethod(GeminiApiChatLlmClient::class, 'extractOutputTokenCount');
-        $method->setAccessible(true);
 
         return $method->invoke(null, $decoded);
     }

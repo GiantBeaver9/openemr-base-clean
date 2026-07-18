@@ -37,7 +37,6 @@ final class GeminiGenerateContentContractTest extends TestCase
     private function extractText(array $decoded): string
     {
         $method = new ReflectionMethod(GeminiApiLlmClient::class, 'extractText');
-        $method->setAccessible(true);
 
         return $method->invoke(null, $decoded);
     }
@@ -45,7 +44,6 @@ final class GeminiGenerateContentContractTest extends TestCase
     private function classifyTransportError(\GuzzleHttp\Exception\GuzzleException $e): LlmUnavailableException
     {
         $method = new ReflectionMethod(GeminiApiLlmClient::class, 'classifyTransportError');
-        $method->setAccessible(true);
 
         return $method->invoke(null, $e);
     }
@@ -202,7 +200,6 @@ final class GeminiGenerateContentContractTest extends TestCase
     private function extractOutputTokenCount(array $decoded): int
     {
         $method = new ReflectionMethod(GeminiApiLlmClient::class, 'extractOutputTokenCount');
-        $method->setAccessible(true);
 
         return $method->invoke(null, $decoded);
     }

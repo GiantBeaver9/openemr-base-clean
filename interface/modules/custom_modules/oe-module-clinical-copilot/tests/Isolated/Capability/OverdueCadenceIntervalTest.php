@@ -31,7 +31,6 @@ final class OverdueCadenceIntervalTest extends TestCase
     private function addCadenceInterval(\DateTimeImmutable $date, \DateInterval $interval): \DateTimeImmutable
     {
         $method = new ReflectionMethod(OverdueTests::class, 'addCadenceInterval');
-        $method->setAccessible(true);
 
         return $method->invoke(null, $date, $interval);
     }

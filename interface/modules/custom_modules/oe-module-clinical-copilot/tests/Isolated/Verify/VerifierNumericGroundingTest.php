@@ -21,6 +21,7 @@ use OpenEMR\Modules\ClinicalCopilot\Verify\SessionFactSet;
 use OpenEMR\Modules\ClinicalCopilot\Verify\VerificationContext;
 use OpenEMR\Modules\ClinicalCopilot\Verify\VerificationPath;
 use OpenEMR\Modules\ClinicalCopilot\Verify\Verifier;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -87,9 +88,7 @@ final class VerifierNumericGroundingTest extends TestCase
         return $verdict !== null && $verdict->passed;
     }
 
-    /**
-     * @dataProvider exemptNarrativeProvider
-     */
+    #[DataProvider('exemptNarrativeProvider')]
     public function testNarrativeNumbersAreExempt(string $text, string $type, string $cite): void
     {
         self::assertTrue($this->v4($text, $type, $cite), "V4 should PASS for narrative-number text: {$text}");
