@@ -28,25 +28,46 @@ paths:
         "403": { description: "ACL denied." }
     post:
       tags: [ingestion]
-      summary: Upload an intake PDF → create patient → redirect to review
+      summary: Upload an intake PDF for extraction preview, or save the reviewed fields as a new patient
+      description: >
+        Deferred-save flow: action=upload extracts and renders the two-pane
+        review screen without persisting anything; action=save (submitted from
+        that review screen) creates the patient, stores the document, and
+        redirects to the new chart.
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
               type: object
-              required: [action, csrf_token_form, document]
+              required: [action, csrf_token_form]
               properties:
-                action: { type: string, enum: [upload] }
+                action: { type: string, enum: [upload, save] }
                 csrf_token_form: { type: string }
                 document:
                   type: string
                   format: binary
-                  description: PDF or image (application/pdf, image/png, image/jpeg, image/webp).
+                  description: >
+                    Required when action=upload. PDF or image (application/pdf,
+                    image/png, image/jpeg, image/webp).
+                field:
+                  type: object
+                  additionalProperties: { type: string }
+                  description: "action=save: reviewed values keyed by intake field_key."
+                pdf_b64:
+                  type: string
+                  description: "action=save: the uploaded document, carried through the review screen as base64."
+                pdf_mime:
+                  type: string
+                  description: "action=save: document MIME; re-validated server-side against the upload allowlist."
+                pdf_name:
+                  type: string
+                  description: "action=save: original filename for the stored document."
       responses:
-        "302": { description: "Redirect to extraction_review.php?extraction_id=<id>." }
-        "200": { description: "The form re-rendered with a validation error." }
+        "200": { description: "action=upload: the two-pane review screen (nothing persisted). Also the form/review re-rendered with a validation error." }
+        "302": { description: "action=save success: redirect to the new patient's chart (demographics.php?set_pid=<pid>)." }
         "403": { description: "CSRF or ACL denied." }
+        "413": { description: "Upload exceeded the server's post body limit." }
   /interface/modules/custom_modules/oe-module-clinical-copilot/public/lab_upload.php:
     get:
       tags: [ingestion]
@@ -82,6 +103,7 @@ paths:
       summary: The verify/edit/lock review surface for a draft extraction
       parameters:
         - { name: extraction_id, in: query, required: true, schema: { type: integer } }
+        - { name: err, in: query, required: false, schema: { type: integer }, description: "Set by the Post/Redirect/Get redirect when the previous action failed." }
       responses:
         "200": { description: "The review page (fields + citations + source map)." }
         "400": { description: "Missing extraction_id." }
@@ -106,6 +128,10 @@ paths:
                 unit: { type: string, nullable: true }
                 ref_range: { type: string, nullable: true }
                 abnormal_flag: { type: string, nullable: true }
+                collection_date:
+                  type: string
+                  format: date
+                  description: "Used by action=lock (labs): specimen draw/collection date, strict YYYY-MM-DD; anything else falls back to today."
       responses:
         "302": { description: "Post/Redirect/Get back to the review page." }
         "400": { description: "Missing extraction_id." }

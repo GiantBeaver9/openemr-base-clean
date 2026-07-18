@@ -9,7 +9,9 @@
 # 2. Additivity gate: the branch diff must stay confined to the module
 #    directory plus the whitelisted root spec docs / deploy layer.
 # 3. Module isolated PHPUnit tests: supervisor-worker contract, schema
-#    validation, and extraction-regression suites under tests/Isolated/.
+#    validation, and extraction-regression suites under tests/Isolated/,
+#    incl. the W1d OpenAPI contract tests (tests/Isolated/Api/) binding
+#    ops/api/openapi.yaml to the public/ endpoint implementations.
 #
 # Deliberately NOT run here: the module's DB-backed contract suite
 # (tests/Db/, incl. tests/Db/Worker/WorkerTest.php). It needs a live
