@@ -80,6 +80,15 @@ if ($isPost) {
         require_once dirname(__DIR__) . '/ops/eval/EvalGate.php';
         try {
             $evalResult = (new \OpenEMR\Modules\ClinicalCopilot\Ops\Eval\EvalGate(dirname(__DIR__) . '/ops/eval'))->run();
+            // Persist the run summary (rates/regressions only, no PHI) so the
+            // worker-tick eval-regression alert fires on the LAST recorded run.
+            // Best-effort: a persistence failure must not hide the on-screen
+            // result the admin just asked for.
+            try {
+                $configStore->recordEvalRun($evalResult);
+            } catch (\Throwable $persistError) {
+                (new \OpenEMR\Common\Logging\SystemLogger())->error('ClinicalCopilot: failed to record eval run for alerting', ['exception' => $persistError]);
+            }
         } catch (\Throwable $e) {
             $evalError = 'Eval run failed to start (see server log).';
             (new \OpenEMR\Common\Logging\SystemLogger())->error('ClinicalCopilot: dashboard eval run failed', ['exception' => $e]);

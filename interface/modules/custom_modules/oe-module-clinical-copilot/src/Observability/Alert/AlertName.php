@@ -1,7 +1,7 @@
 <?php
 
 /**
- * The closed set of alerts AlertEvaluator checks (ARCHITECTURE.md §3.5 + I14).
+ * The closed set of alerts AlertEvaluator checks (ARCHITECTURE.md §3.5 + I14 + the Week-2 spec-named three).
  *
  * @package   OpenEMR\Modules\ClinicalCopilot
  * @link      https://www.open-emr.org
@@ -16,9 +16,10 @@ namespace OpenEMR\Modules\ClinicalCopilot\Observability\Alert;
 
 /**
  * The seven alerts in ARCHITECTURE.md §3.5's table, plus the I14 unaccounted-
- * entity alert (docs/build-notes.md "I14"). One enum case per row of that
- * table, in the same order, so the dashboard and the evaluator's own findings
- * list read the same way the spec documents them.
+ * entity alert (docs/build-notes.md "I14"), plus the three Week-2 spec-named
+ * alerts (extraction failure rate, RAG retrieval latency, eval regression).
+ * One enum case per alert, spec order first, so the dashboard and the
+ * evaluator's own findings list read the same way the spec documents them.
  */
 enum AlertName: string
 {
@@ -30,6 +31,9 @@ enum AlertName: string
     case LlmSpend = 'llm_spend';
     case WorkerHeartbeatStale = 'worker_heartbeat_stale';
     case UnaccountedEntity = 'unaccounted_entity';
+    case ExtractionFailureRate = 'extraction_failure_rate';
+    case RagRetrievalLatency = 'rag_retrieval_latency';
+    case EvalRegression = 'eval_regression';
 
     /**
      * ARCHITECTURE.md §3.5's "Means" column, condensed -- shown on the
@@ -47,6 +51,9 @@ enum AlertName: string
             self::LlmSpend => 'runaway loop, warm storm, or hostile-but-authenticated user',
             self::WorkerHeartbeatStale => 'cron missing or dead -- warm sweep and alert evaluation are down',
             self::UnaccountedEntity => 'a data-shape surprise: extraction silently dropped a source row before it was ever classified (I14)',
+            self::ExtractionFailureRate => 'document ingestion failing on real uploads -- VLM outage, extraction-schema drift, or a new document shape',
+            self::RagRetrievalLatency => 'guideline-evidence retrieval is slow -- knowledge Postgres degrading, missing index, or corpus scan overload',
+            self::EvalRegression => 'the last eval-gate run recorded a rubric regression (>5% drop vs baseline, or below the 0.90 floor) -- model/prompt/code drift reached the golden set',
         };
     }
 
@@ -64,6 +71,9 @@ enum AlertName: string
             self::LlmSpend => 'hard cap trips the circuit breaker automatically; rank correlation IDs by cost_usd in traces to find the burner before reset',
             self::WorkerHeartbeatStale => 'verify the cron entry (hard deployment requirement); check /copilot/ready',
             self::UnaccountedEntity => 'pull the span payload, add the case to fixtures BEFORE fixing the mapping',
+            self::ExtractionFailureRate => 'pull failing vision_extract spans (error_class/error_detail); if provider-side, confirm the manual-entry fallback is serving uploads; if a new document shape, add it to fixtures before fixing the extractor',
+            self::RagRetrievalLatency => 'check the knowledge row on /ready and the dashboard; if Postgres is slow, check indexes/connection health on the knowledge DB -- if it goes fully unreachable the module degrades to the offline corpus on its own',
+            self::EvalRegression => 'treat as a deploy blocker: re-run ops/eval/run-evals.php, diff the failing-case list against baseline.json, pin/roll back the model or prompt version; only update the baseline deliberately (--update-baseline)',
         };
     }
 }

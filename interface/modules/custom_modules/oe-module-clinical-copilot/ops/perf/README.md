@@ -82,7 +82,8 @@ echo "HTTP: $(curl -s -o /dev/null -w '%{http_code}' http://localhost/.../public
 The response now carries an explicit boolean:
 ```json
 {"ready": true, "status": "ok", "db": "ok", "tables_writable": "ok",
- "llm": "ok", "worker_heartbeat": "ok", "breaker": "closed"}
+ "llm": "ok", "worker_heartbeat": "ok", "breaker": "closed",
+ "document_store": "ok", "knowledge": "offline-corpus", "reranker": "in-process"}
 ```
 
 Key point for grading: **`ready` and the HTTP status reflect the *service*, not

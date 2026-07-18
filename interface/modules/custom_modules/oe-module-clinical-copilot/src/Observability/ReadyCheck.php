@@ -15,6 +15,8 @@ declare(strict_types=1);
 namespace OpenEMR\Modules\ClinicalCopilot\Observability;
 
 use OpenEMR\Common\Database\QueryUtils;
+use OpenEMR\Core\OEGlobalsBag;
+use OpenEMR\Modules\ClinicalCopilot\Knowledge\KnowledgeBaseStatus;
 use OpenEMR\Modules\ClinicalCopilot\Observability\RateLimit\CadenceCircuitBreaker;
 
 /**
@@ -25,6 +27,12 @@ use OpenEMR\Modules\ClinicalCopilot\Observability\RateLimit\CadenceCircuitBreake
  * Unauthenticated but REDACTED: status enums only ... no latencies, no
  * config values, no PHI ... and per-IP rate-limited" (ARCHITECTURE.md §3.4).
  *
+ * Week-2 dependencies are probed the same way: core document storage (where
+ * ChartWriter lands source PDFs), the pgvector knowledge Postgres (via the
+ * same {@see KnowledgeBaseStatus} snapshot the dashboard uses), and the
+ * reranker (in-process, so a static configured-state --
+ * {@see self::RERANKER_STATE}).
+ *
  * Every check is independently caught -- a DB outage must not prevent
  * `/ready` from still reporting the LLM/breaker fields it CAN determine
  * (each field degrades to its own honest failure enum rather than the whole
@@ -33,16 +41,28 @@ use OpenEMR\Modules\ClinicalCopilot\Observability\RateLimit\CadenceCircuitBreake
  */
 final class ReadyCheck
 {
+    /**
+     * The production reranker ({@see \OpenEMR\Modules\ClinicalCopilot\Rag\HeuristicReranker},
+     * W7) is in-process PHP behind the RerankerInterface seam -- it ships with
+     * the module and cannot be "down" independently of the process answering
+     * this very request, so its readiness is a STATIC configured-state, not a
+     * live probe. Only a remote/hosted reranker swapped in behind the same
+     * seam would warrant a real reachability probe here.
+     */
+    public const RERANKER_STATE = 'in-process';
+
     public function __construct(
         private readonly CadenceCircuitBreaker $breaker = new CadenceCircuitBreaker(),
         private readonly LlmReachabilityProbe $llmProbe = new LlmReachabilityProbe(),
+        private readonly ?KnowledgeBaseStatus $knowledgeStatus = null,
     ) {
     }
 
     /**
      * @return array{
      *     ready: bool, status: string, db: string, tables_writable: string,
-     *     llm: string, worker_heartbeat: string, breaker: string
+     *     llm: string, worker_heartbeat: string, breaker: string,
+     *     document_store: string, knowledge: string, reranker: string
      * }
      */
     public function check(): array
@@ -52,6 +72,8 @@ final class ReadyCheck
         $breakerOpen = $this->checkBreakerOpen();
         $llm = $breakerOpen === true ? 'circuit-open' : $this->checkLlm();
         $heartbeat = $this->checkHeartbeat();
+        $documentStore = $this->checkDocumentStore();
+        $knowledge = $this->checkKnowledge();
 
         // Overall status: 'ok' only when the hard dependencies (DB, tables)
         // are sound. LLM-unreachable/circuit-open and a stale heartbeat are
@@ -60,8 +82,26 @@ final class ReadyCheck
         // generation) -- reported honestly as 'degraded', never folded into
         // 'ok' and never escalated to a hard failure that would make an
         // orchestrator restart a perfectly healthy process.
+        //
+        // The Week-2 dependencies degrade the same way, mirroring how the
+        // serving paths actually behave when they are down:
+        //  - document store missing/unwritable: ingestion uploads fail but the
+        //    read/chat paths keep serving -- degraded, never error.
+        //  - knowledge Postgres unreachable/driver-missing: retrieval returns
+        //    no external evidence (KnowledgeBaseConnection::select degrades to
+        //    []) and the offline corpus remains the factory fallback -- the
+        //    module DELIBERATELY serves through this, so it is degraded, never
+        //    error. 'offline-corpus' (nothing configured) is a normal healthy
+        //    state and does not degrade.
         $status = ($db === 'ok' && $tablesWritable === 'ok') ? 'ok' : 'error';
-        if ($status === 'ok' && ($llm !== 'ok' || $heartbeat !== 'ok')) {
+        if (
+            $status === 'ok' && (
+                $llm !== 'ok'
+                || $heartbeat !== 'ok'
+                || !in_array($documentStore, ['ok', 'remote-unprobed'], true)
+                || !in_array($knowledge, ['ok', 'offline-corpus'], true)
+            )
+        ) {
             $status = 'degraded';
         }
 
@@ -79,6 +119,9 @@ final class ReadyCheck
             'llm' => $llm,
             'worker_heartbeat' => $heartbeat,
             'breaker' => $breakerOpen === null ? 'unknown' : ($breakerOpen ? 'open' : 'closed'),
+            'document_store' => $documentStore,
+            'knowledge' => $knowledge,
+            'reranker' => self::RERANKER_STATE,
         ];
     }
 
@@ -174,5 +217,130 @@ final class ReadyCheck
         } catch (\Throwable) {
             return 'unknown';
         }
+    }
+
+    /**
+     * Core document storage -- where ChartWriter::storeSourceDocument lands
+     * uploaded source PDFs via the core Document class. With the default
+     * `document_storage_method` '0' ("Hard Disk"), bytes go under the site
+     * documents directory (`$GLOBALS['oer_config']['documents']['repopath']`,
+     * classically `sites/default/documents/` -- docs/W2_BACKUP_RECOVERY.md
+     * §1A), so the honest cheap check is that directory resolving and being
+     * writable. Reads the resolution inputs through OEGlobalsBag; any failure
+     * to resolve degrades to 'unknown' rather than throwing.
+     *
+     * @return 'ok'|'missing'|'not_writable'|'remote-unprobed'|'unknown'
+     */
+    private function checkDocumentStore(): string
+    {
+        try {
+            $bag = OEGlobalsBag::getInstance();
+
+            $methodRaw = $bag->get('document_storage_method');
+            $method = is_scalar($methodRaw) ? (string)$methodRaw : null;
+
+            $dir = null;
+            $oerConfig = $bag->get('oer_config');
+            if (
+                is_array($oerConfig)
+                && is_array($oerConfig['documents'] ?? null)
+                && is_string($oerConfig['documents']['repopath'] ?? null)
+                && $oerConfig['documents']['repopath'] !== ''
+            ) {
+                $dir = $oerConfig['documents']['repopath'];
+            }
+            if ($dir === null) {
+                $siteDir = $bag->getString('OE_SITE_DIR');
+                $dir = $siteDir !== '' ? $siteDir . '/documents/' : null;
+            }
+
+            return self::documentStoreState($method, $dir);
+        } catch (\Throwable) {
+            return 'unknown';
+        }
+    }
+
+    /**
+     * Pure decision over the resolved storage config, so the enum mapping is
+     * unit-testable without OpenEMR globals.
+     *
+     * Probe choice (documented deliberately): `is_dir` + `is_writable` -- a
+     * real access(2) check for THIS process user -- rather than a
+     * touch-and-unlink probe file. /ready is an unauthenticated uptime-probe
+     * target (rate-limited, but still hit continuously), and writing/deleting
+     * a probe file inside the clinical documents repository on every poll
+     * trades disk churn and a leftover-file failure mode for very little
+     * extra signal (a full-disk condition is caught by the actual upload path
+     * and by the tables_writable probe's engine health). Side-effect-free
+     * wins here.
+     *
+     * `document_storage_method` '0' is "Hard Disk" (the default, and what an
+     * unset value means); any other configured method (e.g. '1' CouchDB) is
+     * a remote store this endpoint deliberately does not probe -- reported
+     * honestly as 'remote-unprobed' rather than pretending an on-disk check
+     * covers it.
+     *
+     * @return 'ok'|'missing'|'not_writable'|'remote-unprobed'|'unknown'
+     */
+    public static function documentStoreState(?string $storageMethod, ?string $documentsDir): string
+    {
+        $method = trim((string)$storageMethod);
+        if ($method !== '' && $method !== '0') {
+            return 'remote-unprobed';
+        }
+
+        if ($documentsDir === null || $documentsDir === '') {
+            return 'unknown';
+        }
+        if (!is_dir($documentsDir)) {
+            return 'missing';
+        }
+
+        return is_writable($documentsDir) ? 'ok' : 'not_writable';
+    }
+
+    /**
+     * pgvector / knowledge Postgres -- reuses the SAME {@see KnowledgeBaseStatus}
+     * snapshot the dashboard shows, so /ready and the dashboard can never
+     * disagree about the knowledge store. Non-ok states are DEGRADED, never
+     * error: retrieval genuinely serves through an outage (the connection
+     * degrades to zero external evidence and the factory's offline corpus
+     * remains the fallback), so an orchestrator must not restart over it.
+     *
+     * @return 'ok'|'offline-corpus'|'driver-missing'|'unreachable'|'unknown'
+     */
+    private function checkKnowledge(): string
+    {
+        try {
+            $snapshot = ($this->knowledgeStatus ?? KnowledgeBaseStatus::createDefault())->snapshot();
+
+            return self::knowledgeStateFromSnapshot($snapshot);
+        } catch (\Throwable) {
+            return 'unknown';
+        }
+    }
+
+    /**
+     * Maps a {@see KnowledgeBaseStatus::snapshot()} onto this endpoint's
+     * redacted status enums. Deliberately drops `chunk_count`: /ready is
+     * "status enums only ... no config values" (ARCHITECTURE.md §3.4), and a
+     * corpus size is a config-shaped detail the dashboard (authenticated)
+     * already shows. 'not_configured' becomes 'offline-corpus' because that
+     * is what it MEANS operationally: the module is healthy on the in-repo
+     * corpus, not missing a dependency.
+     *
+     * @param array<string, mixed> $snapshot
+     *
+     * @return 'ok'|'offline-corpus'|'driver-missing'|'unreachable'|'unknown'
+     */
+    public static function knowledgeStateFromSnapshot(array $snapshot): string
+    {
+        return match ($snapshot['state'] ?? null) {
+            'ok' => 'ok',
+            'not_configured' => 'offline-corpus',
+            'driver_missing' => 'driver-missing',
+            'unreachable' => 'unreachable',
+            default => 'unknown',
+        };
     }
 }

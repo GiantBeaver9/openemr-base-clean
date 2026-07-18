@@ -15,9 +15,11 @@ declare(strict_types=1);
 // Page bootstrap contract (docs/build-notes.md): flags set BEFORE globals.php.
 // Unauthenticated (ARCHITECTURE.md §3.4: "external uptime probes point
 // here"), but REDACTED -- status enums only, no latencies/config/PHI -- and
-// per-IP rate-limited (ReadyCheck performs the real dependency checks;
-// IpRateLimiter is this file's own concern since it's about the HTTP
-// request, not a dependency check).
+// per-IP rate-limited (ReadyCheck performs the real dependency checks --
+// db / tables_writable / llm / worker_heartbeat / breaker plus the Week-2
+// dependencies document_store / knowledge / reranker; IpRateLimiter is this
+// file's own concern since it's about the HTTP request, not a dependency
+// check).
 $ignoreAuth = true;
 
 require_once __DIR__ . '/../../../../globals.php';

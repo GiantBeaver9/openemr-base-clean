@@ -99,7 +99,7 @@ final class ReadyHealthCheckTest extends TestCase
         // exactly a boolean `ready` plus these string-valued status keys,
         // nothing else (no latencies/config/PHI).
         self::assertEqualsCanonicalizing(
-            ['ready', 'status', 'db', 'tables_writable', 'llm', 'worker_heartbeat', 'breaker'],
+            ['ready', 'status', 'db', 'tables_writable', 'llm', 'worker_heartbeat', 'breaker', 'document_store', 'knowledge', 'reranker'],
             array_keys($result),
         );
         self::assertIsBool($result['ready']);

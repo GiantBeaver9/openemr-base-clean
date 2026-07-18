@@ -23,13 +23,25 @@ use OpenEMR\Modules\ClinicalCopilot\Config\LlmEnv;
  * This class reads the `rate_limit_breaker` (limits, versioned) and
  * `rate_limit_breaker_state` (the one manual-override mutable flag, §3.7)
  * code_set rows, and is the only place either is written from application
- * code (besides the seed rows in table.sql/install.sql).
+ * code (besides the seed rows in table.sql/install.sql). It also owns the
+ * non-seeded `load_test_mode` and `eval_last_run` config rows -- every
+ * mod_copilot_cadence write in src/ lives behind this one whitelisted
+ * repository.
  */
 final class CadenceConfigStore
 {
     private const LIMITS_CODE_SET = 'rate_limit_breaker';
     private const STATE_CODE_SET = 'rate_limit_breaker_state';
     private const LOAD_TEST_CODE_SET = 'load_test_mode';
+
+    /**
+     * Last eval-gate run summary (rates/regressions only -- synthetic golden
+     * set, no PHI). Written by {@see self::recordEvalRun()} whenever the
+     * dashboard's "Run evals" action completes; read by AlertEvaluator's
+     * eval-regression alert. Public so the reader does not hand-roll the
+     * code_set string.
+     */
+    public const EVAL_LAST_RUN_CODE_SET = 'eval_last_run';
 
     /** The per-user chat caps' value while load-test mode is active. */
     private const LOAD_TEST_UNCAPPED = 1_000_000;
@@ -159,12 +171,57 @@ final class CadenceConfigStore
      */
     private function upsertLoadTestState(array $config): void
     {
+        $this->upsertConfig(self::LOAD_TEST_CODE_SET, $config);
+    }
+
+    /**
+     * Persist the outcome of an eval-gate run ({@see \OpenEMR\Modules\ClinicalCopilot\Ops\Eval\EvalGate::run()}
+     * result shape) so the eval-regression alert can fire on the LAST recorded
+     * run rather than nothing. Stores only rubric-level summary strings and
+     * counts -- the golden set is synthetic, and the regression strings name
+     * rubrics and rates only (no PHI, no case content).
+     *
+     * Called from the dashboard's "Run evals" action (web context, DB
+     * available). The CLI/CI runner (ops/eval/run-evals.php) is deliberately
+     * DB-free and does NOT record here -- its gate is the process exit code CI
+     * already blocks on.
+     *
+     * @param array<string, mixed> $result
+     */
+    public function recordEvalRun(array $result): void
+    {
+        $regressions = [];
+        $rawRegressions = is_array($result['regressions'] ?? null) ? $result['regressions'] : [];
+        foreach ($rawRegressions as $regression) {
+            if (is_string($regression)) {
+                $regressions[] = $regression;
+            }
+        }
+
+        $this->upsertConfig(self::EVAL_LAST_RUN_CODE_SET, [
+            'ran_at' => (new \DateTimeImmutable())->format(DATE_ATOM),
+            'passed' => ($result['passed'] ?? false) === true,
+            'regression_count' => count($regressions),
+            // Bounded: enough to read the incident from the dashboard row
+            // without growing the config row unboundedly on a pathological run.
+            'regressions' => array_slice($regressions, 0, 20),
+            'case_count' => is_numeric($result['case_count'] ?? null) ? (int)$result['case_count'] : 0,
+        ]);
+    }
+
+    /**
+     * INSERT-or-UPDATE a non-seeded config row on its unique code_set.
+     *
+     * @param array<string, mixed> $config
+     */
+    private function upsertConfig(string $codeSet, array $config): void
+    {
         QueryUtils::sqlStatementThrowException(
             'INSERT INTO `mod_copilot_cadence` (`code_set`, `config_json`, `version`, `updated_at`)
              VALUES (?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE `config_json` = VALUES(`config_json`), `updated_at` = VALUES(`updated_at`)',
             [
-                self::LOAD_TEST_CODE_SET,
+                $codeSet,
                 json_encode($config, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
                 'v1',
                 (new \DateTimeImmutable())->format('Y-m-d H:i:s'),

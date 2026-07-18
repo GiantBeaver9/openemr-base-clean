@@ -63,6 +63,8 @@
                 &middot; {{ "tables writable"|xlt }}: <span class="badge {{ ready.tables_writable == 'ok' ? 'badge-success' : 'badge-danger' }}">{{ ready.tables_writable|text }}</span>
                 &middot; {{ "LLM"|xlt }}: <span class="badge {{ ready.llm == 'ok' ? 'badge-success' : 'badge-warning' }}">{{ ready.llm|text }}</span>
                 &middot; {{ "worker heartbeat"|xlt }}: <span class="badge {{ ready.worker_heartbeat == 'ok' ? 'badge-success' : 'badge-warning' }}">{{ ready.worker_heartbeat|text }}</span>
+                &middot; {{ "document store"|xlt }}: <span class="badge {{ ready.document_store == 'ok' ? 'badge-success' : (ready.document_store == 'remote-unprobed' ? 'badge-secondary' : 'badge-warning') }}">{{ ready.document_store|text }}</span>
+                &middot; {{ "reranker"|xlt }}: <span class="badge badge-success">{{ ready.reranker|text }}</span>
             </p>
             <p class="mb-1">
                 {{ "Knowledge store (RAG, PHI-free, separate DB)"|xlt }}:

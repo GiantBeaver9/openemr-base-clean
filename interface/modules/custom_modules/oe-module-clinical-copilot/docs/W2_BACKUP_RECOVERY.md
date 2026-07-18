@@ -263,7 +263,10 @@ the module installer and the knowledge seeder idempotently. So:
   — unauthenticated, checks no dependencies; proves Apache + PHP are up.
 - **Readiness:** `GET .../public/ready.php` — genuine dependency checks with
   redacted enum output: `db`, `tables_writable`, `llm`, `worker_heartbeat`,
-  `breaker`. Expect HTTP 200 with `"status":"ok"`; 503 means the DB restore or
+  `breaker`, `document_store` (the §1A documents directory resolvable and
+  writable), `knowledge` (the §1C knowledge Postgres; `offline-corpus` when
+  none is configured), `reranker` (static `in-process`).
+  Expect HTTP 200 with `"status":"ok"`; 503 means the DB restore or
   module install is incomplete; `worker_heartbeat` recovers within one cron
   interval (`src/Observability/ReadyCheck.php`).
 - **Knowledge store:** `php ops/knowledge/check.php` — PASS/FAIL per link

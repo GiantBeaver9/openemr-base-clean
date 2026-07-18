@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Evaluates the 7 ARCHITECTURE.md §3.5 alerts plus the I14 unaccounted-entity alert, on every worker tick.
+ * Evaluates the 7 ARCHITECTURE.md §3.5 alerts, the I14 unaccounted-entity alert, and the 3 Week-2 spec-named alerts, on every worker tick.
  *
  * @package   OpenEMR\Modules\ClinicalCopilot
  * @link      https://www.open-emr.org
@@ -72,6 +72,9 @@ final class AlertEvaluator
             $this->checkLlmSpend($now),
             $this->checkWorkerHeartbeatStale($thresholds, $now),
             $this->checkUnaccountedEntity($thresholds, $now),
+            $this->checkExtractionFailureRate($thresholds, $now),
+            $this->checkRagRetrievalLatency($thresholds, $now),
+            $this->checkEvalRegression(),
         ];
 
         foreach ($findings as $finding) {
@@ -331,6 +334,146 @@ final class AlertEvaluator
         );
     }
 
+    /**
+     * Week-2 spec-named alert 1: extraction failure rate. Data source is the
+     * `vision_extract` spans BOTH ingestion paths write (AttachAndExtract and
+     * the agent-graph IntakeExtractorWorker) -- `status = 'error'` is a real
+     * extraction failure (provider error / schema-invalid after retries).
+     * `status = 'degraded'` is deliberately NOT counted: that is the
+     * LLM-unavailable manual-entry fallback doing its job, and the LLM outage
+     * itself is already covered by /ready and the error-rate alert.
+     */
+    private function checkExtractionFailureRate(array $thresholds, \DateTimeImmutable $now): AlertFinding
+    {
+        $windowStart = $now->modify('-1 hour')->format('Y-m-d H:i:s.u');
+        $total = (int)QueryUtils::fetchSingleValue(
+            "SELECT COUNT(*) AS c FROM `mod_copilot_trace` WHERE `kind` = 'vision_extract' AND `started_at` > ?",
+            'c',
+            [$windowStart],
+        );
+        $failed = (int)QueryUtils::fetchSingleValue(
+            "SELECT COUNT(*) AS c FROM `mod_copilot_trace` WHERE `kind` = 'vision_extract' AND `status` = 'error' AND `started_at` > ?",
+            'c',
+            [$windowStart],
+        );
+
+        return self::extractionFailureFinding($total, $failed, $thresholds['extraction_failure_rate_pct']);
+    }
+
+    /**
+     * Pure decision half of the extraction-failure-rate alert, split out so
+     * the threshold semantics are unit-testable without a DB (same pattern as
+     * {@see \OpenEMR\Modules\ClinicalCopilot\Observability\RateLimit\CadenceConfigStore::isLoadTestActive()}).
+     * An empty window never fires -- no uploads is not a failure signal.
+     */
+    public static function extractionFailureFinding(int $total, int $failed, float $thresholdPct): AlertFinding
+    {
+        $rate = RateMath::percentage($failed, $total);
+        $fired = $total > 0 && $rate > $thresholdPct;
+
+        return new AlertFinding(
+            AlertName::ExtractionFailureRate,
+            $fired,
+            $fired
+                ? sprintf('extraction failure rate %.1f%% exceeds %.1f%% over the last hour (%d of %d vision_extract spans errored)', $rate, $thresholdPct, $failed, $total)
+                : sprintf('extraction failure rate %.1f%% is within threshold', $rate),
+            $rate,
+            $thresholdPct,
+        );
+    }
+
+    /**
+     * Week-2 spec-named alert 2: RAG-retrieval-SPECIFIC latency -- p95 over
+     * `retrieve` spans (the EvidenceRetrieverWorker's guideline-evidence
+     * lookups, whether offline corpus or knowledge Postgres), deliberately
+     * distinct from the aggregate chat-turn p95 the P95Latency alert already
+     * covers: a slow knowledge store hides inside a chat turn's budget long
+     * before it trips the aggregate.
+     */
+    private function checkRagRetrievalLatency(array $thresholds, \DateTimeImmutable $now): AlertFinding
+    {
+        $windowStart = $now->modify("-{$thresholds['eval_window_minutes']} minutes")->format('Y-m-d H:i:s.u');
+        $durations = self::intColumn(
+            "SELECT `duration_ms` AS v FROM `mod_copilot_trace` WHERE `kind` = 'retrieve' AND `duration_ms` IS NOT NULL AND `started_at` > ?",
+            [$windowStart],
+        );
+
+        return self::ragRetrievalLatencyFinding($durations, $thresholds['rag_retrieval_p95_ms'], $thresholds['eval_window_minutes']);
+    }
+
+    /**
+     * Pure decision half of the RAG-retrieval-latency alert. An empty window
+     * never fires (no retrievals ran); with data, fires when the p95 exceeds
+     * the threshold.
+     *
+     * @param list<int> $durationsMs
+     */
+    public static function ragRetrievalLatencyFinding(array $durationsMs, float $thresholdMs, int $windowMinutes): AlertFinding
+    {
+        $p95 = RateMath::percentile($durationsMs, 95.0);
+        $fired = $durationsMs !== [] && $p95 > $thresholdMs;
+
+        return new AlertFinding(
+            AlertName::RagRetrievalLatency,
+            $fired,
+            $fired
+                ? sprintf('RAG retrieval p95 latency %.0fms exceeds %.0fms over the last %d minutes', $p95, $thresholdMs, $windowMinutes)
+                : sprintf('RAG retrieval p95 latency %.0fms is within threshold', $p95),
+            $p95,
+            $thresholdMs,
+        );
+    }
+
+    /**
+     * Week-2 spec-named alert 3: eval regression. EvalGate already computes
+     * `regressions` (>5% drop vs baseline in any rubric, or below the 0.90
+     * absolute floor); the dashboard's "Run evals" action persists each run's
+     * summary via {@see CadenceConfigStore::recordEvalRun()}, and this alert
+     * fires while the LAST recorded run has any regression. Stays within the
+     * evaluator's dependency budget: a cadence-config read, never an eval run
+     * on the tick.
+     */
+    private function checkEvalRegression(): AlertFinding
+    {
+        return self::evalRegressionFinding($this->cadenceConfig->get(CadenceConfigStore::EVAL_LAST_RUN_CODE_SET));
+    }
+
+    /**
+     * Pure decision half of the eval-regression alert. No recorded run yet is
+     * an honest non-firing state (message says so) -- the CI gate, not this
+     * alert, guards environments where evals only ever run DB-free.
+     *
+     * @param array<string, mixed> $lastRun the stored eval_last_run config row
+     */
+    public static function evalRegressionFinding(array $lastRun): AlertFinding
+    {
+        $ranAt = is_string($lastRun['ran_at'] ?? null) ? $lastRun['ran_at'] : null;
+        if ($ranAt === null) {
+            return new AlertFinding(
+                AlertName::EvalRegression,
+                false,
+                'no eval run has been recorded yet (run evals from the dashboard to arm this alert; CI runs gate on exit code instead)',
+                0.0,
+                0.0,
+            );
+        }
+
+        $count = is_numeric($lastRun['regression_count'] ?? null) ? (int)$lastRun['regression_count'] : 0;
+        $regressions = is_array($lastRun['regressions'] ?? null) ? $lastRun['regressions'] : [];
+        $first = is_string($regressions[0] ?? null) ? $regressions[0] : '';
+        $fired = $count > 0;
+
+        return new AlertFinding(
+            AlertName::EvalRegression,
+            $fired,
+            $fired
+                ? sprintf('last eval run (%s) recorded %d rubric regression(s)%s', $ranAt, $count, $first !== '' ? ' -- first: ' . $first : '')
+                : sprintf('last eval run (%s) passed with no regressions', $ranAt),
+            (float)$count,
+            0.0,
+        );
+    }
+
     private function recordAndNotify(AlertFinding $finding, \DateTimeImmutable $now): void
     {
         $this->tracer->record(new TraceSpan(
@@ -365,7 +508,8 @@ final class AlertEvaluator
      * @return array{
      *     eval_window_minutes: int, p95_latency_ms: float, warm_miss_rate_pct: float,
      *     error_rate_pct: float, tool_failure_rate_pct: float,
-     *     verification_failure_rate_pct: float, heartbeat_stale_multiplier: float
+     *     verification_failure_rate_pct: float, heartbeat_stale_multiplier: float,
+     *     extraction_failure_rate_pct: float, rag_retrieval_p95_ms: float
      * }
      */
     private function loadThresholds(): array
@@ -380,6 +524,13 @@ final class AlertEvaluator
             'tool_failure_rate_pct' => (float)($config['tool_failure_rate_pct'] ?? 2.0),
             'verification_failure_rate_pct' => (float)($config['verification_failure_rate_pct'] ?? 10.0),
             'heartbeat_stale_multiplier' => (float)($config['heartbeat_stale_multiplier'] ?? 2.0),
+            // Week-2 spec-named alerts. Extraction failures are rarer but each
+            // one is a clinician-visible dead upload, so the tolerance sits
+            // between the tool (2%) and verification (10%) rates. Retrieval is
+            // an in-turn stage with its own budget: 2s p95 is already several
+            // times the healthy offline/Postgres path.
+            'extraction_failure_rate_pct' => (float)($config['extraction_failure_rate_pct'] ?? 10.0),
+            'rag_retrieval_p95_ms' => (float)($config['rag_retrieval_p95_ms'] ?? 2000),
         ];
     }
 
