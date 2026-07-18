@@ -50,6 +50,7 @@
                     },
                     "page": {
                         "type": "integer",
+                        "minimum": 1,
                         "description": "1-based page number the value was read from."
                     },
                     "quote": {

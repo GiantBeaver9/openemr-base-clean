@@ -107,6 +107,15 @@ final class ExtractionSchema
                 if (!isset($field['quote']) || !is_string($field['quote']) || $field['quote'] === '') {
                     $errors[] = "{$at}.quote must be a non-empty string (citation is required for a value)";
                 }
+            } elseif ($hasValue && isset($field['page']) && (!is_int($field['page']) || $field['page'] < 1)) {
+                // Even where a citation is optional (intake), a page supplied
+                // alongside a real value must still be a positive 1-based
+                // integer. A page like "one", a quoted "3", 2.0, true, or a
+                // zero/negative index can never address a real page in the
+                // source document, so the extraction is refused rather than
+                // persisting an uncheckable citation. Blank fields keep their
+                // page:0 tolerance — with no value there is nothing to cite.
+                $errors[] = "{$at}.page must be a positive integer when present";
             }
 
             if (isset($field['confidence'])) {

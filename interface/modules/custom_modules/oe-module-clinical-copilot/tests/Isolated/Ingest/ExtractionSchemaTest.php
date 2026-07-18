@@ -63,6 +63,27 @@ final class ExtractionSchemaTest extends TestCase
         self::assertSame([], ExtractionSchema::validate(DocType::IntakeForm, $payload));
     }
 
+    public function testNonIntegerPageOnAValuedFieldIsRejected(): void
+    {
+        // Failure mode guarded (eval case ref-07): the VLM cites page "one"
+        // for a field that has a value. A page that is not a positive 1-based
+        // integer — a string (even a numeric "3": JSON-decoded integers stay
+        // int, so a quoted page is always a model error), a float like 2.0,
+        // a bool, zero, or a negative — can never address a real page in the
+        // source document, so the extraction must be refused rather than
+        // persisting an uncheckable citation. Blank fields keep their page:0
+        // tolerance (see testBlankFieldsWithoutACitationDoNotRejectTheExtraction).
+        foreach (['one', '3', 2.0, true, 0, -1] as $badPage) {
+            $payload = ['fields' => [
+                ['field_key' => 'first_name', 'value' => 'Ada', 'page' => $badPage, 'quote' => 'q'],
+            ]];
+            $errors = ExtractionSchema::validate(DocType::IntakeForm, $payload);
+
+            self::assertNotSame([], $errors, 'page ' . var_export($badPage, true) . ' must reject the extraction');
+            self::assertStringContainsString('page', implode(' ', $errors));
+        }
+    }
+
     public function testLabMissingPageIsRejectedBecauseCitationIsRequired(): void
     {
         // Labs drive the bbox overlay, so a valued result MUST cite its page.
