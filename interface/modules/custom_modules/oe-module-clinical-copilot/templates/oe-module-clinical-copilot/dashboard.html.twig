@@ -113,7 +113,7 @@
 
     <div class="card mb-3">
         <div class="card-header d-flex justify-content-between align-items-center">
-            <strong>{{ "Evals — 50-case boolean-rubric gate"|xlt }}</strong>
+            <strong>{{ "Evals — 54-case boolean-rubric gate"|xlt }}</strong>
             <form method="post" action="{{ dashboard_url_site|attr }}" class="form-inline mb-0">
                 {# Same pinned CSRF field name as the breaker form above. #}
                 {{ csrfToken('default', 'csrf_token_form') }}
@@ -146,6 +146,39 @@
                     {% endfor %}
                     </tbody>
                 </table>
+                {% if eval_category_summary is not empty %}
+                    <div class="mb-2">
+                        <span class="text-muted small">{{ "Golden set by category"|xlt }}:</span>
+                        {% for category, tally in eval_category_summary %}
+                            <span class="badge {{ tally.passed == tally.total ? 'badge-success' : 'badge-warning' }} mr-1">
+                                {{ category|text }} {{ tally.passed }}/{{ tally.total }}
+                            </span>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+                {% if eval_result.cases is not empty %}
+                    <details class="mb-2">
+                        <summary class="small text-muted" style="cursor: pointer">{{ "Show all"|xlt }} {{ eval_result.cases|length }} {{ "cases"|xlt }}</summary>
+                        <table class="table table-sm table-striped mt-2 mb-0">
+                            <thead><tr><th>{{ "Case"|xlt }}</th><th>{{ "Category"|xlt }}</th><th>{{ "Rubrics"|xlt }}</th></tr></thead>
+                            <tbody>
+                            {% for case in eval_result.cases %}
+                                <tr>
+                                    <td class="small"><code>{{ case.id|text }}</code></td>
+                                    <td class="small">{{ case.category|text }}</td>
+                                    <td class="small">
+                                        {% for rubric, passed in case.rubrics %}
+                                            <span class="badge {{ passed ? 'badge-success' : 'badge-danger' }} mr-1" title="{{ rubric|attr }}">
+                                                {{ passed ? '✓' : '✗' }} {{ rubric|text }}
+                                            </span>
+                                        {% endfor %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </details>
+                {% endif %}
                 {% if eval_result.regressions is not empty %}
                     <div class="alert alert-danger py-2 mb-0">
                         <strong>{{ "Regressions"|xlt }}:</strong>
@@ -159,7 +192,7 @@
                     </p>
                 {% endif %}
             {% else %}
-                <p class="text-muted mb-0">{{ "Press \"Run evals\" to run the 50-case gate now — the same deterministic engine CI uses (ops/eval/run-evals.php). No live model or database is touched."|xlt }}</p>
+                <p class="text-muted mb-0">{{ "Press \"Run evals\" to run the 54-case gate now — the same deterministic engine CI uses (ops/eval/run-evals.php). No live model or database is touched."|xlt }}</p>
             {% endif %}
         </div>
     </div>

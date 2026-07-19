@@ -267,10 +267,26 @@ final class EvalGate
         $expect = is_array($case['expect'] ?? null) ? $case['expect'] : [];
         $hits = $retriever->retrieve($query, $tags, 3);
 
+        // `top_chunk` asserts one exact #1 chunk id. `top_chunk_any` accepts the
+        // #1 hit being any id in a list — used when more than one corpus chunk is
+        // an equally-correct top answer (e.g. two guideline sources for the same
+        // first-line recommendation), so growing the corpus with a co-equal chunk
+        // does not spuriously fail the case.
         $topExpected = (string)($expect['top_chunk'] ?? '');
-        $consistent = $topExpected === ''
-            ? $hits !== []
-            : (($hits[0]->chunk->id ?? '') === $topExpected);
+        $acceptable = [];
+        foreach (is_array($expect['top_chunk_any'] ?? null) ? $expect['top_chunk_any'] : [] as $id) {
+            if (is_string($id)) {
+                $acceptable[] = $id;
+            }
+        }
+        $topHit = $hits[0]->chunk->id ?? '';
+        if ($acceptable !== []) {
+            $consistent = in_array($topHit, $acceptable, true);
+        } elseif ($topExpected !== '') {
+            $consistent = $topHit === $topExpected;
+        } else {
+            $consistent = $hits !== [];
+        }
 
         $allCited = true;
         foreach ($hits as $hit) {

@@ -207,6 +207,10 @@ $templateVars = [
     'payload' => $payload,
     'payload_json' => $payloadJson,
     'eval_result' => $evalResult,
+    // Per-category roll-up of the golden set (extraction / retrieval / refusal /
+    // missing_data) derived from the run's PHI-free per-case rubric booleans, so
+    // the panel shows the full set is exercised, not just aggregate rubric rates.
+    'eval_category_summary' => evalCategorySummary($evalResult),
     'eval_error' => $evalError,
     'load_test_result' => $loadTestResult,
     'load_test_error' => $loadTestError,
@@ -223,3 +227,37 @@ $templateVars = [
 
 $twig = (new TwigContainer(dirname(__DIR__) . '/templates', OEGlobalsBag::getInstance()->getKernel()))->getTwig();
 echo $twig->render('oe-module-clinical-copilot/dashboard.html.twig', $templateVars);
+
+/**
+ * Roll the eval run's per-case rubric booleans up by category (extraction,
+ * retrieval, refusal, missing_data). Input is the PHI-free `cases` list from
+ * EvalGate::run() (ids/categories/booleans only), so the summary carries no
+ * case content. Returns [] when no run has happened yet.
+ *
+ * @param array<string, mixed>|null $evalResult
+ * @return array<string, array{total: int, passed: int}>
+ */
+function evalCategorySummary(?array $evalResult): array
+{
+    $cases = is_array($evalResult['cases'] ?? null) ? $evalResult['cases'] : [];
+    $summary = [];
+    foreach ($cases as $case) {
+        if (!is_array($case)) {
+            continue;
+        }
+        $category = (string)($case['category'] ?? '');
+        if ($category === '') {
+            continue;
+        }
+        $rubrics = is_array($case['rubrics'] ?? null) ? $case['rubrics'] : [];
+        $allPassed = !in_array(false, $rubrics, true);
+        $summary[$category] ??= ['total' => 0, 'passed' => 0];
+        $summary[$category]['total']++;
+        if ($allPassed) {
+            $summary[$category]['passed']++;
+        }
+    }
+    ksort($summary);
+
+    return $summary;
+}
