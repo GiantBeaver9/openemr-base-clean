@@ -35,6 +35,10 @@
     </style>
 </head>
 <body class="body_top">
+{# OpenEMR's tab bar labels a tab from the first .title element in the
+   loaded page (interface/main/tabs/js/custom_bindings.js); without one
+   the tab reads "Unknown". Hidden: the visible layout has its own heading. #}
+<span class="title" style="display: none">{{ "Co-Pilot Dashboard"|xlt }}</span>
 <div class="container-fluid mt-3">
     <h4><i class="fa fa-line-chart mr-2"></i>{{ "Clinical Co-Pilot -- Observability"|xlt }}
         <small class="text-muted">{{ "window: last"|xlt }} {{ window_hours }}h &middot; {{ "auto-refreshes every"|xlt }} {{ (refresh_seconds / 60)|round }} {{ "min"|xlt }}</small>

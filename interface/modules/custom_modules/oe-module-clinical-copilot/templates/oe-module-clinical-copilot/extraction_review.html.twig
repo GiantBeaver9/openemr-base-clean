@@ -42,6 +42,10 @@
     </style>
 </head>
 <body class="body_top">
+{# OpenEMR's tab bar labels a tab from the first .title element in the
+   loaded page (interface/main/tabs/js/custom_bindings.js); without one
+   the tab reads "Unknown". Hidden: the visible layout has its own heading. #}
+<span class="title" style="display: none">{{ "Verify Extraction"|xlt }}</span>
 <div class="container-fluid mt-3">
 
     {% if not found %}

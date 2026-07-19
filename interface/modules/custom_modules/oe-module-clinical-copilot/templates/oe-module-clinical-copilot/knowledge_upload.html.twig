@@ -17,6 +17,10 @@
     {{ setupHeader() }}
 </head>
 <body class="body_top">
+{# OpenEMR's tab bar labels a tab from the first .title element in the
+   loaded page (interface/main/tabs/js/custom_bindings.js); without one
+   the tab reads "Unknown". Hidden: the visible layout has its own heading. #}
+<span class="title" style="display: none">{{ "Knowledge Base (RAG)"|xlt }}</span>
 <div class="container-fluid mt-3" style="max-width: 900px;">
     <h4><i class="fa fa-book mr-2"></i>{{ "Knowledge base -- add a document"|xlt }}</h4>
     <p class="text-muted">
