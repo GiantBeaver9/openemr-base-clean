@@ -64,6 +64,22 @@ echo "Railway entrypoint: database prep"
 echo "Railway entrypoint: scheduling Clinical Co-Pilot module install (runs in background after base install)"
 /usr/local/bin/railway-install-copilot.sh &
 
+# Optional full-cohort self-seed (ENDO-001..050 + landmines) on boot, so a
+# redeploy against a non-persistent MySQL never leaves a near-empty chart.
+# Opt-in via CLINICAL_COPILOT_SEED_ON_BOOT=1 (synthetic-only assertion, same
+# stance as CLINICAL_COPILOT_SEED_ALLOW); both seeders are idempotent, so
+# re-running on every deploy is safe. Backgrounded: waits for the base install
+# to create core tables, then seeds without blocking Apache.
+if [ "${CLINICAL_COPILOT_SEED_ON_BOOT:-0}" = "1" ]; then
+    echo "Railway entrypoint: scheduling full-cohort seed (CLINICAL_COPILOT_SEED_ON_BOOT=1; runs in background after base install)"
+    (
+        until php -r '$_GET["site"]="default";$ignoreAuth=true;require "/var/www/localhost/htdocs/openemr/interface/globals.php";exit(\OpenEMR\Common\Database\QueryUtils::fetchSingleValue("SELECT 1 FROM patient_data LIMIT 1","1")!==null?0:1);' 2>/dev/null; do
+            sleep 5
+        done
+        sh /var/www/localhost/htdocs/openemr/interface/modules/custom_modules/oe-module-clinical-copilot/ops/railway/seed.sh
+    ) &
+fi
+
 echo "Railway entrypoint: launching openemr.sh (composer/npm/setup, then Apache on PORT=${PORT:-80})"
 cd /var/www/localhost/htdocs
 exec ./openemr.sh

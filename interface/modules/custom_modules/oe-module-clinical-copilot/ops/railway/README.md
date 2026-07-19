@@ -58,11 +58,14 @@ php interface/modules/custom_modules/oe-module-clinical-copilot/tests/Seed/SeedE
 
 ## Optional: seed automatically on deploy
 
-Keep it operator-triggered by default (a stray auto-seed on every deploy is
-rarely what you want). If you do want a fresh deploy to self-seed once its
-install is up, add a guarded call near the end of `railway-entrypoint.sh`
-*before* it `exec`s `openemr.sh`, backgrounded so it waits for the install then
-seeds without blocking Apache — for example:
+This hook now ships in the root `railway-entrypoint.sh`: set
+`CLINICAL_COPILOT_SEED_ON_BOOT=1` in the Railway service variables and every
+deploy waits for the base install, then runs `seed.sh` (full cohort +
+landmines) in the background. Both seeders are idempotent, so re-seeding on
+each deploy is safe — and a redeploy against a non-persistent MySQL never
+leaves a near-empty chart. It stays off by default (operator opt-in, same
+synthetic-only assertion as `CLINICAL_COPILOT_SEED_ALLOW`). The equivalent
+inline pattern, for reference or other deploy targets:
 
 ```sh
 if [ "${CLINICAL_COPILOT_SEED_ON_BOOT:-0}" = "1" ]; then

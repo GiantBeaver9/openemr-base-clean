@@ -70,6 +70,7 @@ ALLOWED_SPEC_DOCS=(
   ".gitattributes"
   "Dockerfile.railway"
   "railway-install-copilot.sh"
+  "railway-entrypoint.sh"
   # The intentional core-workflow additions: the PR-blocking eval-gate
   # workflow (W1a) and the dependency-audit + security-scan workflow the
   # Week 2 engineering requirements mandate on every PR. Everything else
