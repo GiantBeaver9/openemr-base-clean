@@ -1,11 +1,17 @@
-"""AgentForge CLI — run a Red Team campaign against the target.
+"""AgentForge CLI — run the adversarial platform against the target.
+
+Commands:
+    redteam    run a Red Team campaign only (seed + mutations), emit attempts
+    campaign   run the FULL loop: Orchestrator -> Red Team -> Judge -> Documentation
+    judge      (re)judge a captured attempts file offline, emit verdicts
+    dashboard  print the observability rollup for a run log
 
 Examples:
-    # Offline dry-run (no network; uses the mock target) — works anywhere:
-    python -m agentforge.cli redteam --dry-run --category prompt_injection
+    # Offline dry-run (mock target) — works anywhere:
+    python -m agentforge.cli campaign --dry-run --mock-policy leaky
 
-    # Live run against the deployed target (requires egress + target creds):
-    python -m agentforge.cli redteam --category prompt_injection
+    # Live full campaign against the deployed target (needs egress + creds):
+    python -m agentforge.cli campaign --pid 1 --max-attempts 4
 """
 from __future__ import annotations
 
@@ -18,11 +24,17 @@ from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES_DIR = ROOT / "evals" / "cases"
+RUNS_DIR = ROOT / "runs"
 
 sys.path.insert(0, str(ROOT / "src"))
 
-from agentforge import config as cfgmod          # noqa: E402
-from agentforge.agents.redteam import RedTeamAgent, SeedCase  # noqa: E402
+from agentforge import config as cfgmod                                  # noqa: E402
+from agentforge.agents.judge import JudgeAgent                           # noqa: E402
+from agentforge.agents.documentation import DocumentationAgent          # noqa: E402
+from agentforge.agents.orchestrator import CampaignState, OrchestratorAgent  # noqa: E402
+from agentforge.agents.redteam import RedTeamAgent, SeedCase             # noqa: E402
+from agentforge.observability.store import ObservabilityStore           # noqa: E402
+from agentforge.pipeline import run_campaign                             # noqa: E402
 from agentforge.target.client import MockTargetClient, OpenEmrTargetClient  # noqa: E402
 
 
@@ -32,10 +44,21 @@ def _load_seed_cases(category: str | None) -> list[SeedCase]:
         for d in json.loads(Path(f).read_text()):
             if category and d["attack_category"] != category:
                 continue
-            # skip cases that need a deterministic (non-LLM) probe harness
+            # only cases on an LLM-driven surface (chat/agent) run through here
             if d["target_surface"] in ("chat", "agent"):
                 seeds.append(SeedCase.from_eval(d))
     return seeds
+
+
+def _make_target(args):
+    cfg = cfgmod.load()
+    if args.dry_run:
+        print(f"[dry-run] mock target policy={args.mock_policy}")
+        return MockTargetClient(policy=args.mock_policy)
+    client = OpenEmrTargetClient(cfg.target, csrf_pid=args.pid)
+    client.login()
+    print(f"[live] target={cfg.target.base_url}")
+    return client
 
 
 def _directive(category: str | None, max_attempts: int, max_turns: int) -> dict:
@@ -54,15 +77,7 @@ def _directive(category: str | None, max_attempts: int, max_turns: int) -> dict:
 
 def cmd_redteam(args: argparse.Namespace) -> int:
     cfg = cfgmod.load()
-    if args.dry_run:
-        target = MockTargetClient(policy=args.mock_policy)
-        print(f"[dry-run] mock target policy={args.mock_policy}")
-    else:
-        client = OpenEmrTargetClient(cfg)
-        client.login()
-        target = client
-        print(f"[live] target={cfg.target.base_url}")
-
+    target = _make_target(args)
     seeds = _load_seed_cases(args.category)
     if not seeds:
         print("no seed cases for that category on an LLM surface", file=sys.stderr)
@@ -71,9 +86,8 @@ def cmd_redteam(args: argparse.Namespace) -> int:
     directive = _directive(args.category, args.max_attempts, cfg.budget.max_turns)
     attempts = agent.run_directive(directive, seeds)
 
-    out = ROOT / "runs"
-    out.mkdir(exist_ok=True)
-    path = out / f"{directive['campaign_id']}.attempts.jsonl"
+    RUNS_DIR.mkdir(exist_ok=True)
+    path = RUNS_DIR / f"{directive['campaign_id']}.attempts.jsonl"
     with path.open("w") as fh:
         for a in attempts:
             fh.write(json.dumps(a) + "\n")
@@ -82,22 +96,112 @@ def cmd_redteam(args: argparse.Namespace) -> int:
     for a in attempts[: args.show]:
         target_turn = next((t for t in a["turns"] if t["role"] == "target"), {})
         print(f"  {a['attempt_id']} [{a['attack_technique']:8}] "
-              f"{a['attack_category']:22} -> {target_turn.get('content','')[:70]!r}")
+              f"{a['attack_category']:22} -> {target_turn.get('content', '')[:70]!r}")
     return 0
+
+
+def cmd_campaign(args: argparse.Namespace) -> int:
+    target = _make_target(args)
+    seeds = _load_seed_cases(args.category)
+    if not seeds:
+        print("no seed cases for that category on an LLM surface", file=sys.stderr)
+        return 2
+
+    RUNS_DIR.mkdir(exist_ok=True)
+    run_id = f"camp-{uuid4().hex[:8]}"
+    store = ObservabilityStore(RUNS_DIR / f"{run_id}.observability.jsonl")
+    orch = OrchestratorAgent(store, CampaignState(
+        max_attempts=args.max_attempts * args.rounds, max_usd=args.max_usd))
+
+    result = run_campaign(
+        target=target, seeds=seeds, store=store, orchestrator=orch,
+        pinned_pid=args.pid, max_rounds=args.rounds,
+        max_attempts_per_round=args.max_attempts,
+    )
+
+    # Persist reports for the Documentation deliverable.
+    reports_path = RUNS_DIR / f"{run_id}.reports.json"
+    reports_path.write_text(json.dumps([r.to_dict() for r in result.reports], indent=2))
+
+    summary = store.summary()
+    print(f"\ncampaign {run_id} -> {store.path.name}")
+    print(f"  directives={len(result.directives)} attempts={summary['attempts']} "
+          f"verdicts={summary['verdicts']} findings={summary['open_findings']} "
+          f"halt={result.halt.reason if result.halt else None}")
+    for r in result.reports[: args.show]:
+        print(f"  FINDING {r.finding_id} [{r.severity:8}] {r.title}  ({r.status})")
+    print(f"  reports -> {reports_path}")
+    _print_coverage(summary)
+    return 0
+
+
+def cmd_judge(args: argparse.Namespace) -> int:
+    attempts = [json.loads(l) for l in Path(args.attempts).read_text().splitlines() if l.strip()]
+    judge = JudgeAgent()
+    doc = DocumentationAgent()
+    out = Path(args.attempts).with_suffix(".verdicts.jsonl")
+    findings = 0
+    with out.open("w") as fh:
+        for a in attempts:
+            v = judge.judge(a).to_wire()
+            fh.write(json.dumps(v) + "\n")
+            if v["verdict"] == "success":
+                findings += 1
+    print(f"judged {len(attempts)} attempts -> {out} ({findings} confirmed findings)")
+    return 0
+
+
+def cmd_dashboard(args: argparse.Namespace) -> int:
+    store = ObservabilityStore(args.run)
+    summary = store.summary()
+    print(f"run: {args.run}")
+    print(f"attempts={summary['attempts']} verdicts={summary['verdicts']} "
+          f"open_findings={summary['open_findings']} cost_usd={summary['cost_usd']}")
+    _print_coverage(summary)
+    for f in store.open_findings()[: args.show]:
+        print(f"  OPEN [{f['severity']:8}] attempt={f['attempt_id']} conf={f['confidence']}")
+    return 0
+
+
+def _print_coverage(summary: dict) -> None:
+    print("  coverage (category / surface: attempts, verdicts, success, pass_rate):")
+    for c in summary["coverage"]:
+        pr = "n/a" if c["pass_rate"] is None else f"{c['pass_rate']:.2f}"
+        print(f"    {c['attack_category']:26} {c['target_surface']:6} "
+              f"att={c['attempts']:<3} ver={c['verdicts']:<3} succ={c['successes']:<3} pass={pr}")
 
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="agentforge")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    rt = sub.add_parser("redteam", help="run a Red Team campaign")
-    rt.add_argument("--category", default=None, help="attack_category to focus on")
-    rt.add_argument("--dry-run", action="store_true", help="use the offline mock target")
-    rt.add_argument("--mock-policy", default="defended", choices=["defended", "leaky"])
-    rt.add_argument("--pid", type=int, default=1, help="pinned patient id")
+    def add_target_opts(sp):
+        sp.add_argument("--category", default=None, help="attack_category to focus on")
+        sp.add_argument("--dry-run", action="store_true", help="use the offline mock target")
+        sp.add_argument("--mock-policy", default="defended", choices=["defended", "leaky"])
+        sp.add_argument("--pid", type=int, default=1, help="pinned patient id")
+        sp.add_argument("--show", type=int, default=10)
+
+    rt = sub.add_parser("redteam", help="run a Red Team campaign only")
+    add_target_opts(rt)
     rt.add_argument("--max-attempts", type=int, default=25)
-    rt.add_argument("--show", type=int, default=10)
     rt.set_defaults(func=cmd_redteam)
+
+    cp = sub.add_parser("campaign", help="run the full multi-agent loop")
+    add_target_opts(cp)
+    cp.add_argument("--rounds", type=int, default=3, help="orchestrator rounds")
+    cp.add_argument("--max-attempts", type=int, default=6, help="max attempts per round")
+    cp.add_argument("--max-usd", type=float, default=2.0)
+    cp.set_defaults(func=cmd_campaign)
+
+    ju = sub.add_parser("judge", help="(re)judge a captured attempts file offline")
+    ju.add_argument("attempts", help="path to a runs/*.attempts.jsonl file")
+    ju.set_defaults(func=cmd_judge)
+
+    db = sub.add_parser("dashboard", help="print the observability rollup for a run")
+    db.add_argument("run", help="path to a runs/*.observability.jsonl file")
+    db.add_argument("--show", type=int, default=10)
+    db.set_defaults(func=cmd_dashboard)
 
     args = p.parse_args(argv)
     return args.func(args)

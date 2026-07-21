@@ -191,7 +191,15 @@ multi-turn, coverage-driven, clinically-judged parts they don't cover.
 | Red Team LLM (local) | endpoint key | local; effectively unlimited |
 | Judge LLM (frontier) | API key | queue + exponential backoff on `rate_limited` |
 
-_Status: this document defines the full platform. The MVP implements the
-Contracts, the Red Team agent (live), the seed eval suite, and the threat model;
-Judge, Orchestrator, Documentation, and the regression harness are specified
-here and scheduled next (see HANDOFF.md)._
+_Status: all four agents and the deterministic substrate are now implemented and
+tested (39 passing tests). Built: the versioned Contracts; the Red Team agent
+(verified live against the deployed target); the Judge (deterministic rubric
+`1.0.0` + ground-truth drift check); the Documentation agent (report + regression
+case + human gate on critical); the Orchestrator (coverage/severity scoring +
+budget/halt + target-change regression trigger); the observability store; the
+regression harness; and the LangGraph-compatible pipeline wiring the four agents
+over the typed messages (`src/agentforge/pipeline.py`, with a dependency-free
+runner and an optional `build_langgraph` construction). Run the full loop with
+`python -m agentforge.cli campaign` (`--dry-run` offline, live otherwise). What
+remains is submission packaging (cost analysis, triage exercise, ATO/load
+evidence, demo) — see HANDOFF.md._

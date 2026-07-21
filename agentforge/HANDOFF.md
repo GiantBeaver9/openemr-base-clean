@@ -27,7 +27,33 @@ verify the env's Network access = Custom, `*.up.railway.app` + `*.railway.app`
 listed, "include defaults" checked, and that you started a *new* session after
 saving.
 
-## Step 0 — verify reachability + auth (the one live-only task)
+## Step 0 — VERIFIED ✅ (target reachable, login + CSRF + full loop confirmed live)
+
+**This is done.** The target is reachable (HTTP 200) and the whole handshake was
+confirmed against the live Railway deploy with `admin`/`pass`:
+
+- Login posts `authUser`/`clearPass`/`new_login_session_management`/
+  `languageChoice`/`facility=user_default` to
+  `interface/main/main_screen.php?auth=login` (the module's own verified bruno
+  flow). The old client sent the wrong fields — **fixed** in `client.py`.
+- The CSRF form token is scraped from
+  `.../oe-module-clinical-copilot/public/doc.php?pid=<pid>` via the chat panel's
+  `id="ccpChatCsrf"` hidden input (NOT `dashboard.php`/`csrf_token_form` as the
+  original draft assumed) — **fixed**. Needs a pid with a seeded synthesis doc
+  (`--pid 1` works on the deploy).
+- Two client bugs the live path exposed were fixed: the CLI passed the whole
+  `Config` where the client expects `cfg.target`; and httpx needs the egress
+  proxy CA (`/root/.ccr/ca-bundle.crt`) set as `verify=` — the client now does
+  both, plus a small retry on the proxy's transient chunked-read closes.
+- **Real result:** the co-pilot **defended** the benign and cross-patient/
+  injection asks it was given (`answer_status=refused` on agent.php;
+  `verify_status=degraded`, "couldn't produce a verifiable answer" on chat.php).
+  Evidence: `runs/camp-95fd476c.attempts.jsonl` (Red Team only) and the live
+  `campaign` run's `runs/*.observability.jsonl` + `*.reports.json`.
+
+Original step-0 checklist (kept for reference / re-verification):
+
+### Step 0 (reference) — verify reachability + auth
 
 ```bash
 # a) reachability
@@ -75,46 +101,49 @@ the target client that was written to convention but not verified live
 | Contract tests | `tests/test_contracts.py`, `test_models_roundtrip.py` | schemas valid + golden examples + model round-trips. |
 | Seed eval suite | `evals/cases/*.json` (17 cases, 5 categories) | OWASP-tagged; each maps to boundary/invariant/regression dimension. `evals/schema.json` enforces shape + unique ids. |
 | Red Team agent | `src/agentforge/agents/redteam.py` | generate + 4 deterministic mutation operators (+ optional LLM variants); drives multi-turn; emits contract-valid `AttackAttempt`. |
-| Target client | `src/agentforge/target/client.py` | `OpenEmrTargetClient` (live, needs step 0) + `MockTargetClient` (offline, defended/leaky policies). |
-| CLI | `src/agentforge/cli.py` | `redteam` command, `--dry-run` offline mode. |
-| Red Team e2e tests | `tests/test_redteam_e2e.py` | seed+mutations valid, budget respected, leaky target caught. |
+| Target client | `src/agentforge/target/client.py` | `OpenEmrTargetClient` (**verified live**, see below) + `MockTargetClient` (offline, defended/leaky policies). |
+| **Judge agent** | `src/agentforge/agents/judge.py` | independent verdict maker; deterministic rubric `RUBRIC_VERSION=1.0.0` (leak vs defense markers) + optional LLM refinement; ground-truth drift check; `critical`/`uncertain` → `escalate_to_human`. |
+| **Ground-truth set** | `evals/ground_truth.json` | 4 labeled attempts (2 real defended + 2 synthetic leaks) that pin the rubric; drift check rejects a rubric that mislabels them. |
+| **Documentation agent** | `src/agentforge/agents/documentation.py` | success `Verdict` → `VulnerabilityReport` (OWASP-tagged, reproducible) + regression case (invariant, not string match); data-quality gates; human gate on `critical`. |
+| **Orchestrator** | `src/agentforge/agents/orchestrator.py` | scores (category×surface) by `base_priority·coverage_gap + open-severity`; emits contract-valid `AttackCampaignDirective`; budget/halt (`budget_exceeded`, `no_findings_in_window`); regression trigger on target-version change. |
+| **Observability store** | `src/agentforge/observability/store.py` | append-only JSONL keyed by `correlation_id`; deterministic rollups (coverage, pass-rate, open findings, cost, timeline); the Orchestrator's input. |
+| **Regression harness** | `src/agentforge/regression.py` | replays confirmed exploits; pass == invariant holds (target defended), not a string match; sibling replay across a category. |
+| **Pipeline (LangGraph)** | `src/agentforge/pipeline.py` | wires Orchestrator→RedTeam→Judge→Documentation→Observability over the typed messages; dependency-free `run_campaign` runner + optional `build_langgraph` StateGraph. |
+| CLI | `src/agentforge/cli.py` | `redteam`, `campaign` (full loop), `judge` (offline re-judge), `dashboard` (observability rollup); `--dry-run` offline mode on all. |
+| Tests | `tests/` | contracts, models, redteam e2e, **observability, judge (+drift), documentation, orchestrator+pipeline, regression**. |
 
-Run everything: `cd agentforge && PYTHONPATH=src pytest tests/ -q` → **17 passed**.
+Run everything: `cd agentforge && PYTHONPATH=src pytest tests/ -q` → **39 passed**.
+Run the full loop live: `PYTHONPATH=src python -m agentforge.cli campaign --pid 1 --rounds 2 --max-attempts 4`.
 
 ## What is NEXT (priority order)
 
-### To finish the MVP (by Tue night)
-The MVP hard gates are already largely met on paper (threat model ✅, evals ✅,
-one agent role ✅, architecture ✅). Remaining for a *live* MVP:
-1. **Step 0** — get the Red Team firing against the live target. This is the
-   only thing between "runs on mock" and the MVP "agent running live against the
-   deployed target" gate.
-2. Capture a short live run's `runs/*.attempts.jsonl` as evidence.
-3. Submit the deployed URL with the checkpoint (hard gate, every checkpoint).
+### MVP — DONE ✅
+The MVP hard gates are met: threat model ✅, evals ✅, one agent role live ✅,
+architecture ✅, and Step 0 (Red Team firing against the live target) ✅ with
+captured evidence. All four agents are now built beyond the MVP bar.
+Remaining human-only action: **submit the deployed URL with the checkpoint**
+(target: `https://abundant-art-production-d560.up.railway.app`).
 
-### For the Final (Wed–Fri) — specified in ARCHITECTURE.md, not yet built
-4. **Judge agent** (`agents/judge.py`) — independent frontier model; consumes
-   `AttackAttempt`, emits `Verdict` (schema already exists). Add the versioned
-   rubric + a ground-truth set of labeled attempts to detect drift.
-5. **Orchestrator** (`agents/orchestrator.py`) — coverage/severity scoring over
-   the observability store; emits `AttackCampaignDirective`; budget + halt
-   (`no_findings_in_window`, `budget_exceeded`); triggers regression on target
-   version change.
-6. **Documentation agent** (`agents/documentation.py`) — `Verdict(success)` →
-   structured vuln report; data-quality validation (unique id, required fields,
-   no dup attack sequences); **human gate on critical**.
-7. **Regression harness** — promote confirmed exploits to deterministic cases;
-   pass = the *invariant* holds (not a string match); re-run siblings to catch
-   cross-category regressions.
-8. **Observability store** — append-only run log keyed by `correlation_id`;
-   answers coverage/pass-rate/trend/open-findings/cost/timeline. This is also
-   the Orchestrator's input — build it before/with the Orchestrator.
-9. **LangGraph wiring** — connect the four agents as a graph with the typed
-   messages as edges.
+### For the Final (Wed–Fri) — agents DONE; below is what's left
+Items 4–9 from the prior handoff (Judge, Orchestrator, Documentation, Regression
+harness, Observability store, LangGraph wiring) are **implemented and tested** —
+see the DONE table above. What remains:
+
 10. **Deterministic probes** (configure, don't build) — a small HTTP probe
     harness for the unauth endpoints (`health.php`, `ready.php`) and the
-    IDOR/forged-pid cases; these are cheaper than LLM attempts (see threat model
-    §5, §2).
+    IDOR/forged-pid cases; cheaper than LLM attempts (threat model §5, §2). The
+    live client + observability store already give you the auth'd session and
+    the run log to hang these off.
+11. **LLM wiring for Judge/Red Team** (optional quality lift) — the Judge and
+    Red Team both run fully on their deterministic cores today. Plug a local
+    model into `RedTeamAgent(llm=…)` for novel mutations and an independent
+    frontier model into `JudgeAgent(llm=…)` for subtle-leak NLU. The interfaces
+    (`.variants`, `.classify`) and the offline fallbacks are already in place.
+12. **Longer live campaigns for real findings** — the deployed build defends the
+    seeded attacks. To surface genuine findings, widen the mutation search
+    (LLM variants), add the prompt-only-refusal categories the threat model
+    flags as unguarded (`AF-EXF-001`, `AF-ID-001`), and let the Orchestrator run
+    more rounds against a larger budget.
 
 ### Submission artifacts still owed (Final)
 - **≥3 vulnerability reports** (Documentation output; format in ARCHITECTURE).

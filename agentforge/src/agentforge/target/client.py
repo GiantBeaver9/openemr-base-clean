@@ -15,12 +15,18 @@ from recon but OpenEMR's token delivery can vary by version.
 """
 from __future__ import annotations
 
+import os
 import re
 import time
 from dataclasses import dataclass, field
 from typing import Protocol
 
 from ..contracts.models import AgentError
+
+# Well-known CA bundle for the agent egress proxy (TLS is re-terminated there).
+# httpx does not read the OpenSSL SSL_CERT_FILE env var the way curl does, so we
+# resolve the bundle explicitly and hand it to the client's ``verify``.
+_PROXY_CA_BUNDLE = "/root/.ccr/ca-bundle.crt"
 
 
 @dataclass
@@ -55,89 +61,140 @@ class OpenEmrTargetClient:
     Requires ``httpx``. Auth mode 'session' logs in with username/password.
     """
 
-    def __init__(self, cfg, http=None):
+    def __init__(self, cfg, http=None, csrf_pid: int = 1, site: str = "default"):
         self.cfg = cfg
         self._public = cfg.public_base
         self._csrf: str | None = None
+        # The module's CSRF form token is embedded in doc.php, which only
+        # renders (and only carries the token) for a patient that already has a
+        # seeded synthesis doc. We scrape it against this pid.
+        self._csrf_pid = csrf_pid
+        self._site = site
         if http is None:
             import httpx  # imported lazily so MockTargetClient needs no httpx
-            http = httpx.Client(timeout=30.0, follow_redirects=True)
+            # Trust the egress proxy's CA when present (env may not export it);
+            # fall back to SSL_CERT_FILE / system trust otherwise.
+            verify = os.environ.get("SSL_CERT_FILE") or True
+            if os.path.exists(_PROXY_CA_BUNDLE):
+                verify = _PROXY_CA_BUNDLE
+            http = httpx.Client(timeout=60.0, follow_redirects=True, verify=verify)
         self._http = http
+
+    # ---- transport ---------------------------------------------------------
+    def _request(self, method: str, url: str, **kw):
+        """One HTTP request with a small retry for *transient* transport faults.
+
+        The egress proxy occasionally closes a keep-alive connection mid-body
+        (``httpx.RemoteProtocolError`` / incomplete chunked read), especially on
+        the slower LLM-backed endpoints. That is not the target being down, so
+        we retry with backoff and only escalate to ``TargetUnreachable`` once the
+        retries are exhausted.
+        """
+        import httpx
+        last: Exception | None = None
+        for attempt in range(3):
+            try:
+                return self._http.request(method, url, **kw)
+            except (httpx.TransportError, httpx.RemoteProtocolError) as exc:
+                last = exc
+                time.sleep(2 ** attempt)  # 1s, 2s, 4s
+        raise TargetUnreachable(f"{method} {url}: {last}") from last
 
     # ---- auth --------------------------------------------------------------
     def login(self) -> None:
         """Establish an OpenEMR session cookie.
 
-        OpenEMR's login posts authUser/clearPass/authProvider to
-        interface/main/main_screen.php?auth=login (exact path can vary by
-        version — verify against the live target). On success the session
-        cookie is stored on the httpx client's cookie jar.
+        Field names + path are the verified live handshake (the module's own
+        ``ops/bruno/00 - Auth Bootstrap`` collection, itself checked against
+        ``tests/Tests/E2e/Login/LoginTrait.php``): prime the login page to seed
+        cookies, then POST ``authUser``/``clearPass`` (plus
+        ``new_login_session_management``/``languageChoice``/``facility``) to
+        ``interface/main/main_screen.php?auth=login``. On success the session
+        cookie is stored on the httpx client's cookie jar and the server 302s to
+        the app shell (a bad password re-renders the login form with a 200 — the
+        real proof of auth is that a later module page renders rather than 403s).
         """
         base = self.cfg.base_url.rstrip("/")
-        try:
-            # Prime cookies + capture the login-form CSRF if present.
-            self._http.get(f"{base}/interface/login/login.php?site=default")
-            resp = self._http.post(
-                f"{base}/interface/main/main_screen.php?auth=login&site=default",
-                data={
-                    "authProvider": "Default",
-                    "authUser": self.cfg.username,
-                    "clearPass": self.cfg.password,
-                    "languageChoice": "1",
-                },
-            )
-        except Exception as exc:  # noqa: BLE001 — normalize to a typed failure
-            raise TargetUnreachable(str(exc)) from exc
+        # Prime cookies (and any login-form CSRF the version sets), then submit.
+        # _request normalizes transport faults to TargetUnreachable.
+        self._request("GET", f"{base}/interface/login/login.php?site={self._site}")
+        resp = self._request(
+            "POST",
+            f"{base}/interface/main/main_screen.php?auth=login&site={self._site}",
+            data={
+                "new_login_session_management": "1",
+                "languageChoice": "1",
+                "authUser": self.cfg.username,
+                "clearPass": self.cfg.password,
+                "facility": "user_default",
+            },
+        )
         if resp.status_code >= 500:
             raise TargetUnreachable(f"login returned {resp.status_code}")
 
     def _ensure_csrf(self) -> str:
-        """Fetch a CSRF form token from a module page that renders one.
+        """Scrape the module's CSRF form token from ``doc.php``.
 
-        The module embeds ``csrf_token_form`` in its GET-rendered pages
-        (e.g. the chat UI). We scrape it once and reuse it. Verify the exact
-        source page/field against the live target.
+        A GET view performs no write, so ``doc.php`` needs no token to render —
+        but the page it returns embeds one (the chat panel's ``#ccpChatCsrf``
+        hidden input, carrying the bare token string) that every state-changing
+        request in the module replays as ``csrf_token_form``. We scrape it once
+        and reuse it. The page (and therefore the token) only renders when
+        ``doc.php`` finds both a patient and a computed synthesis for the pid, so
+        ``--pid`` must point at a seeded patient (default dev seed: pid 1).
         """
         if self._csrf:
             return self._csrf
-        r = self._http.get(f"{self._public}/dashboard.php")
-        m = re.search(r'name=["\']csrf_token_form["\']\s+value=["\']([^"\']+)', r.text)
+        r = self._request("GET", f"{self._public}/doc.php?pid={self._csrf_pid}")
+        # Primary source: the chat panel's hidden input (verified live flow).
+        m = re.search(r'id=["\']ccpChatCsrf["\'][^>]*value=["\']([^"\']+)', r.text)
         if not m:
-            # Fall back to a token endpoint if the deploy exposes one.
-            raise RuntimeError("could not locate csrf_token_form — see HANDOFF 'target auth'")
+            # Fallbacks for token delivery that varies by version/page.
+            m = re.search(r'name=["\']csrf_token_form["\']\s+value=["\']([^"\']+)', r.text)
+        if not m:
+            raise RuntimeError(
+                "could not locate a CSRF token in doc.php — login likely failed "
+                "or pid has no seeded synthesis doc (see HANDOFF 'target auth')"
+            )
         self._csrf = m.group(1)
         return self._csrf
 
     # ---- surfaces ----------------------------------------------------------
     def start_chat(self, pid: int) -> str:
         csrf = self._ensure_csrf()
-        r = self._http.post(f"{self._public}/chat.php",
-                            data={"action": "start", "pid": pid, "csrf_token_form": csrf})
+        r = self._request("POST", f"{self._public}/chat.php",
+                          data={"action": "start", "pid": pid, "csrf_token_form": csrf})
         data = r.json()
         return str(data["session_id"])
 
     def chat_turn(self, session_id: str, message: str) -> TurnResult:
         csrf = self._ensure_csrf()
         t0 = time.perf_counter()
-        r = self._http.post(f"{self._public}/chat.php", data={
+        r = self._request("POST", f"{self._public}/chat.php", data={
             "action": "turn", "session_id": session_id,
             "message": message, "stream": "0", "csrf_token_form": csrf,
         })
         dt = (time.perf_counter() - t0) * 1000
         body = _safe_json(r)
+        frozen = bool(body and body.get("frozen"))
+        # The chat turn "defends" when it freezes, when the verifier degrades the
+        # answer (it declined to assert an unverifiable claim), or on a lock/
+        # conflict status. The Judge makes the final call; this is only a hint.
+        degraded = bool(body and (body.get("degraded_message")
+                                  or body.get("verify_status") == "degraded"))
         return TurnResult(
             content=_render_answer(body),
             http_status=r.status_code, latency_ms=dt, session_id=session_id,
             tool_calls=body.get("tool_calls", []) if body else [],
-            frozen=bool(body and body.get("frozen")),
-            refused=r.status_code in (409, 423),
+            frozen=frozen,
+            refused=frozen or degraded or r.status_code in (409, 423),
             raw=body,
         )
 
     def agent_ask(self, pid: int, question: str) -> TurnResult:
         csrf = self._ensure_csrf()
         t0 = time.perf_counter()
-        r = self._http.post(f"{self._public}/agent.php", data={
+        r = self._request("POST", f"{self._public}/agent.php", data={
             "pid": pid, "question": question, "csrf_token_form": csrf,
         })
         dt = (time.perf_counter() - t0) * 1000
@@ -160,13 +217,24 @@ def _safe_json(resp) -> dict | None:
 
 
 def _render_answer(body: dict | None) -> str:
+    """Normalize a target response to the assistant's user-visible text.
+
+    Handles both surfaces: agent.php carries ``refusal_message`` + ``claims``;
+    chat.php carries ``degraded_message`` (verifier declined) + ``claims``. We
+    prefer an explicit refusal/degrade string, else join the claim texts, and
+    only fall back to the raw body when neither is present.
+    """
     if not body:
         return ""
-    if "refusal_message" in body and body.get("refusal_message"):
-        return str(body["refusal_message"])
+    for key in ("refusal_message", "degraded_message"):
+        if body.get(key):
+            return str(body[key])
     claims = body.get("claims") or []
     if claims:
-        return " ".join(str(c.get("text", "")) for c in claims)
+        texts = [str(c.get("text", "")) for c in claims if isinstance(c, dict)]
+        joined = " ".join(t for t in texts if t)
+        if joined:
+            return joined
     return str(body)
 
 
