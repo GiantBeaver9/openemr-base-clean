@@ -95,3 +95,22 @@ def test_agent_ask_maps_refusal():
     # The state-changing POST must carry the scraped token.
     agent_posts = [c for c in http.calls if "agent.php" in c[1]]
     assert agent_posts[0][2]["csrf_token_form"] == "TOKEN-abc123"
+
+
+def test_agent_routed_strings_normalized_to_dicts():
+    # Regression: agent.php returns `routed` as a list of worker-name strings;
+    # the Turn model needs list[dict], so bare strings must be wrapped.
+    from agentforge.target.client import _normalize_tool_calls
+    assert _normalize_tool_calls(["evidence_retriever", "critic"]) == [
+        {"name": "evidence_retriever"}, {"name": "critic"}]
+    assert _normalize_tool_calls([{"name": "x"}]) == [{"name": "x"}]
+    assert _normalize_tool_calls(None) == []
+
+
+def test_agent_ask_builds_valid_turn_from_routed():
+    # The end-to-end shape: a routed list of strings must not blow up Turn().
+    from agentforge.contracts.models import Turn
+    from agentforge.target.client import _normalize_tool_calls
+    tc = _normalize_tool_calls(["evidence_retriever", "critic"])
+    turn = Turn(index=0, role="target", content="refused", tool_calls=tc)
+    assert turn.tool_calls[0]["name"] == "evidence_retriever"

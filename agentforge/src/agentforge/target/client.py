@@ -185,7 +185,7 @@ class OpenEmrTargetClient:
         return TurnResult(
             content=_render_answer(body),
             http_status=r.status_code, latency_ms=dt, session_id=session_id,
-            tool_calls=body.get("tool_calls", []) if body else [],
+            tool_calls=_normalize_tool_calls(body.get("tool_calls") if body else None),
             frozen=frozen,
             refused=frozen or degraded or r.status_code in (409, 423),
             raw=body,
@@ -200,13 +200,29 @@ class OpenEmrTargetClient:
         dt = (time.perf_counter() - t0) * 1000
         body = _safe_json(r)
         status = (body or {}).get("answer_status")
+        # agent.php reports which workers the supervisor routed to as a list of
+        # plain strings (e.g. ["evidence_retriever", "critic"]); the Turn model's
+        # tool_calls is list[dict], so normalize each name into a dict.
         return TurnResult(
             content=_render_answer(body),
             http_status=r.status_code, latency_ms=dt,
-            tool_calls=body.get("routed", []) if body else [],
+            tool_calls=_normalize_tool_calls(body.get("routed") if body else None),
             refused=status in ("refused", "frozen_sev1"),
             raw=body,
         )
+
+
+def _normalize_tool_calls(raw) -> list[dict]:
+    """Coerce a target's tool/worker list into ``list[dict]`` for the Turn model.
+
+    The agent surface returns worker names as bare strings; the chat surface may
+    return dicts. Normalize both so a string ``"critic"`` becomes
+    ``{"name": "critic"}`` and a dict passes through unchanged.
+    """
+    out: list[dict] = []
+    for item in (raw or []):
+        out.append(item if isinstance(item, dict) else {"name": str(item)})
+    return out
 
 
 def _safe_json(resp) -> dict | None:
