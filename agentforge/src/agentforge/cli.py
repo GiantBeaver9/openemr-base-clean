@@ -176,6 +176,23 @@ def cmd_judge(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_loadtest(args: argparse.Namespace) -> int:
+    from agentforge.loadtest import sweep
+    cfg = cfgmod.load()
+    print(f"[loadtest] {args.n} req/level against {cfg.target.base_url} (health.php)")
+    results = sweep(cfg.target.base_url, n=args.n)
+    RUNS_DIR.mkdir(exist_ok=True)
+    out = RUNS_DIR / f"loadtest-{uuid4().hex[:8]}.json"
+    out.write_text(json.dumps([s.summary() for s in results], indent=2))
+    print(f"  {'conc':>4} {'rps':>8} {'p50':>7} {'p95':>7} {'p99':>7} {'errs':>5}")
+    for s in results:
+        m = s.summary()["latency_ms"]
+        print(f"  {s.concurrency:>4} {s.throughput_rps:>8} {m['p50']:>7} "
+              f"{m['p95']:>7} {m['p99']:>7} {s.errors:>5}")
+    print(f"  -> {out}")
+    return 0
+
+
 def cmd_web(args: argparse.Namespace) -> int:
     from agentforge.web import main as web_main
     web_main(args.host, args.port)
@@ -264,6 +281,10 @@ def main(argv: list[str] | None = None) -> int:
     wb.add_argument("--host", default="127.0.0.1")
     wb.add_argument("--port", type=int, default=8800)
     wb.set_defaults(func=cmd_web)
+
+    lt = sub.add_parser("loadtest", help="baseline load test of the cheap unauth surface")
+    lt.add_argument("--n", type=int, default=100, help="requests per concurrency level")
+    lt.set_defaults(func=cmd_loadtest)
 
     db = sub.add_parser("dashboard", help="print the observability rollup for a run")
     db.add_argument("run", help="path to a runs/*.observability.jsonl file")

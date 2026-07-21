@@ -85,6 +85,11 @@ PYTHONPATH=src python -m agentforge.cli campaign --use-llm-judge --use-llm-redte
   live findings (info disclosure ×2, rate-limit fail-open) + resilience summary.
 - [`docs/COST_ANALYSIS.md`](docs/COST_ANALYSIS.md) — AI spend at 100/1K/10K/100K.
 - [`docs/TRIAGE_EXERCISE.md`](docs/TRIAGE_EXERCISE.md) — 10-finding triage pass.
+- [`docs/LOAD_TEST.md`](docs/LOAD_TEST.md) — baseline perf + 100-req load test + bottleneck.
+- [`docs/ATO_EVIDENCE.md`](docs/ATO_EVIDENCE.md) — ATO-style control/evidence packet.
+- [`docs/INTEGRATION_PACKET.md`](docs/INTEGRATION_PACKET.md) — CI/CD + ops integration.
+- [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md) — 3–5 min demo storyboard.
+- [`docs/SOCIAL_POST.md`](docs/SOCIAL_POST.md) — social post drafts (tag @GauntletAI).
 - [`docs/LIVE_RUN_EVIDENCE.md`](docs/LIVE_RUN_EVIDENCE.md) — verified live-run log.
 
 ## Run against the live target
@@ -126,7 +131,8 @@ agentforge/
     regression.py        # invariant-based regression replay
     pipeline.py          # wires the 4 agents (LangGraph-compatible)
     web.py               # local web dashboard (stdlib only) — GUI control panel
-    cli.py               # redteam | campaign | judge | dashboard | probe | web
+    loadtest.py          # baseline load test of the cheap unauth surface
+    cli.py               # redteam | campaign | judge | dashboard | probe | web | loadtest
   tests/                 # contracts, models, redteam, observability, judge,
                          # documentation, orchestrator+pipeline, regression (39 green)
 ```

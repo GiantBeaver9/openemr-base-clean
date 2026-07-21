@@ -148,13 +148,26 @@ store, LangGraph wiring) are implemented and tested. Since then:
     (`AF-EXF-001`, `AF-ID-001`), and run more Orchestrator rounds on a larger
     budget.
 
-### Submission artifacts — now written
+### Submission artifacts — DONE (except the video recording)
 - **≥3 vulnerability reports** → `docs/VULNERABILITY_REPORTS.md` (3 confirmed).
 - **AI cost analysis** → `docs/COST_ANALYSIS.md` (100/1K/10K/100K).
 - **Triage exercise** → `docs/TRIAGE_EXERCISE.md` (10-finding pass).
+- **Baseline perf + 100-case load test** → `docs/LOAD_TEST.md` + `loadtest.py`
+  + `cli loadtest` (real numbers captured; bottleneck identified).
+- **ATO-style evidence packet** → `docs/ATO_EVIDENCE.md`.
+- **Integration packet** → `docs/INTEGRATION_PACKET.md`.
 - **Live-run evidence** → `docs/LIVE_RUN_EVIDENCE.md`.
-- Still owed (human/infra): ATO-style + integration packet, baseline perf +
-  100-case load test, demo video (3–5 min) + social post.
+- **Local GUI** → `src/agentforge/web.py` (`cli web`), stdlib-only dashboard.
+- **Demo video** → script/storyboard ready in `docs/DEMO_SCRIPT.md`; the
+  recording itself is the one human task left.
+- **Social post** → drafts ready in `docs/SOCIAL_POST.md` (tag @GauntletAI).
+
+### The only human tasks left
+1. Submit the MVP (repo/branch + deployed URL) — content is all in place.
+2. Record the 3–5 min demo from `docs/DEMO_SCRIPT.md` (run `cli web`, follow the
+   shot list) and post it with `docs/SOCIAL_POST.md`.
+3. (Optional) run a longer live `--use-llm-redteam` campaign where an LLM
+   endpoint is reachable, to push for deeper LLM-semantic findings.
 
 ### Submission artifacts still owed (Final)
 - **≥3 vulnerability reports** (Documentation output; format in ARCHITECTURE).
