@@ -91,3 +91,28 @@ def test_unknown_job_is_404():
             assert e.code == 404
     finally:
         server.shutdown()
+
+
+def test_healthz_open_and_auth_gate(monkeypatch):
+    monkeypatch.setenv("AGENTFORGE_WEB_USER", "u")
+    monkeypatch.setenv("AGENTFORGE_WEB_PASSWORD", "p")
+    port = _free_port()
+    server = ThreadingHTTPServer(("127.0.0.1", port), web.Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    import base64 as _b64
+    try:
+        # healthz needs no auth
+        assert json.loads(urllib.request.urlopen(base + "/healthz").read())["ok"] is True
+        # state without creds -> 401
+        try:
+            urllib.request.urlopen(base + "/api/state")
+            assert False, "expected 401"
+        except urllib.error.HTTPError as e:
+            assert e.code == 401
+        # state with correct creds -> 200
+        req = urllib.request.Request(base + "/api/state")
+        req.add_header("Authorization", "Basic " + _b64.b64encode(b"u:p").decode())
+        assert urllib.request.urlopen(req).status == 200
+    finally:
+        server.shutdown()

@@ -19,8 +19,11 @@ GUI over the same agents and the same observability store.
 """
 from __future__ import annotations
 
+import base64
 import glob
+import hmac
 import json
+import os
 import threading
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -212,11 +215,50 @@ def _categories() -> list[str]:
 # --------------------------------------------------------------------------- #
 #  HTTP handler
 # --------------------------------------------------------------------------- #
+def _auth_credentials() -> tuple[str, str] | None:
+    """Optional HTTP Basic credentials from the environment.
+
+    When ``AGENTFORGE_WEB_USER`` and ``AGENTFORGE_WEB_PASSWORD`` are both set, the
+    dashboard requires them on every request except ``/healthz``. This matters
+    for a public deployment: the panel can spend the target's LLM budget and
+    drive attacks, so it must not be left open. Locally (loopback) it is optional.
+    """
+    user = os.environ.get("AGENTFORGE_WEB_USER")
+    pw = os.environ.get("AGENTFORGE_WEB_PASSWORD")
+    return (user, pw) if user and pw else None
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "AgentForge/1.0"
 
     def log_message(self, *args):  # quiet the default stderr access log
         pass
+
+    def _check_auth(self) -> bool:
+        """Enforce HTTP Basic auth when configured. Returns False (and writes a
+        401) when the request is unauthorized."""
+        creds = _auth_credentials()
+        if creds is None:
+            return True
+        header = self.headers.get("Authorization", "")
+        if header.startswith("Basic "):
+            try:
+                decoded = base64.b64decode(header[6:]).decode("utf-8", "replace")
+                user, _, pw = decoded.partition(":")
+                # constant-time compare to avoid timing oracles
+                if (hmac.compare_digest(user, creds[0])
+                        and hmac.compare_digest(pw, creds[1])):
+                    return True
+            except Exception:  # noqa: BLE001
+                pass
+        body = b'{"error":"authentication required"}'
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="AgentForge"')
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+        return False
 
     def _send(self, code: int, body: bytes, ctype: str) -> None:
         self.send_response(code)
@@ -242,7 +284,12 @@ class Handler(BaseHTTPRequestHandler):
         # A single bad file or unexpected error must never take the panel down;
         # always return a clean JSON error rather than a half-sent 500.
         try:
-            self._route_get(urlparse(self.path).path)
+            path = urlparse(self.path).path
+            if path == "/healthz":          # unauthenticated liveness for the PaaS
+                return self._json({"ok": True, "service": "agentforge"})
+            if not self._check_auth():
+                return
+            self._route_get(path)
         except Exception as exc:  # noqa: BLE001
             self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
 
@@ -268,6 +315,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):  # noqa: N802
         try:
+            if not self._check_auth():
+                return
             path = urlparse(self.path).path
             body = self._body()
             if path == "/api/campaign":
@@ -502,10 +551,34 @@ setInterval(()=>{ if(!poll) fetch("/api/state").then(r=>r.json()).then(s=>render
 </body></html>"""
 
 
-def main(host: str = "127.0.0.1", port: int = 8800) -> None:
+def _resolve_host(host: str | None) -> str:
+    # PaaS (Railway/Render/Fly) needs 0.0.0.0; locally default to loopback.
+    return host or os.environ.get("AGENTFORGE_WEB_HOST") or "127.0.0.1"
+
+
+def _resolve_port(port: int | None) -> int:
+    # Railway/Heroku inject $PORT; honor it, else AGENTFORGE_WEB_PORT, else 8800.
+    if port:
+        return port
+    return int(os.environ.get("PORT") or os.environ.get("AGENTFORGE_WEB_PORT") or 8800)
+
+
+def main(host: str | None = None, port: int | None = None) -> None:
+    host = _resolve_host(host)
+    port = _resolve_port(port)
     RUNS_DIR.mkdir(exist_ok=True)
+
+    public = host not in ("127.0.0.1", "localhost", "::1")
+    if public and _auth_credentials() is None:
+        print("WARNING: binding to a public interface with NO auth configured. "
+              "Anyone who reaches this URL can launch live attacks and spend the "
+              "target's budget. Set AGENTFORGE_WEB_USER / AGENTFORGE_WEB_PASSWORD.")
+    elif _auth_credentials() is not None:
+        print("auth: HTTP Basic enabled (AGENTFORGE_WEB_USER/PASSWORD)")
+
     server = ThreadingHTTPServer((host, port), Handler)
-    print(f"AgentForge dashboard → http://{host}:{port}  (Ctrl-C to stop)")
+    shown = host if host != "0.0.0.0" else "0.0.0.0 (all interfaces)"
+    print(f"AgentForge dashboard → http://{shown}:{port}  (Ctrl-C to stop)")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -516,7 +589,7 @@ def main(host: str = "127.0.0.1", port: int = 8800) -> None:
 if __name__ == "__main__":
     import argparse
     p = argparse.ArgumentParser(prog="agentforge.web")
-    p.add_argument("--host", default="127.0.0.1")
-    p.add_argument("--port", type=int, default=8800)
+    p.add_argument("--host", default=None, help="bind host (env AGENTFORGE_WEB_HOST)")
+    p.add_argument("--port", type=int, default=None, help="bind port (env PORT)")
     args = p.parse_args()
     main(args.host, args.port)

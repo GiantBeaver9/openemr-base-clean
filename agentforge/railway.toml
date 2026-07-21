@@ -1,0 +1,14 @@
+# Railway service config for the standalone AgentForge dashboard.
+# In the Railway service settings, set the service Root Directory to `agentforge`
+# so this file and the Dockerfile are found.
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "python -m agentforge.web"
+healthcheckPath = "/healthz"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3

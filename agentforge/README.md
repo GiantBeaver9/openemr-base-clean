@@ -10,6 +10,8 @@ regression-guards vulnerabilities in the OpenEMR **Clinical Co-Pilot**
 - **Users:** [`USERS.md`](USERS.md)
 - **Contracts:** [`contracts/`](contracts/) — versioned inter-agent JSON Schemas
 - **Seed attack suite:** [`evals/`](evals/) — 17 cases across 5 categories
+- **Deploy it standalone:** [`DEPLOY.md`](DEPLOY.md) — run AgentForge as its own
+  Railway service, pointed at any OpenEMR instance via env vars
 - **Continue this build:** [`HANDOFF.md`](HANDOFF.md)
 
 ## Status
