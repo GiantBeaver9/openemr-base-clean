@@ -176,6 +176,12 @@ def cmd_judge(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_web(args: argparse.Namespace) -> int:
+    from agentforge.web import main as web_main
+    web_main(args.host, args.port)
+    return 0
+
+
 def cmd_probe(args: argparse.Namespace) -> int:
     from agentforge.probes import ProbeHarness
     cfg = cfgmod.load()
@@ -253,6 +259,11 @@ def main(argv: list[str] | None = None) -> int:
 
     pb = sub.add_parser("probe", help="run deterministic HTTP probes (unauth surface)")
     pb.set_defaults(func=cmd_probe)
+
+    wb = sub.add_parser("web", help="launch the local web dashboard (GUI)")
+    wb.add_argument("--host", default="127.0.0.1")
+    wb.add_argument("--port", type=int, default=8800)
+    wb.set_defaults(func=cmd_web)
 
     db = sub.add_parser("dashboard", help="print the observability rollup for a run")
     db.add_argument("run", help="path to a runs/*.observability.jsonl file")

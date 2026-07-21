@@ -34,7 +34,24 @@ tests** — and the full loop has been run live against the deployed co-pilot
 (cost analysis, triage exercise, ATO/load evidence, demo) — see
 [`HANDOFF.md`](HANDOFF.md).
 
-## Quick start
+## Local GUI (web dashboard)
+
+A pure-standard-library control panel — **no extra dependencies** — to launch
+campaigns/probes and watch results in a browser:
+
+```bash
+cd agentforge
+PYTHONPATH=src python -m agentforge.web        # then open http://127.0.0.1:8800
+# or: PYTHONPATH=src python -m agentforge.cli web --port 8800
+```
+
+From the dashboard you can launch a campaign (offline **dry-run** by default, or
+live against the target with enforced attempt/round/budget caps), run the
+deterministic **probe** sweep, watch coverage/pass-rate/findings update live, and
+click into any past run's detail. It's the same agents and observability store as
+the CLI, just with buttons — and it doubles as the demo view.
+
+## Quick start (CLI)
 
 ```bash
 cd agentforge
@@ -108,7 +125,8 @@ agentforge/
     probes.py            # deterministic HTTP probes (unauth surface, IDOR, rate-limit)
     regression.py        # invariant-based regression replay
     pipeline.py          # wires the 4 agents (LangGraph-compatible)
-    cli.py               # redteam | campaign | judge | dashboard | probe
+    web.py               # local web dashboard (stdlib only) — GUI control panel
+    cli.py               # redteam | campaign | judge | dashboard | probe | web
   tests/                 # contracts, models, redteam, observability, judge,
                          # documentation, orchestrator+pipeline, regression (39 green)
 ```
