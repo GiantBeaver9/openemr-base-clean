@@ -61,17 +61,51 @@ environment. Summary of what was found and fixed:
   has no notion of `verify_status:"degraded"` as a soft-refusal — add that when
   wiring the Judge so a degraded verify isn't scored as a leak.
 
-### ⚠️ Blocker for running the *real* CLI here (deps)
+### ⚠️ Blocker for running the *real* CLI here (deps) — and the fix
 
-This environment's egress policy allowlists `*.up.railway.app` but **not PyPI**
-(`pip install` → 403 on `pypi.org`/`files.pythonhosted.org`). So
-`pydantic`/`httpx`/`typer` can't install and
+This environment's egress is **Custom**, allowlisting `*.up.railway.app` but with
+the package-manager defaults **NOT** included, so **PyPI is blocked**
+(`pip install` → 403 on `pypi.org` / `files.pythonhosted.org`).
+`pydantic`/`httpx`/`typer` therefore can't install and
 `python -m agentforge.cli redteam` cannot run in-env. The Step-0 verification
 above was done with `curl` + a **stdlib-only bridge**
 (`tools/step0_live_smoke.py`, reproduced from the real seed cases +
-`redteam.py` MUTATORS). To run the actual CLI, widen the egress allowlist to
-`pypi.org` + `files.pythonhosted.org` (or vendor the wheels), then:
-`cd agentforge && PYTHONPATH=src pytest tests/ -q` and the smoke in step 0.4.
+`redteam.py` MUTATORS).
+
+**How to unblock PyPI** (per the Claude-Code-on-web
+[network-access docs](https://code.claude.com/docs/en/claude-code-on-the-web#network-access)) —
+edit the environment (cloud icon → select current env → edit → **Network access**
+selector, already **Custom**), then either:
+
+- **Simplest:** tick **"Also include default list of common package managers"** —
+  keeps the `*.up.railway.app` entry and adds Anthropic's default registry
+  allowlist, which already contains `pypi.org` **and** `files.pythonhosted.org`.
+- **Minimal/explicit:** leave that box unchecked and add to **Allowed domains**
+  (one per line), alongside `*.up.railway.app`:
+  ```
+  pypi.org
+  files.pythonhosted.org
+  pythonhosted.org
+  ```
+  Both `pypi.org` (index) **and** `files.pythonhosted.org` (downloads) are
+  required — the index host alone still 403s on the actual wheel fetch.
+
+Gotchas: allowed domains are **per-environment** (no org-level allowlist), and the
+change applies **only to a new session** — save it, then start a fresh session
+(the repo re-clones; `git pull` this branch). A setup script can't route around
+this: setup scripts obey the same access level, so PyPI must be allowed either
+way. Last-resort with no egress change: vendor wheels
+(`pip download` elsewhere → commit → `pip install --no-index --find-links`).
+
+Once PyPI is allowed, in a new session:
+```bash
+cd agentforge
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+PYTHONPATH=src pytest tests/ -q          # expect 17 passed
+set -a; . ./.env; set +a                 # admin/pass already filled in (gitignored)
+PYTHONPATH=src python -m agentforge.cli redteam --category prompt_injection --max-attempts 4
+```
 
 ## Step 0 (original instructions, for reference)
 
