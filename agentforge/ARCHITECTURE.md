@@ -197,9 +197,13 @@ tested (39 passing tests). Built: the versioned Contracts; the Red Team agent
 `1.0.0` + ground-truth drift check); the Documentation agent (report + regression
 case + human gate on critical); the Orchestrator (coverage/severity scoring +
 budget/halt + target-change regression trigger); the observability store; the
-regression harness; and the LangGraph-compatible pipeline wiring the four agents
-over the typed messages (`src/agentforge/pipeline.py`, with a dependency-free
-runner and an optional `build_langgraph` construction). Run the full loop with
-`python -m agentforge.cli campaign` (`--dry-run` offline, live otherwise). What
-remains is submission packaging (cost analysis, triage exercise, ATO/load
-evidence, demo) — see HANDOFF.md._
+regression harness; the LangGraph-compatible pipeline wiring the four agents over
+the typed messages (`src/agentforge/pipeline.py`, dependency-free runner + optional
+`build_langgraph`); the deterministic probe harness (`probes.py`, which found 3
+real live findings on the unauth surface); and provider-agnostic LLM adapters for
+the Judge and Red Team (`agents/llm.py`, opt-in via `--use-llm-*`, fail-soft to the
+deterministic core). Run the full loop with `python -m agentforge.cli campaign`
+(`--dry-run` offline, live otherwise) and the probes with `... probe`. Reports and
+analysis are under `docs/` (vulnerability reports, cost analysis, triage exercise,
+live-run evidence). What remains is human/infra packaging (ATO/load evidence,
+demo) — see HANDOFF.md._

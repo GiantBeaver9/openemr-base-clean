@@ -124,26 +124,37 @@ captured evidence. All four agents are now built beyond the MVP bar.
 Remaining human-only action: **submit the deployed URL with the checkpoint**
 (target: `https://abundant-art-production-d560.up.railway.app`).
 
-### For the Final (Wed–Fri) — agents DONE; below is what's left
-Items 4–9 from the prior handoff (Judge, Orchestrator, Documentation, Regression
-harness, Observability store, LangGraph wiring) are **implemented and tested** —
-see the DONE table above. What remains:
+### For the Final (Wed–Fri) — mostly DONE
+Items 4–9 (Judge, Orchestrator, Documentation, Regression harness, Observability
+store, LangGraph wiring) are implemented and tested. Since then:
 
-10. **Deterministic probes** (configure, don't build) — a small HTTP probe
-    harness for the unauth endpoints (`health.php`, `ready.php`) and the
-    IDOR/forged-pid cases; cheaper than LLM attempts (threat model §5, §2). The
-    live client + observability store already give you the auth'd session and
-    the run log to hang these off.
-11. **LLM wiring for Judge/Red Team** (optional quality lift) — the Judge and
-    Red Team both run fully on their deterministic cores today. Plug a local
-    model into `RedTeamAgent(llm=…)` for novel mutations and an independent
-    frontier model into `JudgeAgent(llm=…)` for subtle-leak NLU. The interfaces
-    (`.variants`, `.classify`) and the offline fallbacks are already in place.
-12. **Longer live campaigns for real findings** — the deployed build defends the
-    seeded attacks. To surface genuine findings, widen the mutation search
-    (LLM variants), add the prompt-only-refusal categories the threat model
-    flags as unguarded (`AF-EXF-001`, `AF-ID-001`), and let the Orchestrator run
-    more rounds against a larger budget.
+10. **Deterministic probes** — ✅ DONE. `src/agentforge/probes.py` +
+    `cli.py probe`. Runs live and found **3 real findings** (health.php version
+    disclosure, ready.php dependency enumeration, ready.php rate-limiter
+    fail-open) with the two auth-required invariants holding. Reported in
+    `docs/VULNERABILITY_REPORTS.md`.
+11. **LLM wiring for Judge/Red Team** — ✅ DONE (code + tests). `agents/llm.py`
+    is a provider-agnostic OpenAI-compatible adapter: `LlmJudge.classify` and
+    `LlmRedTeam.variants`, wired via `--use-llm-judge` / `--use-llm-redteam`,
+    both fail-soft to the deterministic core. NOTE: could not be exercised live
+    from this environment — egress is scoped to `*.up.railway.app`, so external
+    LLM APIs return `403 CONNECT` and no key is present. Run it where a model
+    endpoint + egress exist (local Ollama for Red Team; a frontier key for the
+    independent Judge).
+12. **Longer live campaigns for real findings** — still open. The deployed build
+    defends the seeded LLM attacks (`pass_rate 1.00`). To surface genuine
+    LLM-semantic findings, turn on `--use-llm-redteam` for novel mutations, add
+    the prompt-only-refusal categories the threat model flags as unguarded
+    (`AF-EXF-001`, `AF-ID-001`), and run more Orchestrator rounds on a larger
+    budget.
+
+### Submission artifacts — now written
+- **≥3 vulnerability reports** → `docs/VULNERABILITY_REPORTS.md` (3 confirmed).
+- **AI cost analysis** → `docs/COST_ANALYSIS.md` (100/1K/10K/100K).
+- **Triage exercise** → `docs/TRIAGE_EXERCISE.md` (10-finding pass).
+- **Live-run evidence** → `docs/LIVE_RUN_EVIDENCE.md`.
+- Still owed (human/infra): ATO-style + integration packet, baseline perf +
+  100-case load test, demo video (3–5 min) + social post.
 
 ### Submission artifacts still owed (Final)
 - **≥3 vulnerability reports** (Documentation output; format in ARCHITECTURE).

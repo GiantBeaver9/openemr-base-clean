@@ -53,7 +53,22 @@ PYTHONPATH=src python -m agentforge.cli campaign --dry-run --mock-policy leaky
 PYTHONPATH=src python -m agentforge.cli redteam --dry-run --category prompt_injection
 PYTHONPATH=src python -m agentforge.cli judge runs/<campaign>.attempts.jsonl
 PYTHONPATH=src python -m agentforge.cli dashboard runs/<campaign>.observability.jsonl
+
+# Deterministic HTTP probes against the unauthenticated surface (runs live):
+PYTHONPATH=src python -m agentforge.cli probe
+
+# Opt into real models (needs endpoints + egress): independent LLM Judge and
+# LLM-generated Red Team mutations (both fail soft to the deterministic core):
+PYTHONPATH=src python -m agentforge.cli campaign --use-llm-judge --use-llm-redteam
 ```
+
+## Reports & analysis (`docs/`)
+
+- [`docs/VULNERABILITY_REPORTS.md`](docs/VULNERABILITY_REPORTS.md) — 3 confirmed
+  live findings (info disclosure ×2, rate-limit fail-open) + resilience summary.
+- [`docs/COST_ANALYSIS.md`](docs/COST_ANALYSIS.md) — AI spend at 100/1K/10K/100K.
+- [`docs/TRIAGE_EXERCISE.md`](docs/TRIAGE_EXERCISE.md) — 10-finding triage pass.
+- [`docs/LIVE_RUN_EVIDENCE.md`](docs/LIVE_RUN_EVIDENCE.md) — verified live-run log.
 
 ## Run against the live target
 
@@ -89,9 +104,11 @@ agentforge/
     agents/judge.py      # Judge: independent verdict + rubric + drift check
     agents/documentation.py # Documentation: report + regression case + human gate
     agents/orchestrator.py  # Orchestrator: scoring + budget/halt + regression trigger
+    agents/llm.py        # optional LLM adapters for Judge (.classify) + Red Team (.variants)
+    probes.py            # deterministic HTTP probes (unauth surface, IDOR, rate-limit)
     regression.py        # invariant-based regression replay
     pipeline.py          # wires the 4 agents (LangGraph-compatible)
-    cli.py               # redteam | campaign | judge | dashboard
+    cli.py               # redteam | campaign | judge | dashboard | probe
   tests/                 # contracts, models, redteam, observability, judge,
                          # documentation, orchestrator+pipeline, regression (39 green)
 ```

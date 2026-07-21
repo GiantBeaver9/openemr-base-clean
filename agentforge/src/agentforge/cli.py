@@ -31,11 +31,34 @@ sys.path.insert(0, str(ROOT / "src"))
 from agentforge import config as cfgmod                                  # noqa: E402
 from agentforge.agents.judge import JudgeAgent                           # noqa: E402
 from agentforge.agents.documentation import DocumentationAgent          # noqa: E402
+from agentforge.agents.llm import build_judge_llm, build_redteam_llm    # noqa: E402
 from agentforge.agents.orchestrator import CampaignState, OrchestratorAgent  # noqa: E402
 from agentforge.agents.redteam import RedTeamAgent, SeedCase             # noqa: E402
 from agentforge.observability.store import ObservabilityStore           # noqa: E402
 from agentforge.pipeline import run_campaign                             # noqa: E402
 from agentforge.target.client import MockTargetClient, OpenEmrTargetClient  # noqa: E402
+
+
+def _build_judge(args, cfg) -> JudgeAgent:
+    """Deterministic Judge by default; opt into the independent LLM with
+    --use-llm-judge (requires JUDGE_BASE_URL + egress to it)."""
+    if getattr(args, "use_llm_judge", False):
+        llm = build_judge_llm(cfg)
+        if llm is not None:
+            print(f"[judge] LLM refinement on: {cfg.judge.model}")
+            return JudgeAgent(llm=llm, model_name=cfg.judge.model)
+        print("[judge] --use-llm-judge set but JUDGE_BASE_URL empty; using rubric")
+    return JudgeAgent()
+
+
+def _build_redteam_llm(args, cfg):
+    if getattr(args, "use_llm_redteam", False):
+        llm = build_redteam_llm(cfg)
+        if llm is not None:
+            print(f"[redteam] LLM variants on: {cfg.redteam.model}")
+            return llm
+        print("[redteam] --use-llm-redteam set but REDTEAM_BASE_URL empty; using operators")
+    return None
 
 
 def _load_seed_cases(category: str | None) -> list[SeedCase]:
@@ -82,7 +105,7 @@ def cmd_redteam(args: argparse.Namespace) -> int:
     if not seeds:
         print("no seed cases for that category on an LLM surface", file=sys.stderr)
         return 2
-    agent = RedTeamAgent(target=target, pinned_pid=args.pid)
+    agent = RedTeamAgent(target=target, pinned_pid=args.pid, llm=_build_redteam_llm(args, cfg))
     directive = _directive(args.category, args.max_attempts, cfg.budget.max_turns)
     attempts = agent.run_directive(directive, seeds)
 
@@ -101,6 +124,7 @@ def cmd_redteam(args: argparse.Namespace) -> int:
 
 
 def cmd_campaign(args: argparse.Namespace) -> int:
+    cfg = cfgmod.load()
     target = _make_target(args)
     seeds = _load_seed_cases(args.category)
     if not seeds:
@@ -115,6 +139,7 @@ def cmd_campaign(args: argparse.Namespace) -> int:
 
     result = run_campaign(
         target=target, seeds=seeds, store=store, orchestrator=orch,
+        judge=_build_judge(args, cfg), redteam_llm=_build_redteam_llm(args, cfg),
         pinned_pid=args.pid, max_rounds=args.rounds,
         max_attempts_per_round=args.max_attempts,
     )
@@ -137,7 +162,7 @@ def cmd_campaign(args: argparse.Namespace) -> int:
 
 def cmd_judge(args: argparse.Namespace) -> int:
     attempts = [json.loads(l) for l in Path(args.attempts).read_text().splitlines() if l.strip()]
-    judge = JudgeAgent()
+    judge = _build_judge(args, cfgmod.load())
     doc = DocumentationAgent()
     out = Path(args.attempts).with_suffix(".verdicts.jsonl")
     findings = 0
@@ -148,6 +173,26 @@ def cmd_judge(args: argparse.Namespace) -> int:
             if v["verdict"] == "success":
                 findings += 1
     print(f"judged {len(attempts)} attempts -> {out} ({findings} confirmed findings)")
+    return 0
+
+
+def cmd_probe(args: argparse.Namespace) -> int:
+    from agentforge.probes import ProbeHarness
+    cfg = cfgmod.load()
+    print(f"[probe] deterministic probes against {cfg.target.base_url}")
+    results = ProbeHarness(cfg.target.base_url).run_all()
+    findings = [r for r in results if not r.secure]
+
+    RUNS_DIR.mkdir(exist_ok=True)
+    out = RUNS_DIR / f"probes-{uuid4().hex[:8]}.json"
+    out.write_text(json.dumps([r.to_dict() for r in results], indent=2))
+
+    for r in results:
+        flag = "FINDING" if not r.secure else "ok     "
+        print(f"  [{flag}] {r.severity:8} {r.probe_id:26} {r.title}")
+        if not r.secure:
+            print(f"            observed: {r.observed}")
+    print(f"\n{len(findings)} finding(s) / {len(results)} probes -> {out}")
     return 0
 
 
@@ -185,6 +230,8 @@ def main(argv: list[str] | None = None) -> int:
     rt = sub.add_parser("redteam", help="run a Red Team campaign only")
     add_target_opts(rt)
     rt.add_argument("--max-attempts", type=int, default=25)
+    rt.add_argument("--use-llm-redteam", action="store_true",
+                    help="generate mutation variants with the REDTEAM_* model")
     rt.set_defaults(func=cmd_redteam)
 
     cp = sub.add_parser("campaign", help="run the full multi-agent loop")
@@ -192,11 +239,20 @@ def main(argv: list[str] | None = None) -> int:
     cp.add_argument("--rounds", type=int, default=3, help="orchestrator rounds")
     cp.add_argument("--max-attempts", type=int, default=6, help="max attempts per round")
     cp.add_argument("--max-usd", type=float, default=2.0)
+    cp.add_argument("--use-llm-judge", action="store_true",
+                    help="refine uncertain/partial verdicts with the JUDGE_* model")
+    cp.add_argument("--use-llm-redteam", action="store_true",
+                    help="generate mutation variants with the REDTEAM_* model")
     cp.set_defaults(func=cmd_campaign)
 
     ju = sub.add_parser("judge", help="(re)judge a captured attempts file offline")
     ju.add_argument("attempts", help="path to a runs/*.attempts.jsonl file")
+    ju.add_argument("--use-llm-judge", action="store_true",
+                    help="refine uncertain/partial verdicts with the JUDGE_* model")
     ju.set_defaults(func=cmd_judge)
+
+    pb = sub.add_parser("probe", help="run deterministic HTTP probes (unauth surface)")
+    pb.set_defaults(func=cmd_probe)
 
     db = sub.add_parser("dashboard", help="print the observability rollup for a run")
     db.add_argument("run", help="path to a runs/*.observability.jsonl file")
