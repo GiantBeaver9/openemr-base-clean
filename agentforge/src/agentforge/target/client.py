@@ -68,10 +68,14 @@ class OpenEmrTargetClient:
     def login(self) -> None:
         """Establish an OpenEMR session cookie.
 
-        OpenEMR's login posts authUser/clearPass/authProvider to
-        interface/main/main_screen.php?auth=login (exact path can vary by
-        version — verify against the live target). On success the session
-        cookie is stored on the httpx client's cookie jar.
+        Verified live against the Railway deploy (HANDOFF.md "Step 0"): the login
+        form posts authUser/clearPass/languageChoice AND the hidden
+        ``new_login_session_management=1`` to
+        ``interface/main/main_screen.php?auth=login``. That last field is
+        decisive — without it main_screen.php re-renders the login page (HTTP
+        200) instead of completing the login, so the session never authenticates.
+        On success the endpoint issues a 302 to ``tabs/main.php`` and the session
+        cookie lands in the httpx client's cookie jar.
         """
         base = self.cfg.base_url.rstrip("/")
         try:
@@ -80,6 +84,7 @@ class OpenEmrTargetClient:
             resp = self._http.post(
                 f"{base}/interface/main/main_screen.php?auth=login&site=default",
                 data={
+                    "new_login_session_management": "1",
                     "authProvider": "Default",
                     "authUser": self.cfg.username,
                     "clearPass": self.cfg.password,
@@ -90,6 +95,16 @@ class OpenEmrTargetClient:
             raise TargetUnreachable(str(exc)) from exc
         if resp.status_code >= 500:
             raise TargetUnreachable(f"login returned {resp.status_code}")
+        # A failed login re-renders login.php as a 200 with no redirect in the
+        # history; a successful one is followed here from its 302. Treat the
+        # absence of any redirect as an auth failure so callers fail loudly at
+        # login instead of later at the (unauthenticated) CSRF scrape.
+        redirected = bool(getattr(resp, "history", None))
+        if not redirected and resp.status_code == 200:
+            raise RuntimeError(
+                "login did not authenticate (no redirect) — check credentials "
+                "and that new_login_session_management is posted; see HANDOFF Step 0"
+            )
 
     def _ensure_csrf(self) -> str:
         """Fetch a CSRF form token from a module page that renders one.

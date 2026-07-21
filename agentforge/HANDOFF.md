@@ -27,7 +27,53 @@ verify the env's Network access = Custom, `*.up.railway.app` + `*.railway.app`
 listed, "include defaults" checked, and that you started a *new* session after
 saving.
 
-## Step 0 — verify reachability + auth (the one live-only task)
+## Step 0 — VERIFIED ✅ (2026-07-21, live against the Railway target)
+
+The whole live handshake was confirmed end-to-end from the Custom-egress
+environment. Summary of what was found and fixed:
+
+- **Reachability:** `login.php` → 200, `/` → 302 (no more `403 CONNECT`).
+- **Login:** `admin` / `pass` works. **The client's original login POST did NOT
+  authenticate** — it omitted the hidden `new_login_session_management=1` field,
+  so `main_screen.php` re-rendered the login page as a 200 (no redirect) and the
+  session never authenticated (the subsequent CSRF scrape then 400s). Fixed in
+  `target/client.py::login` (adds the field + a "no redirect ⇒ auth failure"
+  guard). Verified working field set: `new_login_session_management=1`,
+  `authUser`, `clearPass`, `languageChoice=1` → **302** to `tabs/main.php`,
+  session cookie set. `authProvider` is not on this deploy's form and is
+  harmless if left in.
+- **CSRF source:** `_ensure_csrf` scraping `csrf_token_form` from the module's
+  `public/dashboard.php` is **correct as written** — that page is admin-gated
+  and we log in as `admin`, so it renders a 40-char token. (If a future run uses
+  a non-admin clinician login, point `_ensure_csrf` at a clinician-rendered page
+  instead — dashboard.php will 400 for them.)
+- **Live target responses captured** (not the mock): 6 real attempts
+  (prompt-injection + data-exfiltration seeds + deterministic mutations) driven
+  through `chat.php` and `agent.php`. The target **defended**: exfil attempts on
+  chat came back `verify_status:"degraded"` (verifier suppressed the answer);
+  the agent-surface seed returned `answer_status:"refused"`. Evidence:
+  `runs/step0-live-smoke.*.attempts.jsonl` (gitignored; regenerate with the
+  bridge script noted below).
+- **Response-shape note for building out the client:** `agent.php` returns
+  `answer_status` + `refusal_message` + `claims`; `chat.php` turns return
+  `text` + `claims` + `verify_status` + `frozen` (NO top-level
+  `refusal_message`). `client.py::_render_answer` handles `claims` for both but
+  has no notion of `verify_status:"degraded"` as a soft-refusal — add that when
+  wiring the Judge so a degraded verify isn't scored as a leak.
+
+### ⚠️ Blocker for running the *real* CLI here (deps)
+
+This environment's egress policy allowlists `*.up.railway.app` but **not PyPI**
+(`pip install` → 403 on `pypi.org`/`files.pythonhosted.org`). So
+`pydantic`/`httpx`/`typer` can't install and
+`python -m agentforge.cli redteam` cannot run in-env. The Step-0 verification
+above was done with `curl` + a **stdlib-only bridge**
+(`tools/step0_live_smoke.py`, reproduced from the real seed cases +
+`redteam.py` MUTATORS). To run the actual CLI, widen the egress allowlist to
+`pypi.org` + `files.pythonhosted.org` (or vendor the wheels), then:
+`cd agentforge && PYTHONPATH=src pytest tests/ -q` and the smoke in step 0.4.
+
+## Step 0 (original instructions, for reference)
 
 ```bash
 # a) reachability
