@@ -22,6 +22,19 @@ def test_categories_and_traversal_guard():
     assert web._read_json_file("does-not-exist.json") is None
 
 
+def test_malformed_run_file_returns_error_not_crash():
+    # A partially-written / malformed run file must degrade to an error dict,
+    # never raise (the viewer stays usable while a live run is mid-write).
+    web.RUNS_DIR.mkdir(exist_ok=True)
+    bad = web.RUNS_DIR / "camp-UNITBAD.observability.jsonl"
+    bad.write_text("{ not valid json\n")
+    try:
+        out = web._read_json_file("camp-UNITBAD.observability.jsonl")
+        assert isinstance(out, dict) and "error" in out
+    finally:
+        bad.unlink(missing_ok=True)
+
+
 def _free_port():
     import socket
     s = socket.socket()

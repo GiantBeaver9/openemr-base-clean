@@ -190,12 +190,15 @@ def _read_json_file(name: str):
     p = RUNS_DIR / safe
     if not p.exists():
         return None
-    if safe.endswith(".jsonl"):
-        from agentforge.observability.store import ObservabilityStore
-        store = ObservabilityStore(p)
-        return {"summary": store.summary(), "open_findings": store.open_findings(),
-                "timeline": store.timeline()}
-    return json.loads(p.read_text())
+    try:
+        if safe.endswith(".jsonl"):
+            from agentforge.observability.store import ObservabilityStore
+            store = ObservabilityStore(p)
+            return {"summary": store.summary(), "open_findings": store.open_findings(),
+                    "timeline": store.timeline()}
+        return json.loads(p.read_text())
+    except Exception as exc:  # noqa: BLE001 — a partial/malformed run file is not fatal
+        return {"error": f"could not parse {safe}: {type(exc).__name__}"}
 
 
 def _categories() -> list[str]:
@@ -236,7 +239,14 @@ class Handler(BaseHTTPRequestHandler):
             return {}
 
     def do_GET(self):  # noqa: N802
-        path = urlparse(self.path).path
+        # A single bad file or unexpected error must never take the panel down;
+        # always return a clean JSON error rather than a half-sent 500.
+        try:
+            self._route_get(urlparse(self.path).path)
+        except Exception as exc:  # noqa: BLE001
+            self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
+
+    def _route_get(self, path: str) -> None:
         if path in ("/", "/index.html"):
             return self._send(200, _INDEX_HTML.encode(), "text/html; charset=utf-8")
         if path == "/api/state":
@@ -257,13 +267,16 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"error": "not found"}, 404)
 
     def do_POST(self):  # noqa: N802
-        path = urlparse(self.path).path
-        body = self._body()
-        if path == "/api/campaign":
-            return self._json({"job_id": _start_job("campaign", _run_campaign_job, body)})
-        if path == "/api/probe":
-            return self._json({"job_id": _start_job("probe", _run_probe_job, body)})
-        return self._json({"error": "not found"}, 404)
+        try:
+            path = urlparse(self.path).path
+            body = self._body()
+            if path == "/api/campaign":
+                return self._json({"job_id": _start_job("campaign", _run_campaign_job, body)})
+            if path == "/api/probe":
+                return self._json({"job_id": _start_job("probe", _run_probe_job, body)})
+            return self._json({"error": "not found"}, 404)
+        except Exception as exc:  # noqa: BLE001
+            self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
 
 
 _INDEX_HTML = r"""<!doctype html>
